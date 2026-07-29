@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Shadow Palette: Stealth &amp; Siege</title>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&family=Outfit:wght@400;600;800&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <div id="app">
+    <header class="app-header">
+      <div class="logo-container">
+        <span class="logo-icon">🛡️</span>
+        <div>
+          <h1>SHADOW PALETTE</h1>
+          <p class="subtitle">Stealth &amp; Siege Tactical Engine</p>
+        </div>
+      </div>
+      <div class="status-bar">
+        <div id="backend-status" class="status-badge status-connecting">
+          <span class="dot"></span> Backend: Connecting...
+        </div>
+      </div>
+    </header>
+
+    <main class="main-content">
+      <section class="canvas-panel">
+        <div class="panel-header">
+          <h2>20×20 World Grid Canvas</h2>
+          <span class="badge">Phase 0 Canvas Init</span>
+        </div>
+        <div class="canvas-wrapper">
+          <canvas id="gameCanvas" width="600" height="600"></canvas>
+        </div>
+      </section>
+
+      <aside class="control-panel">
+        <h3>System Diagnostics</h3>
+        <div class="card">
+          <h4>Backend Connection</h4>
+          <p id="health-output">Checking GET /api/health...</p>
+          <button id="btn-recheck" class="btn btn-primary">Recheck Health</button>
+        </div>
+        <div class="card">
+          <h4>Grid Configuration</h4>
+          <ul class="stats-list">
+            <li><span>Grid Size:</span> <strong>20 × 20 (400 Tiles)</strong></li>
+            <li><span>Render Engine:</span> <strong>HTML5 2D Context</strong></li>
+            <li><span>Proxy Target:</span> <strong>http://localhost:8080</strong></li>
+          </ul>
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
