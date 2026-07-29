@@ -19,21 +19,39 @@
         <span class="logo-icon">🛡️</span>
         <div>
           <h1>SHADOW PALETTE</h1>
-          <p class="subtitle">Stealth &amp; Siege Tactical Engine</p>
+          <p class="subtitle">Stealth &amp; Siege Engine</p>
         </div>
       </div>
-      <div class="status-bar">
-        <div id="backend-status" class="status-badge status-connecting">
-          <span class="dot"></span> Backend: Connecting...
+
+      <nav class="nav-tabs">
+        <button id="tab-map" class="nav-tab active">🗺️ World Map</button>
+        <button id="tab-builder" class="nav-tab">🏗️ Base Builder</button>
+      </nav>
+
+      <div class="hud-bar">
+        <div class="hud-pill">
+          <span>User:</span> <strong id="hud-user-id">12</strong>
+        </div>
+        <div class="hud-pill">
+          <span>Coins:</span> <strong id="hud-coins">500</strong> 🪙
+        </div>
+        <div class="hud-pill">
+          <span>Ink:</span> <strong id="hud-ink">100</strong> ✒️
+        </div>
+        <div class="hud-pill">
+          <span>Camo:</span> <strong id="hud-camo">BLUE</strong>
+        </div>
+        <div class="hud-pill">
+          <span>Active Plot:</span> <strong id="hud-plot">#1</strong>
         </div>
       </div>
     </header>
 
-    <main class="main-content">
+    <main class="main-layout">
       <section class="canvas-panel">
         <div class="panel-header">
-          <h2>20×20 World Grid Canvas</h2>
-          <span class="badge">Phase 0 Canvas Init</span>
+          <h2 id="view-title">Shared World Map (5×5 Grid)</h2>
+          <span id="view-badge" class="badge">Click Unclaimed Plot to Claim</span>
         </div>
         <div class="canvas-wrapper">
           <canvas id="gameCanvas" width="600" height="600"></canvas>
@@ -41,23 +59,62 @@
       </section>
 
       <aside class="control-panel">
-        <h3>System Diagnostics</h3>
-        <div class="card">
-          <h4>Backend Connection</h4>
-          <p id="health-output">Checking GET /api/health...</p>
-          <button id="btn-recheck" class="btn btn-primary">Recheck Health</button>
+        <!-- Palette Tool Card -->
+        <div class="card" id="card-palette">
+          <h3>5-Color Surface Palette</h3>
+          <div class="color-swatches">
+            <button class="color-swatch active" data-color="#F1FAEE" style="background-color: #F1FAEE;" title="White (35% Max Quota)"></button>
+            <button class="color-swatch" data-color="#F4C245" style="background-color: #F4C245;" title="Yellow (35% Max Quota)"></button>
+            <button class="color-swatch" data-color="#2A9D8F" style="background-color: #2A9D8F;" title="Green (35% Max Quota)"></button>
+            <button class="color-swatch" data-color="#E63946" style="background-color: #E63946;" title="Red (35% Max Quota)"></button>
+            <button class="color-swatch" data-color="#264653" style="background-color: #264653;" title="Blue (35% Max Quota)"></button>
+          </div>
         </div>
+
+        <!-- Placement Menu Card -->
+        <div class="card" id="card-placement">
+          <h3>Structure Placement Menu</h3>
+          <div class="tool-grid">
+            <button class="tool-btn active" data-tool="CRAFT_HOUSE">
+              <span>🏠 Craft House</span>
+              <small>4×4 (16 Tiles)</small>
+            </button>
+            <button class="tool-btn" data-tool="INK_HOUSE">
+              <span>✒️ Ink House</span>
+              <small>3×3 (9 Tiles)</small>
+            </button>
+            <button class="tool-btn" data-tool="SLEEP_HOUSE">
+              <span>🛏️ Sleep House</span>
+              <small>3×3 (9 Tiles)</small>
+            </button>
+            <button class="tool-btn" data-tool="COIN_GENERATOR">
+              <span>💰 Coin Generator</span>
+              <small>4×3 (12 Tiles)</small>
+            </button>
+            <button class="tool-btn" data-tool="LIGHTHOUSE">
+              <span>💡 Lighthouse</span>
+              <small>Defense (1 Max)</small>
+            </button>
+            <button class="tool-btn" data-tool="PATROL_ROBOT">
+              <span>🤖 PatrolRobot</span>
+              <small>Defense (3 Raids)</small>
+            </button>
+          </div>
+        </div>
+
+        <!-- Player Config Card -->
         <div class="card">
-          <h4>Grid Configuration</h4>
-          <ul class="stats-list">
-            <li><span>Grid Size:</span> <strong>20 × 20 (400 Tiles)</strong></li>
-            <li><span>Render Engine:</span> <strong>HTML5 2D Context</strong></li>
-            <li><span>Proxy Target:</span> <strong>http://localhost:8080</strong></li>
-          </ul>
+          <h3>Player Configuration</h3>
+          <div style="display: flex; gap: 8px;">
+            <input type="number" id="input-user-id" value="12" min="1" style="width: 80px; padding: 6px; border-radius: 6px; background: #000; border: 1px solid var(--border-color); color: #fff;" />
+            <button id="btn-set-user" class="btn btn-primary" style="flex: 1;">Switch User ID</button>
+          </div>
         </div>
       </aside>
     </main>
   </div>
+
+  <div id="toast-container" class="toast-container"></div>
 
   <script type="module" src="/src/main.js"></script>
 </body>
