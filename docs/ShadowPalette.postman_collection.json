@@ -1,0 +1,164 @@
+{
+  "info": {
+    "_postman_id": "a2f8d39c-1122-4455-8899-shadowpalette01",
+    "name": "Shadow Palette: Stealth & Siege API Collection",
+    "description": "Complete Postman test suite covering success and error scenarios for all core REST endpoints.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "1. Player Setup (Success)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"userId\": 12,\n  \"characterModel\": 2,\n  \"camoColor\": \"BLUE\"\n}"
+        },
+        "url": {
+          "raw": "http://localhost:8080/api/player/setup",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8080",
+          "path": ["api", "player", "setup"]
+        }
+      }
+    },
+    {
+      "name": "2. Player Setup (Conflict 409 - Camo Already Set)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"userId\": 12,\n  \"characterModel\": 3,\n  \"camoColor\": \"RED\"\n}"
+        },
+        "url": {
+          "raw": "http://localhost:8080/api/player/setup",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8080",
+          "path": ["api", "player", "setup"]
+        }
+      }
+    },
+    {
+      "name": "3. Get World Map",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:8080/api/map",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8080",
+          "path": ["api", "map"]
+        }
+      }
+    },
+    {
+      "name": "4. Claim Plot (Success)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"userId\": 12,\n  \"plotId\": 1\n}"
+        },
+        "url": {
+          "raw": "http://localhost:8080/api/plot/claim",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8080",
+          "path": ["api", "plot", "claim"]
+        }
+      }
+    },
+    {
+      "name": "5. Claim Plot (Conflict 409 - Already Owned)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"userId\": 99,\n  \"plotId\": 1\n}"
+        },
+        "url": {
+          "raw": "http://localhost:8080/api/plot/claim",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8080",
+          "path": ["api", "plot", "claim"]
+        }
+      }
+    },
+    {
+      "name": "6. Place Building (Success)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"userId\": 12,\n  \"plotId\": 1,\n  \"action\": \"PLACE_BUILDING\",\n  \"buildingType\": \"CRAFT_HOUSE\",\n  \"modelVariant\": 1,\n  \"xPos\": 3,\n  \"yPos\": 4,\n  \"hexColor\": \"#264653\"\n}"
+        },
+        "url": {
+          "raw": "http://localhost:8080/api/building/place",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8080",
+          "path": ["api", "building", "place"]
+        }
+      }
+    },
+    {
+      "name": "7. Place Building (Error 422 - Color Quota Exceeded)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"userId\": 12,\n  \"plotId\": 1,\n  \"action\": \"PLACE_BUILDING\",\n  \"buildingType\": \"CRAFT_HOUSE\",\n  \"modelVariant\": 1,\n  \"xPos\": 10,\n  \"yPos\": 10,\n  \"hexColor\": \"#264653\"\n}"
+        },
+        "url": {
+          "raw": "http://localhost:8080/api/building/place",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8080",
+          "path": ["api", "building", "place"]
+        }
+      }
+    },
+    {
+      "name": "8. Upgrade Building (Success)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"userId\": 12,\n  \"targetId\": 1,\n  \"targetType\": \"BUILDING\"\n}"
+        },
+        "url": {
+          "raw": "http://localhost:8080/api/building/upgrade",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8080",
+          "path": ["api", "building", "upgrade"]
+        }
+      }
+    }
+  ]
+}
