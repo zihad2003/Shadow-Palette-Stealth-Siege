@@ -11,10 +11,9 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 @Builder
 @JsonInclude(JsonInclude.Include.NON_NULL)
-public class ErrorResponse {
+public class RaidCompleteResponse {
     private boolean success;
-    private String error;
-    private Double colorUsagePercent;
-    private Integer successfulRaidsNeeded;
     private ValidatedOutcomeDto validatedOutcome;
+    private Long raidLogId;
+    private String error;
 }

@@ -26,6 +26,7 @@
       <nav class="nav-tabs">
         <button id="tab-map" class="nav-tab active">🗺️ World Map</button>
         <button id="tab-builder" class="nav-tab">🏗️ Base Builder</button>
+        <button id="tab-raid" class="nav-tab">⚔️ Stealth Raid</button>
       </nav>
 
       <div class="hud-bar">
@@ -39,7 +40,7 @@
           <span>Ink:</span> <strong id="hud-ink">100</strong> ✒️
         </div>
         <div class="hud-pill">
-          <span>Camo:</span> <strong id="hud-camo">BLUE</strong>
+          <span>Chips:</span> <strong id="hud-chips">200</strong> 💎
         </div>
         <div class="hud-pill">
           <span>Active Plot:</span> <strong id="hud-plot">#1</strong>
@@ -99,6 +100,18 @@
               <span>🤖 PatrolRobot</span>
               <small>Defense (3 Raids)</small>
             </button>
+          </div>
+        </div>
+
+        <!-- Stealth Raid Card -->
+        <div class="card" id="card-raid">
+          <h3>Raid Control Center</h3>
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <label style="font-size: 0.8rem; color: var(--text-muted);">Defender User ID:</label>
+            <input type="number" id="input-defender-id" value="34" min="1" style="padding: 6px; border-radius: 6px; background: #000; border: 1px solid var(--border-color); color: #fff;" />
+            <button id="btn-start-raid" class="btn" style="background: var(--accent-rose); color: #fff; border: none; padding: 10px; border-radius: 6px; font-weight: bold; cursor: pointer;">⚔️ Launch Raid</button>
+            <button id="btn-hit-wall" class="btn" style="background: var(--bg-card); color: var(--accent-gold); border: 1px solid var(--accent-gold); padding: 8px; border-radius: 6px; font-weight: bold; cursor: pointer; display: none;">🔨 Hit Gate Wall (Spacebar)</button>
+            <button id="btn-submit-raid" class="btn" style="background: var(--accent-emerald); color: #000; border: none; padding: 10px; border-radius: 6px; font-weight: bold; cursor: pointer; display: none;">✅ Extract &amp; Complete Raid</button>
           </div>
         </div>
 

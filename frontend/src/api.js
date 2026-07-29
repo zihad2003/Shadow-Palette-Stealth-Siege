@@ -71,3 +71,14 @@ export async function placeDefense(userId, plotId, defenseType, modelVariant) {
     }),
   });
 }
+
+export async function fetchRaidTarget(userId) {
+  return request(`/api/raid/target/${userId}`);
+}
+
+export async function completeRaid(payload) {
+  return request('/api/raid/complete', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}

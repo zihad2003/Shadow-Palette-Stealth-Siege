@@ -1,5 +1,6 @@
 package com.shadowpalette.exception;
 
+import com.shadowpalette.dto.ValidatedOutcomeDto;
 import lombok.Getter;
 import org.springframework.http.HttpStatus;
 
@@ -9,6 +10,7 @@ public class ApiException extends RuntimeException {
     private final String errorCode;
     private final Double colorUsagePercent;
     private final Integer successfulRaidsNeeded;
+    private final ValidatedOutcomeDto validatedOutcome;
 
     public ApiException(HttpStatus status, String errorCode) {
         super(errorCode);
@@ -16,6 +18,7 @@ public class ApiException extends RuntimeException {
         this.errorCode = errorCode;
         this.colorUsagePercent = null;
         this.successfulRaidsNeeded = null;
+        this.validatedOutcome = null;
     }
 
     public ApiException(HttpStatus status, String errorCode, Double colorUsagePercent) {
@@ -24,6 +27,7 @@ public class ApiException extends RuntimeException {
         this.errorCode = errorCode;
         this.colorUsagePercent = colorUsagePercent;
         this.successfulRaidsNeeded = null;
+        this.validatedOutcome = null;
     }
 
     public ApiException(HttpStatus status, String errorCode, Integer successfulRaidsNeeded) {
@@ -32,5 +36,15 @@ public class ApiException extends RuntimeException {
         this.errorCode = errorCode;
         this.colorUsagePercent = null;
         this.successfulRaidsNeeded = successfulRaidsNeeded;
+        this.validatedOutcome = null;
+    }
+
+    public ApiException(HttpStatus status, String errorCode, ValidatedOutcomeDto validatedOutcome) {
+        super(errorCode);
+        this.status = status;
+        this.errorCode = errorCode;
+        this.colorUsagePercent = null;
+        this.successfulRaidsNeeded = null;
+        this.validatedOutcome = validatedOutcome;
     }
 }

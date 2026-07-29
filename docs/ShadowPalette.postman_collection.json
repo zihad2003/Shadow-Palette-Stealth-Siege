@@ -81,27 +81,7 @@
       }
     },
     {
-      "name": "5. Claim Plot (Conflict 409 - Already Owned)",
-      "request": {
-        "method": "POST",
-        "header": [
-          { "key": "Content-Type", "value": "application/json" }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"userId\": 99,\n  \"plotId\": 1\n}"
-        },
-        "url": {
-          "raw": "http://localhost:8080/api/plot/claim",
-          "protocol": "http",
-          "host": ["localhost"],
-          "port": "8080",
-          "path": ["api", "plot", "claim"]
-        }
-      }
-    },
-    {
-      "name": "6. Place Building (Success)",
+      "name": "5. Place Building (Success)",
       "request": {
         "method": "POST",
         "header": [
@@ -121,47 +101,7 @@
       }
     },
     {
-      "name": "7. Place Building (Error 422 - Color Quota Exceeded)",
-      "request": {
-        "method": "POST",
-        "header": [
-          { "key": "Content-Type", "value": "application/json" }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"userId\": 12,\n  \"plotId\": 1,\n  \"action\": \"PLACE_BUILDING\",\n  \"buildingType\": \"CRAFT_HOUSE\",\n  \"modelVariant\": 1,\n  \"xPos\": 10,\n  \"yPos\": 10,\n  \"hexColor\": \"#264653\"\n}"
-        },
-        "url": {
-          "raw": "http://localhost:8080/api/building/place",
-          "protocol": "http",
-          "host": ["localhost"],
-          "port": "8080",
-          "path": ["api", "building", "place"]
-        }
-      }
-    },
-    {
-      "name": "8. Upgrade Building (Success)",
-      "request": {
-        "method": "POST",
-        "header": [
-          { "key": "Content-Type", "value": "application/json" }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"userId\": 12,\n  \"targetId\": 1,\n  \"targetType\": \"BUILDING\"\n}"
-        },
-        "url": {
-          "raw": "http://localhost:8080/api/building/upgrade",
-          "protocol": "http",
-          "host": ["localhost"],
-          "port": "8080",
-          "path": ["api", "building", "upgrade"]
-        }
-      }
-    },
-    {
-      "name": "9. Place Defense - Lighthouse (Success)",
+      "name": "6. Place Defense - Lighthouse (Success)",
       "request": {
         "method": "POST",
         "header": [
@@ -181,27 +121,21 @@
       }
     },
     {
-      "name": "10. Place Defense - Lighthouse (Conflict 409 - Already Placed)",
+      "name": "7. Get Raid Target",
       "request": {
-        "method": "POST",
-        "header": [
-          { "key": "Content-Type", "value": "application/json" }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"userId\": 12,\n  \"plotId\": 1,\n  \"defenseType\": \"LIGHTHOUSE\",\n  \"modelVariant\": 1\n}"
-        },
+        "method": "GET",
+        "header": [],
         "url": {
-          "raw": "http://localhost:8080/api/defense/place",
+          "raw": "http://localhost:8080/api/raid/target/34",
           "protocol": "http",
           "host": ["localhost"],
           "port": "8080",
-          "path": ["api", "defense", "place"]
+          "path": ["api", "raid", "target", "34"]
         }
       }
     },
     {
-      "name": "11. Place Defense - PatrolRobot (Forbidden 403 - Not Unlocked)",
+      "name": "8. Complete Raid (Success 200)",
       "request": {
         "method": "POST",
         "header": [
@@ -209,14 +143,34 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"userId\": 12,\n  \"plotId\": 1,\n  \"defenseType\": \"PATROL_ROBOT\",\n  \"modelVariant\": 1\n}"
+          "raw": "{\n  \"attackerId\": 12,\n  \"defenderId\": 34,\n  \"durationSeconds\": 30,\n  \"wallBreakEvents\": [ { \"wallBlockId\": 9, \"hits\": 4, \"gateWasLocked\": true } ],\n  \"sessionLog\": [ { \"tick\": 0, \"xPos\": 10, \"yPos\": 19 } ],\n  \"clientReportedOutcome\": { \"isDetected\": false, \"outcome\": \"SILENT\", \"chipsRequested\": 200 }\n}"
         },
         "url": {
-          "raw": "http://localhost:8080/api/defense/place",
+          "raw": "http://localhost:8080/api/raid/complete",
           "protocol": "http",
           "host": ["localhost"],
           "port": "8080",
-          "path": ["api", "defense", "place"]
+          "path": ["api", "raid", "complete"]
+        }
+      }
+    },
+    {
+      "name": "9. Complete Raid (Error 422 - Outcome Mismatch)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"attackerId\": 12,\n  \"defenderId\": 34,\n  \"durationSeconds\": 30,\n  \"wallBreakEvents\": [],\n  \"sessionLog\": [ { \"tick\": 60, \"xPos\": 10, \"yPos\": 5 } ],\n  \"clientReportedOutcome\": { \"isDetected\": false, \"outcome\": \"SILENT\", \"chipsRequested\": 200 }\n}"
+        },
+        "url": {
+          "raw": "http://localhost:8080/api/raid/complete",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8080",
+          "path": ["api", "raid", "complete"]
         }
       }
     }
