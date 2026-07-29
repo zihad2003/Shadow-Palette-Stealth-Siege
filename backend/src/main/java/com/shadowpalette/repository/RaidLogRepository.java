@@ -10,4 +10,5 @@ import java.util.List;
 public interface RaidLogRepository extends JpaRepository<RaidLog, Long> {
     List<RaidLog> findByAttackerId(Long attackerId);
     List<RaidLog> findByDefenderId(Long defenderId);
+    long countByAttackerIdAndOutcomeNot(Long attackerId, String outcome);
 }

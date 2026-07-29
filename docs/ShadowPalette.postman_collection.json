@@ -159,6 +159,66 @@
           "path": ["api", "building", "upgrade"]
         }
       }
+    },
+    {
+      "name": "9. Place Defense - Lighthouse (Success)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"userId\": 12,\n  \"plotId\": 1,\n  \"defenseType\": \"LIGHTHOUSE\",\n  \"modelVariant\": 2\n}"
+        },
+        "url": {
+          "raw": "http://localhost:8080/api/defense/place",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8080",
+          "path": ["api", "defense", "place"]
+        }
+      }
+    },
+    {
+      "name": "10. Place Defense - Lighthouse (Conflict 409 - Already Placed)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"userId\": 12,\n  \"plotId\": 1,\n  \"defenseType\": \"LIGHTHOUSE\",\n  \"modelVariant\": 1\n}"
+        },
+        "url": {
+          "raw": "http://localhost:8080/api/defense/place",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8080",
+          "path": ["api", "defense", "place"]
+        }
+      }
+    },
+    {
+      "name": "11. Place Defense - PatrolRobot (Forbidden 403 - Not Unlocked)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"userId\": 12,\n  \"plotId\": 1,\n  \"defenseType\": \"PATROL_ROBOT\",\n  \"modelVariant\": 1\n}"
+        },
+        "url": {
+          "raw": "http://localhost:8080/api/defense/place",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8080",
+          "path": ["api", "defense", "place"]
+        }
+      }
     }
   ]
 }

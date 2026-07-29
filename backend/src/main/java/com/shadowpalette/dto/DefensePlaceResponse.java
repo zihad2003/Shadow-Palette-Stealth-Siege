@@ -11,9 +11,10 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 @Builder
 @JsonInclude(JsonInclude.Include.NON_NULL)
-public class ErrorResponse {
+public class DefensePlaceResponse {
     private boolean success;
+    private Long defenseId;
+    private String defenseType;
     private String error;
-    private Double colorUsagePercent;
     private Integer successfulRaidsNeeded;
 }

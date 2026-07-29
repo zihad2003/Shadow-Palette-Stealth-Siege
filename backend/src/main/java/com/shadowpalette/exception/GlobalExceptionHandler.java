@@ -17,6 +17,7 @@ public class GlobalExceptionHandler {
                 .success(false)
                 .error(ex.getErrorCode())
                 .colorUsagePercent(ex.getColorUsagePercent())
+                .successfulRaidsNeeded(ex.getSuccessfulRaidsNeeded())
                 .build();
         return ResponseEntity.status(ex.getStatus()).body(errorResponse);
     }
