@@ -6,6 +6,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.time.LocalDateTime;
+
 @Entity
 @Table(name = "`user`")
 @Data
@@ -31,4 +33,6 @@ public class User {
     private String camoColor;
 
     private int prestigeLevel;
+
+    private LocalDateTime raidCooldownUntil;
 }

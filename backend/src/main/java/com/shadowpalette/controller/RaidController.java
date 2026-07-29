@@ -17,8 +17,11 @@ public class RaidController {
     private final RaidService raidService;
 
     @GetMapping("/target/{userId}")
-    public ResponseEntity<RaidTargetResponse> getRaidTarget(@PathVariable Long userId) {
-        RaidTargetResponse response = raidService.getRaidTarget(userId);
+    public ResponseEntity<RaidTargetResponse> getRaidTarget(
+            @PathVariable Long userId,
+            @RequestParam(required = false) Long attackerId
+    ) {
+        RaidTargetResponse response = raidService.getRaidTarget(userId, attackerId);
         return ResponseEntity.ok(response);
     }
 

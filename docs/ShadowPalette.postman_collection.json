@@ -27,27 +27,7 @@
       }
     },
     {
-      "name": "2. Player Setup (Conflict 409 - Camo Already Set)",
-      "request": {
-        "method": "POST",
-        "header": [
-          { "key": "Content-Type", "value": "application/json" }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"userId\": 12,\n  \"characterModel\": 3,\n  \"camoColor\": \"RED\"\n}"
-        },
-        "url": {
-          "raw": "http://localhost:8080/api/player/setup",
-          "protocol": "http",
-          "host": ["localhost"],
-          "port": "8080",
-          "path": ["api", "player", "setup"]
-        }
-      }
-    },
-    {
-      "name": "3. Get World Map",
+      "name": "2. Get World Map",
       "request": {
         "method": "GET",
         "header": [],
@@ -61,7 +41,7 @@
       }
     },
     {
-      "name": "4. Claim Plot (Success)",
+      "name": "3. Claim Plot (Success)",
       "request": {
         "method": "POST",
         "header": [
@@ -81,7 +61,7 @@
       }
     },
     {
-      "name": "5. Place Building (Success)",
+      "name": "4. Place Building (Success)",
       "request": {
         "method": "POST",
         "header": [
@@ -101,7 +81,7 @@
       }
     },
     {
-      "name": "6. Place Defense - Lighthouse (Success)",
+      "name": "5. Perform Base Prestige (Reset & Stealth Bonus)",
       "request": {
         "method": "POST",
         "header": [
@@ -109,33 +89,34 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"userId\": 12,\n  \"plotId\": 1,\n  \"defenseType\": \"LIGHTHOUSE\",\n  \"modelVariant\": 2\n}"
+          "raw": "{\n  \"userId\": 12\n}"
         },
         "url": {
-          "raw": "http://localhost:8080/api/defense/place",
+          "raw": "http://localhost:8080/api/player/prestige",
           "protocol": "http",
           "host": ["localhost"],
           "port": "8080",
-          "path": ["api", "defense", "place"]
+          "path": ["api", "player", "prestige"]
         }
       }
     },
     {
-      "name": "7. Get Raid Target",
+      "name": "6. Get Raid Target",
       "request": {
         "method": "GET",
         "header": [],
         "url": {
-          "raw": "http://localhost:8080/api/raid/target/34",
+          "raw": "http://localhost:8080/api/raid/target/34?attackerId=12",
           "protocol": "http",
           "host": ["localhost"],
           "port": "8080",
-          "path": ["api", "raid", "target", "34"]
+          "path": ["api", "raid", "target", "34"],
+          "query": [{ "key": "attackerId", "value": "12" }]
         }
       }
     },
     {
-      "name": "8. Complete Raid (Success 200)",
+      "name": "7. Complete Raid (Success 200)",
       "request": {
         "method": "POST",
         "header": [
@@ -144,26 +125,6 @@
         "body": {
           "mode": "raw",
           "raw": "{\n  \"attackerId\": 12,\n  \"defenderId\": 34,\n  \"durationSeconds\": 30,\n  \"wallBreakEvents\": [ { \"wallBlockId\": 9, \"hits\": 4, \"gateWasLocked\": true } ],\n  \"sessionLog\": [ { \"tick\": 0, \"xPos\": 10, \"yPos\": 19 } ],\n  \"clientReportedOutcome\": { \"isDetected\": false, \"outcome\": \"SILENT\", \"chipsRequested\": 200 }\n}"
-        },
-        "url": {
-          "raw": "http://localhost:8080/api/raid/complete",
-          "protocol": "http",
-          "host": ["localhost"],
-          "port": "8080",
-          "path": ["api", "raid", "complete"]
-        }
-      }
-    },
-    {
-      "name": "9. Complete Raid (Error 422 - Outcome Mismatch)",
-      "request": {
-        "method": "POST",
-        "header": [
-          { "key": "Content-Type", "value": "application/json" }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"attackerId\": 12,\n  \"defenderId\": 34,\n  \"durationSeconds\": 30,\n  \"wallBreakEvents\": [],\n  \"sessionLog\": [ { \"tick\": 60, \"xPos\": 10, \"yPos\": 5 } ],\n  \"clientReportedOutcome\": { \"isDetected\": false, \"outcome\": \"SILENT\", \"chipsRequested\": 200 }\n}"
         },
         "url": {
           "raw": "http://localhost:8080/api/raid/complete",

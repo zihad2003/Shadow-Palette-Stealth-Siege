@@ -63,14 +63,15 @@ public class RaidValidator {
 
                 if (result.isDetected()) {
                     isDetected = true;
-                    DetectionEvent event = DetectionEvent.builder()
-                            .playerX(px)
-                            .playerY(py)
-                            .reason(result.getReason())
-                            .timestamp(tick)
-                            .build();
-                    robotContext.processDetection(event);
                 }
+
+                DetectionEvent event = DetectionEvent.builder()
+                        .playerX(px)
+                        .playerY(py)
+                        .reason(result.getReason())
+                        .timestamp(tick)
+                        .build();
+                robotContext.processDetection(event);
 
                 // 3. Check Robot Chase distance (Player speed is 1.25x robot speed)
                 if ("CHASING".equals(robotContext.getCurrentStateName())) {

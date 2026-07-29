@@ -1,5 +1,7 @@
 package com.shadowpalette.controller;
 
+import com.shadowpalette.dto.PlayerPrestigeRequest;
+import com.shadowpalette.dto.PlayerPrestigeResponse;
 import com.shadowpalette.dto.PlayerSetupRequest;
 import com.shadowpalette.dto.PlayerSetupResponse;
 import com.shadowpalette.service.PlayerService;
@@ -21,6 +23,12 @@ public class PlayerController {
     @PostMapping("/setup")
     public ResponseEntity<PlayerSetupResponse> setupPlayer(@Valid @RequestBody PlayerSetupRequest request) {
         PlayerSetupResponse response = playerService.setupPlayer(request);
+        return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/prestige")
+    public ResponseEntity<PlayerPrestigeResponse> performPrestige(@Valid @RequestBody PlayerPrestigeRequest request) {
+        PlayerPrestigeResponse response = playerService.performPrestige(request);
         return ResponseEntity.ok(response);
     }
 }

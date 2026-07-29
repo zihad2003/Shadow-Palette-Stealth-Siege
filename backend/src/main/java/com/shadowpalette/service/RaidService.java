@@ -9,6 +9,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.*;
 
 @Service
@@ -25,7 +26,16 @@ public class RaidService {
     private final RaidValidator raidValidator;
 
     @Transactional(readOnly = true)
-    public RaidTargetResponse getRaidTarget(Long defenderId) {
+    public RaidTargetResponse getRaidTarget(Long defenderId, Long attackerId) {
+        // Cooldown enforcement on attacker
+        if (attackerId != null) {
+            userRepository.findById(attackerId).ifPresent(attacker -> {
+                if (attacker.getRaidCooldownUntil() != null && attacker.getRaidCooldownUntil().isAfter(LocalDateTime.now())) {
+                    throw new ApiException(HttpStatus.FORBIDDEN, "RAID_COOLDOWN_ACTIVE");
+                }
+            });
+        }
+
         User defender = userRepository.findById(defenderId)
                 .orElse(null);
 
@@ -79,6 +89,11 @@ public class RaidService {
             if (clientOutcome != null && !clientOutcome.equalsIgnoreCase(validated.getOutcome())) {
                 throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, "OUTCOME_MISMATCH", validated);
             }
+        }
+
+        // Handle CAUGHT penalty (5-minute cooldown per GDD Section 11)
+        if ("CAUGHT".equalsIgnoreCase(validated.getOutcome())) {
+            attacker.setRaidCooldownUntil(LocalDateTime.now().plusMinutes(5));
         }
 
         // Persist WallBlock breakProgress in DB
