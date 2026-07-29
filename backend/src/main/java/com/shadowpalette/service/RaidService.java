@@ -1,9 +1,6 @@
 package com.shadowpalette.service;
 
-import com.shadowpalette.dto.RaidCompleteRequest;
-import com.shadowpalette.dto.RaidCompleteResponse;
-import com.shadowpalette.dto.RaidTargetResponse;
-import com.shadowpalette.dto.ValidatedOutcomeDto;
+import com.shadowpalette.dto.*;
 import com.shadowpalette.entity.*;
 import com.shadowpalette.exception.ApiException;
 import com.shadowpalette.repository.*;
@@ -81,6 +78,18 @@ public class RaidService {
             String clientOutcome = request.getClientReportedOutcome().getOutcome();
             if (clientOutcome != null && !clientOutcome.equalsIgnoreCase(validated.getOutcome())) {
                 throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, "OUTCOME_MISMATCH", validated);
+            }
+        }
+
+        // Persist WallBlock breakProgress in DB
+        if (request.getWallBreakEvents() != null) {
+            for (WallBreakEventDto event : request.getWallBreakEvents()) {
+                if (event.getWallBlockId() != null) {
+                    wallBlockRepository.findById(event.getWallBlockId()).ifPresent(wall -> {
+                        wall.setBreakProgress(event.getHits());
+                        wallBlockRepository.save(wall);
+                    });
+                }
             }
         }
 

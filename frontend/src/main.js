@@ -37,6 +37,7 @@ const state = {
     chipsAvailable: 200,
     playerPos: { x: 10, y: 19 },
     gateWallHits: 0,
+    isActionCharging: false,
     isGateLocked: false,
     isAlarmTriggered: false,
     tickCount: 0,
@@ -45,6 +46,8 @@ const state = {
     wallBreakEvents: [],
   },
 };
+
+let actionChargeTimer = null;
 
 document.addEventListener('DOMContentLoaded', () => {
   const canvas = document.getElementById('gameCanvas');
@@ -100,7 +103,7 @@ document.addEventListener('DOMContentLoaded', () => {
     state.activeView = 'RAID';
     setActiveTab(tabRaid);
     viewTitle.textContent = `Stealth Raid Simulation — Target User #${inputDefenderId.value}`;
-    viewBadge.textContent = 'Grayscale Canvas — Move & Stealth Infiltrate';
+    viewBadge.textContent = 'Grayscale Canvas — Move (1.25x Speed) & Hold Action on Wall';
     btnHitWall.style.display = 'inline-block';
     btnSubmitRaid.style.display = 'inline-block';
     render();
@@ -129,6 +132,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         state.raid.playerPos = { x: 10, y: 19 };
         state.raid.gateWallHits = 0;
+        state.raid.isActionCharging = false;
         state.raid.isAlarmTriggered = false;
         state.raid.tickCount = 0;
         state.raid.sessionLog = [{ tick: 0, xPos: 10, yPos: 19 }];
@@ -137,7 +141,7 @@ document.addEventListener('DOMContentLoaded', () => {
         btnHitWall.style.display = 'inline-block';
         btnSubmitRaid.style.display = 'inline-block';
 
-        showToast(`Raid Started against User #${defenderId}! Base rendered in grayscale.`, 'success');
+        showToast(`Raid Started against User #${defenderId}! Hold action to break wall (~2s per hit).`, 'success');
         render();
       }
     } catch (err) {
@@ -145,23 +149,49 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // --- Hit Wall Button Listener ---
-  btnHitWall.addEventListener('click', () => {
+  // --- Hold Action Wall-Break Logic (~2s per hit, non-decaying) ---
+  function startWallHitAction() {
     if (state.activeView !== 'RAID') return;
-    state.raid.gateWallHits += 1;
-    state.raid.wallBreakEvents.push({
-      wallBlockId: 9,
-      hits: state.raid.gateWallHits,
-      gateWasLocked: state.raid.isAlarmTriggered,
-    });
+    if (state.raid.gateWallHits >= 4) return;
+    if (state.raid.isActionCharging) return;
 
-    if (state.raid.gateWallHits >= 4) {
-      showToast('Exit Gate WALL BROKEN (4/4)! You can now extract successfully!', 'success');
-    } else {
-      showToast(`Hit Gate Wall! Progress: ${state.raid.gateWallHits}/4 hits`, 'info');
-    }
+    state.raid.isActionCharging = true;
     render();
-  });
+
+    actionChargeTimer = setTimeout(() => {
+      state.raid.gateWallHits = Math.min(4, state.raid.gateWallHits + 1);
+      state.raid.isActionCharging = false;
+
+      state.raid.wallBreakEvents.push({
+        wallBlockId: 9,
+        hits: state.raid.gateWallHits,
+        gateWasLocked: state.raid.isAlarmTriggered,
+      });
+
+      if (state.raid.gateWallHits >= 4) {
+        showToast('Exit Gate WALL BROKEN (4/4 Hits)! Escape window unlocked!', 'success');
+      } else {
+        showToast(`Wall Hit Completed! Progress: ${state.raid.gateWallHits}/4 Hits (Progress Saved)`, 'info');
+      }
+      render();
+    }, 1800); // ~2 sec action hold
+  }
+
+  function stopWallHitAction() {
+    if (actionChargeTimer) {
+      clearTimeout(actionChargeTimer);
+      actionChargeTimer = null;
+    }
+    if (state.raid.isActionCharging) {
+      state.raid.isActionCharging = false;
+      showToast('Wall Hit Action Interrupted (Progress Retained)', 'info');
+      render();
+    }
+  }
+
+  btnHitWall.addEventListener('mousedown', startWallHitAction);
+  btnHitWall.addEventListener('mouseup', stopWallHitAction);
+  btnHitWall.addEventListener('mouseleave', stopWallHitAction);
 
   // --- Submit Raid Button Listener ---
   btnSubmitRaid.addEventListener('click', async () => {
@@ -199,26 +229,33 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // --- Keyboard Movement Listener for Raid ---
+  // --- Keyboard Movement Listener (1.25x Player Speed) ---
   window.addEventListener('keydown', (e) => {
     if (state.activeView !== 'RAID') return;
 
     let { x, y } = state.raid.playerPos;
     let moved = false;
 
-    if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') { y = Math.max(0, y - 1); moved = true; }
-    if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') { y = Math.min(19, y + 1); moved = true; }
-    if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') { x = Math.max(0, x - 1); moved = true; }
-    if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') { x = Math.min(19, x + 1); moved = true; }
-    if (e.key === ' ') { btnHitWall.click(); }
+    // 1.25x movement speed
+    const step = 1.25;
+
+    if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') { y = Math.max(0, y - step); moved = true; }
+    if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') { y = Math.min(19, y + step); moved = true; }
+    if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') { x = Math.max(0, x - step); moved = true; }
+    if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') { x = Math.min(19, x + step); moved = true; }
+    if (e.key === ' ' && !e.repeat) { startWallHitAction(); }
 
     if (moved) {
       state.raid.playerPos = { x, y };
       state.raid.tickCount += 1;
       state.raid.sessionLog.push({ tick: state.raid.tickCount, xPos: x, yPos: y });
 
+      // Alarm Escalation Buffs per GDD Section 9 (+25% sweep speed, +1 tile cone range)
+      const sweepSpeedMult = state.raid.isAlarmTriggered ? 1.25 : 1.0;
+      const coneRangeTiles = state.raid.isAlarmTriggered ? 8.0 : 7.0;
+
       // Rotate beam angle
-      state.raid.beamAngleDeg = (state.raid.tickCount * 1.5) % 360;
+      state.raid.beamAngleDeg = (state.raid.tickCount * 1.5 * sweepSpeedMult) % 360;
 
       // Stealth Detection Check
       const lh = {
@@ -226,7 +263,7 @@ document.addEventListener('DOMContentLoaded', () => {
         y: state.raid.lighthouse.yPos || 2,
         beamAngleDeg: state.raid.beamAngleDeg,
         coneAngleDeg: 60,
-        coneRangeTiles: 7,
+        coneRangeTiles,
       };
 
       const playerObj = {
@@ -237,10 +274,15 @@ document.addEventListener('DOMContentLoaded', () => {
       const result = checkLighthouseDetection(lh, playerObj, 3);
       if (result.isDetected) {
         state.raid.isAlarmTriggered = true;
-        showToast(`ALARM DETECTED! Reason: ${result.reason}`, 'error');
+        state.raid.isGateLocked = true;
+        showToast(`ALARM DETECTED! Reason: ${result.reason} (+25% Sweep Speed, +1 Cone Range)`, 'error');
       }
       render();
     }
+  });
+
+  window.addEventListener('keyup', (e) => {
+    if (e.key === ' ') { stopWallHitAction(); }
   });
 
   // --- Color Palette Selection Listener ---

@@ -35,14 +35,26 @@ export function renderGrayscaleRaid(ctx, raidState) {
 
   // 3. Draw Gate Wall Block (Top Center - x: 9, y: 0)
   const isGateBroken = raidState.gateWallHits >= 4;
+  const hits = Math.min(4, raidState.gateWallHits || 0);
+
   if (!isGateBroken) {
     ctx.fillStyle = raidState.isGateLocked ? '#dc2626' : '#475569';
     ctx.fillRect(9 * tileSize + 2, 2, 2 * tileSize - 4, tileSize - 4);
 
+    // Wall Break Progress Bar
+    const barWidth = (2 * tileSize - 8) * (hits / 4.0);
+    ctx.fillStyle = '#fbbf24';
+    ctx.fillRect(9 * tileSize + 4, tileSize - 6, barWidth, 4);
+
     ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 10px Outfit';
     ctx.textAlign = 'center';
-    ctx.fillText(`GATE (${raidState.gateWallHits}/4)`, 10 * tileSize, 16);
+    ctx.fillText(`GATE (${hits}/4 Hits)`, 10 * tileSize, 14);
+
+    if (raidState.isActionCharging) {
+      ctx.fillStyle = '#67e8f9';
+      ctx.fillText('CHARGING... 🔨', 10 * tileSize, 26);
+    }
   } else {
     ctx.fillStyle = '#16a34a';
     ctx.fillRect(9 * tileSize + 2, 2, 2 * tileSize - 4, tileSize - 4);
@@ -61,7 +73,7 @@ export function renderGrayscaleRaid(ctx, raidState) {
       const w = (b.footprintWidth || 3) * tileSize - 4;
       const h = (b.footprintHeight || 3) * tileSize - 4;
 
-      ctx.fillStyle = '#334155'; // Grayscale building shade
+      ctx.fillStyle = '#334155';
       ctx.beginPath();
       ctx.roundRect(x, y, w, h, 6);
       ctx.fill();
@@ -77,17 +89,18 @@ export function renderGrayscaleRaid(ctx, raidState) {
     });
   }
 
-  // 5. Draw Lighthouse Spotlight Sweep
+  // 5. Draw Lighthouse Spotlight Sweep (+1 tile cone range on alarm)
   if (raidState.lighthouse) {
     const lx = (raidState.lighthouse.xPos || 10) * tileSize;
     const ly = (raidState.lighthouse.yPos || 2) * tileSize;
     const beamAngle = raidState.beamAngleDeg || 90;
 
     const rad = (beamAngle * Math.PI) / 180;
-    const range = 140;
+    // Base 7 tiles (140px), on alarm 8 tiles (160px) (+1 tile range per GDD 9)
+    const range = raidState.isAlarmTriggered ? 160 : 140;
 
     const gradient = ctx.createRadialGradient(lx, ly, 10, lx, ly + range, range + 20);
-    gradient.addColorStop(0, raidState.isAlarmTriggered ? 'rgba(239, 68, 68, 0.5)' : 'rgba(251, 191, 36, 0.4)');
+    gradient.addColorStop(0, raidState.isAlarmTriggered ? 'rgba(239, 68, 68, 0.6)' : 'rgba(251, 191, 36, 0.4)');
     gradient.addColorStop(1, 'rgba(0, 0, 0, 0.0)');
 
     ctx.fillStyle = gradient;
@@ -104,7 +117,7 @@ export function renderGrayscaleRaid(ctx, raidState) {
     ctx.fill();
   }
 
-  // 6. Draw Player Character Marker (Colored Camo)
+  // 6. Draw Player Character Marker (1.25x speed, colored camo)
   if (raidState.playerPos) {
     const px = raidState.playerPos.x * tileSize + tileSize / 2;
     const py = raidState.playerPos.y * tileSize + tileSize / 2;
@@ -121,6 +134,6 @@ export function renderGrayscaleRaid(ctx, raidState) {
     ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 9px Outfit';
     ctx.textAlign = 'center';
-    ctx.fillText('YOU', px, py - 14);
+    ctx.fillText('YOU (1.25x Speed)', px, py - 14);
   }
 }

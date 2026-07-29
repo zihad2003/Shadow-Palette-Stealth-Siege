@@ -22,6 +22,7 @@ public class RaidValidator {
     /**
      * Replays the client's session log ticks against the server-side detection rules,
      * Lighthouse beam rotation, and PatrolRobot state machine.
+     * Applies GDD Section 9 Alarm Escalation (+25% Lighthouse sweep speed, +1 tile cone range).
      */
     public ValidatedOutcomeDto validateSession(RaidCompleteRequest request, String attackerCamoColor, int defenderChipsAvailable) {
         int playerBand = strategyFactory.getLuminanceBandForColor(attackerCamoColor);
@@ -33,11 +34,12 @@ public class RaidValidator {
 
         PatrolRobotContext robotContext = new PatrolRobotContext();
 
-        // Default Lighthouse pos: (10.0, 2.0)
+        // Base Lighthouse configuration
         double lhX = 10.0;
         double lhY = 2.0;
         double coneAngle = 60.0;
-        double coneRange = 7.0;
+        double coneRange = 7.0; // Base 7 tiles range
+        double sweepSpeedMult = 1.0;
 
         if (ticks != null && !ticks.isEmpty()) {
             for (SessionLogTickDto tickDto : ticks) {
@@ -45,8 +47,14 @@ public class RaidValidator {
                 double px = tickDto.getXPos();
                 double py = tickDto.getYPos();
 
-                // 1. Calculate Lighthouse beam sweep angle (1 rotation per 12s @ 20 ticks/s)
-                double beamAngleDeg = (tick * (360.0 / 240.0)) % 360.0;
+                // Alarm Escalation Buff per GDD Section 9
+                if (isDetected) {
+                    coneRange = 8.0; // +1 tile range on alarm
+                    sweepSpeedMult = 1.25; // +25% sweep speed on alarm
+                }
+
+                // 1. Calculate Lighthouse beam sweep angle
+                double beamAngleDeg = (tick * (360.0 / 240.0) * sweepSpeedMult) % 360.0;
 
                 // 2. Evaluate Lighthouse stealth detection
                 DetectionResult result = LighthouseDetectionEngine.evaluateDetection(
@@ -64,7 +72,7 @@ public class RaidValidator {
                     robotContext.processDetection(event);
                 }
 
-                // 3. Check Robot Chase distance
+                // 3. Check Robot Chase distance (Player speed is 1.25x robot speed)
                 if ("CHASING".equals(robotContext.getCurrentStateName())) {
                     double robotDist = Math.hypot(px - robotContext.getX(), py - robotContext.getY());
                     if (robotDist <= 0.5) { // Caught by robot!
