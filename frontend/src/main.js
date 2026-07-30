@@ -3,6 +3,7 @@ import { renderWorldMap } from './worldMapRenderer.js';
 import { renderBaseBuilder, getBuildingSize } from './baseBuilderRenderer.js';
 import { renderGrayscaleRaid } from './raidRenderer.js';
 import { checkLighthouseDetection, getLuminanceBand } from './stealthEngine.js';
+import { setupHiDPICanvas, screenToGrid } from './isoUtils.js';
 import { COLORS } from './colors.js';
 
 // Application State
@@ -53,6 +54,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const canvas = document.getElementById('gameCanvas');
   const ctx = canvas.getContext('2d');
 
+  // Setup HiDPI Canvas Scaling
+  setupHiDPICanvas(canvas, ctx, 800, 600);
+
   const tabMap = document.getElementById('tab-map');
   const tabBuilder = document.getElementById('tab-builder');
   const tabRaid = document.getElementById('tab-raid');
@@ -75,14 +79,15 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnHitWall = document.getElementById('btn-hit-wall');
   const btnSubmitRaid = document.getElementById('btn-submit-raid');
 
-  // --- Initial Data Load ---
+  // --- Initial Data Load & Render Loop ---
   loadMapData();
+  startRenderLoop(ctx);
 
   // --- Navigation Tabs ---
   tabMap.addEventListener('click', () => {
     state.activeView = 'MAP';
     setActiveTab(tabMap);
-    viewTitle.textContent = 'Shared World Map (5×5 Grid)';
+    viewTitle.textContent = 'Shared World Map (2.5D Isometric)';
     viewBadge.textContent = 'Click Unclaimed Plot to Claim';
     btnHitWall.style.display = 'none';
     btnSubmitRaid.style.display = 'none';
@@ -96,7 +101,6 @@ document.addEventListener('DOMContentLoaded', () => {
     viewBadge.textContent = 'Click Grid Tile to Place Structure';
     btnHitWall.style.display = 'none';
     btnSubmitRaid.style.display = 'none';
-    render();
   });
 
   tabRaid.addEventListener('click', () => {
@@ -106,7 +110,6 @@ document.addEventListener('DOMContentLoaded', () => {
     viewBadge.textContent = 'Grayscale Canvas — Move (1.25x Speed) & Hold Action on Wall';
     btnHitWall.style.display = 'inline-block';
     btnSubmitRaid.style.display = 'inline-block';
-    render();
   });
 
   function setActiveTab(activeTab) {
@@ -142,10 +145,13 @@ document.addEventListener('DOMContentLoaded', () => {
         btnSubmitRaid.style.display = 'inline-block';
 
         showToast(`Raid Started against User #${defenderId}! Hold action to break wall (~2s per hit).`, 'success');
-        render();
       }
     } catch (err) {
-      showToast(`Failed to load raid target: ${err.message}`, 'error');
+      if (err.data && err.data.error === 'RAID_COOLDOWN_ACTIVE') {
+        showToast('RAID_COOLDOWN_ACTIVE: You are on a 5-minute capture cooldown!', 'error');
+      } else {
+        showToast(`Failed to load raid target: ${err.message}`, 'error');
+      }
     }
   });
 
@@ -156,7 +162,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (state.raid.isActionCharging) return;
 
     state.raid.isActionCharging = true;
-    render();
 
     actionChargeTimer = setTimeout(() => {
       state.raid.gateWallHits = Math.min(4, state.raid.gateWallHits + 1);
@@ -173,7 +178,6 @@ document.addEventListener('DOMContentLoaded', () => {
       } else {
         showToast(`Wall Hit Completed! Progress: ${state.raid.gateWallHits}/4 Hits (Progress Saved)`, 'info');
       }
-      render();
     }, 1800); // ~2 sec action hold
   }
 
@@ -185,7 +189,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (state.raid.isActionCharging) {
       state.raid.isActionCharging = false;
       showToast('Wall Hit Action Interrupted (Progress Retained)', 'info');
-      render();
     }
   }
 
@@ -277,7 +280,6 @@ document.addEventListener('DOMContentLoaded', () => {
         state.raid.isGateLocked = true;
         showToast(`ALARM DETECTED! Reason: ${result.reason} (+25% Sweep Speed, +1 Cone Range)`, 'error');
       }
-      render();
     }
   });
 
@@ -314,31 +316,24 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // --- Canvas Mouse Listener ---
+  // --- Canvas Mouse Listener (Isometric Screen-to-Grid Math) ---
   canvas.addEventListener('mousemove', (e) => {
     const rect = canvas.getBoundingClientRect();
-    const mx = (e.clientX - rect.left) * (canvas.width / rect.width);
-    const my = (e.clientY - rect.top) * (canvas.height / rect.height);
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
 
     if (state.activeView === 'MAP') {
-      const padding = 40;
-      const cellW = (canvas.width - padding * 2) / 5;
-      const cellH = (canvas.height - padding * 2) / 5;
-      const col = Math.floor((mx - padding) / cellW);
-      const row = Math.floor((my - padding) / cellH);
-      const found = state.plots.find((p) => p.xCoord === col && p.yCoord === row);
+      const { x, y } = screenToGrid(mx, my, 400, 120, 100, 50);
+      const found = state.plots.find((p) => p.xCoord === x && p.yCoord === y);
       state.hoveredPlotId = found ? found.id : null;
     } else if (state.activeView === 'BUILDER') {
-      const tileSize = canvas.width / 20;
-      const xPos = Math.floor(mx / tileSize);
-      const yPos = Math.floor(my / tileSize);
-      if (xPos >= 0 && xPos < 20 && yPos >= 0 && yPos < 20) {
-        state.hoverTile = { xPos, yPos };
+      const { x, y } = screenToGrid(mx, my, 400, 50, 28, 14);
+      if (x >= 0 && x < 20 && y >= 0 && y < 20) {
+        state.hoverTile = { xPos: x, yPos: y };
       } else {
         state.hoverTile = null;
       }
     }
-    render();
   });
 
   canvas.addEventListener('click', async () => {
@@ -353,7 +348,6 @@ document.addEventListener('DOMContentLoaded', () => {
         setActiveTab(tabBuilder);
         viewTitle.textContent = `Base Builder — Plot #${state.activePlotId}`;
         hudPlot.textContent = `#${state.activePlotId}`;
-        render();
         return;
       }
 
@@ -403,7 +397,6 @@ document.addEventListener('DOMContentLoaded', () => {
               hexColor: state.selectedColor,
               level: 1,
             });
-            render();
           }
         } catch (err) {
           if (err.data && err.data.error === 'COLOR_QUOTA_EXCEEDED') {
@@ -424,7 +417,6 @@ document.addEventListener('DOMContentLoaded', () => {
           if (res.success) {
             showToast(`Placed ${res.defenseType} successfully!`, 'success');
             state.defenses.push({ id: res.defenseId, type: res.defenseType });
-            render();
           }
         } catch (err) {
           if (err.data && err.data.error === 'PATROLROBOT_NOT_UNLOCKED') {
@@ -439,22 +431,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  function render() {
-    if (state.activeView === 'MAP') {
-      renderWorldMap(ctx, state.plots, state.userId, state.hoveredPlotId);
-    } else if (state.activeView === 'BUILDER') {
-      renderBaseBuilder(ctx, state);
-    } else if (state.activeView === 'RAID') {
-      renderGrayscaleRaid(ctx, state.raid);
-    }
-  }
-
   async function loadMapData() {
     try {
       const data = await fetchMap();
       if (data && data.plots) {
         state.plots = data.plots;
-        render();
       }
     } catch (err) {
       showToast(`Failed to load world map: ${err.message}`, 'error');
@@ -470,6 +451,21 @@ document.addEventListener('DOMContentLoaded', () => {
     hudPlot.textContent = `#${state.activePlotId}`;
   }
 });
+
+// Continuous Animation Render Loop (60FPS for LERP Gliding)
+function startRenderLoop(ctx) {
+  function loop() {
+    if (state.activeView === 'MAP') {
+      renderWorldMap(ctx, state.plots, state.userId, state.hoveredPlotId);
+    } else if (state.activeView === 'BUILDER') {
+      renderBaseBuilder(ctx, state);
+    } else if (state.activeView === 'RAID') {
+      renderGrayscaleRaid(ctx, state.raid);
+    }
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+}
 
 function showToast(message, type = 'info') {
   const container = document.getElementById('toast-container');

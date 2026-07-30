@@ -1,115 +1,144 @@
-// World Map Canvas Renderer (Plots + Connecting Roads)
+// 2.5D Isometric World Map Canvas Renderer
 
-const GRID_COLS = 5;
-const GRID_ROWS = 5;
+import { gridToScreen, drawIsoDiamond, drawIsoBlock } from './isoUtils.js';
+import { drawSpriteOrFallback } from './assetLoader.js';
 
 export function renderWorldMap(ctx, plots, activeUserId, hoveredPlotId) {
   const canvas = ctx.canvas;
   const width = canvas.width;
   const height = canvas.height;
 
-  ctx.clearRect(0, 0, width, height);
-
-  // Draw Map Background
-  ctx.fillStyle = '#090b10';
+  // 1. Draw Atmospheric Ground/Sky Background Gradient
+  const bgGradient = ctx.createLinearGradient(0, 0, width, height);
+  bgGradient.addColorStop(0, '#0a0e1a');
+  bgGradient.addColorStop(0.5, '#111827');
+  bgGradient.addColorStop(1, '#060911');
+  ctx.fillStyle = bgGradient;
   ctx.fillRect(0, 0, width, height);
 
-  const padding = 40;
-  const cellW = (width - padding * 2) / GRID_COLS;
-  const cellH = (height - padding * 2) / GRID_ROWS;
+  // Grid Configuration for 5x5 Isometric World
+  const tileW = 100;
+  const tileH = 50;
+  const originX = width / 2;
+  const originY = 120;
 
-  // 1. Draw Roads Connecting Plots
-  ctx.strokeStyle = '#1e293b';
-  ctx.lineWidth = 12;
+  // 2. Render 2.5D Connecting Roads
+  ctx.save();
+  ctx.lineWidth = 14;
+  ctx.strokeStyle = '#334155';
+  ctx.lineCap = 'round';
 
-  // Horizontal roads
-  for (let r = 0; r < GRID_ROWS; r++) {
-    const y = padding + r * cellH + cellH / 2;
-    ctx.beginPath();
-    ctx.moveTo(padding + cellW / 2, y);
-    ctx.lineTo(width - padding - cellW / 2, y);
-    ctx.stroke();
+  for (let r = 0; r < 5; r++) {
+    for (let c = 0; c < 5; c++) {
+      const p1 = gridToScreen(c, r, originX, originY, tileW, tileH);
+
+      // Horizontal Road Connection
+      if (c < 4) {
+        const p2 = gridToScreen(c + 1, r, originX, originY, tileW, tileH);
+        ctx.beginPath();
+        ctx.moveTo(p1.x, p1.y + tileH / 2);
+        ctx.lineTo(p2.x, p2.y + tileH / 2);
+        ctx.stroke();
+      }
+
+      // Vertical Road Connection
+      if (r < 4) {
+        const p2 = gridToScreen(c, r + 1, originX, originY, tileW, tileH);
+        ctx.beginPath();
+        ctx.moveTo(p1.x, p1.y + tileH / 2);
+        ctx.lineTo(p2.x, p2.y + tileH / 2);
+        ctx.stroke();
+      }
+    }
   }
+  ctx.restore();
 
-  // Vertical roads
-  for (let c = 0; c < GRID_COLS; c++) {
-    const x = padding + c * cellW + cellW / 2;
-    ctx.beginPath();
-    ctx.moveTo(x, padding + cellH / 2);
-    ctx.lineTo(x, height - padding - cellH / 2);
-    ctx.stroke();
+  // 3. Render 5x5 Plots in Back-to-Front Order (sorted by r + c)
+  const plotList = [];
+  for (let r = 0; r < 5; r++) {
+    for (let c = 0; c < 5; c++) {
+      const plot = plots ? plots.find((p) => p.xCoord === c && p.yCoord === r) : null;
+      plotList.push({ r, c, plot });
+    }
   }
+  plotList.sort((a, b) => (a.r + a.c) - (b.r + b.c));
 
-  // Road Dash Lines
-  ctx.strokeStyle = '#fbbf24';
-  ctx.lineWidth = 2;
-  ctx.setLineDash([6, 6]);
-  for (let r = 0; r < GRID_ROWS; r++) {
-    const y = padding + r * cellH + cellH / 2;
-    ctx.beginPath();
-    ctx.moveTo(padding, y);
-    ctx.lineTo(width - padding, y);
-    ctx.stroke();
-  }
-  ctx.setLineDash([]);
+  plotList.forEach(({ r, c, plot }) => {
+    const { x: sx, y: sy } = gridToScreen(c, r, originX, originY, tileW, tileH);
+    const isHovered = plot && plot.id === hoveredPlotId;
+    const isOwned = plot && plot.ownerId === activeUserId;
+    const isOccupied = plot && plot.isOccupied;
 
-  // 2. Draw Plots
-  const plotRects = [];
+    let baseColor = '#10b981'; // Unclaimed Green
+    let label = 'UNCLAIMED';
 
-  plots.forEach((plot) => {
-    const x = padding + plot.xCoord * cellW + cellW * 0.1;
-    const y = padding + plot.yCoord * cellH + cellH * 0.1;
-    const w = cellW * 0.8;
-    const h = cellH * 0.8;
-
-    plotRects.push({ plot, x, y, w, h });
-
-    const isHovered = hoveredPlotId === plot.id;
-    const isOwnedByMe = plot.ownerId === activeUserId;
-    const isOccupied = plot.isOccupied || plot.ownerId != null;
-
-    // Fill Plot Rectangle
-    if (isOwnedByMe) {
-      ctx.fillStyle = 'rgba(56, 189, 248, 0.2)';
-      ctx.strokeStyle = '#38bdf8';
+    if (isOwned) {
+      baseColor = '#3b82f6'; // Own Plot Blue
+      label = `PLOT #${plot.id} (YOUR BASE)`;
     } else if (isOccupied) {
-      ctx.fillStyle = 'rgba(239, 68, 68, 0.15)';
-      ctx.strokeStyle = '#ef4444';
-    } else {
-      ctx.fillStyle = isHovered ? 'rgba(16, 185, 129, 0.25)' : 'rgba(16, 185, 129, 0.1)';
-      ctx.strokeStyle = isHovered ? '#34d399' : '#10b981';
+      baseColor = '#ef4444'; // Occupied Red
+      label = `USER #${plot.ownerId}`;
     }
 
-    ctx.lineWidth = isHovered ? 3 : 2;
-    ctx.beginPath();
-    ctx.roundRect(x, y, w, h, 8);
-    ctx.fill();
-    ctx.stroke();
+    if (isHovered) {
+      baseColor = isOwned ? '#60a5fa' : (isOccupied ? '#f87171' : '#34d399');
+    }
 
-    // Text Overlay
-    ctx.font = 'bold 12px Outfit';
-    ctx.textAlign = 'center';
+    // Soft Drop Shadow under Plot Platform
+    ctx.save();
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+    ctx.shadowBlur = 14;
+    ctx.shadowOffsetY = 8;
 
-    if (isOwnedByMe) {
-      ctx.fillStyle = '#38bdf8';
-      ctx.fillText(`MY BASE`, x + w / 2, y + h / 2 - 4);
-      ctx.font = '10px Inter';
-      ctx.fillStyle = '#94a3b8';
-      ctx.fillText(`Plot #${plot.id}`, x + w / 2, y + h / 2 + 12);
-    } else if (isOccupied) {
-      ctx.fillStyle = '#f87171';
-      ctx.fillText(`BASE #${plot.id}`, x + w / 2, y + h / 2 - 4);
-      ctx.font = '10px Inter';
-      ctx.fillStyle = '#94a3b8';
-      ctx.fillText(`Owner: User #${plot.ownerId}`, x + w / 2, y + h / 2 + 12);
-    } else {
-      ctx.fillStyle = '#34d399';
-      ctx.fillText(`PLOT #${plot.id}`, x + w / 2, y + h / 2 - 6);
-      ctx.font = '10px Inter';
-      ctx.fillStyle = '#a7f3d0';
-      ctx.fillText(`[CLAIM]`, x + w / 2, y + h / 2 + 12);
+    // Draw 2.5D Isometric Raised Platform Block
+    const blockHeight = isHovered ? 18 : 12;
+
+    drawSpriteOrFallback(
+      ctx,
+      `/assets/tiles/plot_${isOwned ? 'owned' : (isOccupied ? 'occupied' : 'unclaimed')}.png`,
+      sx, sy, tileW, tileH * 2,
+      () => {
+        drawIsoBlock(
+          ctx,
+          sx, sy,
+          tileW, tileH,
+          blockHeight,
+          baseColor,
+          adjustColorBrightness(baseColor, -30),
+          adjustColorBrightness(baseColor, -15),
+          isHovered ? '#ffffff' : 'rgba(0,0,0,0.3)'
+        );
+      }
+    );
+    ctx.restore();
+
+    // Plot Title Label
+    if (plot) {
+      ctx.save();
+      const textY = sy - blockHeight - 6;
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 11px Outfit';
+      ctx.textAlign = 'center';
+      ctx.shadowColor = '#000000';
+      ctx.shadowBlur = 4;
+      ctx.fillText(label, sx, textY);
+      ctx.restore();
     }
   });
+}
 
-  return plotRects;
+function adjustColorBrightness(hex, percent) {
+  if (!hex || hex[0] !== '#') return hex || '#888888';
+  let num = parseInt(hex.replace('#', ''), 16);
+  let amt = Math.round(2.55 * percent);
+  let R = (num >> 16) + amt;
+  let G = (num >> 8 & 0x00FF) + amt;
+  let B = (num & 0x0000FF) + amt;
+
+  return '#' + (
+    0x1000000 +
+    (R < 255 ? (R < 0 ? 0 : R) : 255) * 0x10000 +
+    (G < 255 ? (G < 0 ? 0 : G) : 255) * 0x100 +
+    (B < 255 ? (B < 0 ? 0 : B) : 255)
+  ).toString(16).slice(1);
 }
