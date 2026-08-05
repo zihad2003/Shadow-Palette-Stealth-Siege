@@ -1,11 +1,9 @@
 // Isometric Projection & Drawing Utilities (2:1 Diamond Projection)
 
-export function setupHiDPICanvas(canvas, ctx, cssWidth, cssHeight) {
+export function setupHiDPICanvas(canvas, ctx, cssWidth = 800, cssHeight = 600) {
   const dpr = window.devicePixelRatio || 1;
   canvas.width = cssWidth * dpr;
   canvas.height = cssHeight * dpr;
-  canvas.style.width = `${cssWidth}px`;
-  canvas.style.height = `${cssHeight}px`;
 
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.scale(dpr, dpr);

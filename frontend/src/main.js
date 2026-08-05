@@ -1,23 +1,43 @@
-import { fetchMap, claimPlot, placeBuilding, placeDefense, fetchRaidTarget, completeRaid } from './api.js';
+import { fetchMap, claimPlot, placeBuilding, placeDefense, fetchRaidTarget, completeRaid, setupPlayer } from './api.js';
 import { renderWorldMap } from './worldMapRenderer.js';
 import { renderBaseBuilder, getBuildingSize } from './baseBuilderRenderer.js';
 import { renderGrayscaleRaid } from './raidRenderer.js';
+import { renderOnboarding } from './onboardingRenderer.js';
 import { checkLighthouseDetection, getLuminanceBand } from './stealthEngine.js';
 import { setupHiDPICanvas, screenToGrid } from './isoUtils.js';
 import { COLORS } from './colors.js';
 
+function createDefaultPlots() {
+  const plots = [];
+  let id = 1;
+  for (let r = 0; r < 5; r++) {
+    for (let c = 0; c < 5; c++) {
+      plots.push({
+        id: id++,
+        xCoord: c,
+        yCoord: r,
+        ownerId: (c === 2 && r === 2) ? 12 : ((c === 1 && r === 1) ? 34 : null),
+        isOccupied: (c === 1 && r === 1) || (c === 2 && r === 2),
+      });
+    }
+  }
+  return plots;
+}
+
 // Application State
 const state = {
-  activeView: 'MAP', // 'MAP' | 'BUILDER' | 'RAID'
+  activeView: 'MAP', // 'ONBOARDING' | 'MAP' | 'BUILDER' | 'RAID'
   userId: 12,
+  characterModel: 1,
   coins: 500,
   inkEnergy: 100,
   chips: 200,
   camoColor: 'BLUE',
   activePlotId: 1,
+  onboarding: { characterModel: 1 },
 
   // World Map State
-  plots: [],
+  plots: createDefaultPlots(),
   hoveredPlotId: null,
 
   // Base Builder State
@@ -87,8 +107,8 @@ document.addEventListener('DOMContentLoaded', () => {
   tabMap.addEventListener('click', () => {
     state.activeView = 'MAP';
     setActiveTab(tabMap);
-    viewTitle.textContent = 'Shared World Map (2.5D Isometric)';
-    viewBadge.textContent = 'Click Unclaimed Plot to Claim';
+    if (viewTitle) viewTitle.textContent = 'Shared World Map (2.5D Isometric)';
+    if (viewBadge) viewBadge.textContent = 'Click Unclaimed Plot to Claim';
     btnHitWall.style.display = 'none';
     btnSubmitRaid.style.display = 'none';
     loadMapData();
@@ -97,8 +117,8 @@ document.addEventListener('DOMContentLoaded', () => {
   tabBuilder.addEventListener('click', () => {
     state.activeView = 'BUILDER';
     setActiveTab(tabBuilder);
-    viewTitle.textContent = `Base Builder — Plot #${state.activePlotId}`;
-    viewBadge.textContent = 'Click Grid Tile to Place Structure';
+    if (viewTitle) viewTitle.textContent = `Base Builder — Plot #${state.activePlotId}`;
+    if (viewBadge) viewBadge.textContent = 'Click Grid Tile to Place Structure';
     btnHitWall.style.display = 'none';
     btnSubmitRaid.style.display = 'none';
   });
@@ -106,8 +126,8 @@ document.addEventListener('DOMContentLoaded', () => {
   tabRaid.addEventListener('click', () => {
     state.activeView = 'RAID';
     setActiveTab(tabRaid);
-    viewTitle.textContent = `Stealth Raid Simulation — Target User #${inputDefenderId.value}`;
-    viewBadge.textContent = 'Grayscale Canvas — Move (1.25x Speed) & Hold Action on Wall';
+    if (viewTitle) viewTitle.textContent = `Stealth Raid Simulation — Target User #${inputDefenderId.value}`;
+    if (viewBadge) viewBadge.textContent = 'Grayscale Canvas — Move (1.25x Speed) & Hold Action on Wall';
     btnHitWall.style.display = 'inline-block';
     btnSubmitRaid.style.display = 'inline-block';
   });
@@ -321,11 +341,21 @@ document.addEventListener('DOMContentLoaded', () => {
     const rect = canvas.getBoundingClientRect();
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
+    state._lastMx = mx;
+    state._lastMy = my;
 
     if (state.activeView === 'MAP') {
-      const { x, y } = screenToGrid(mx, my, 400, 120, 100, 50);
-      const found = state.plots.find((p) => p.xCoord === x && p.yCoord === y);
-      state.hoveredPlotId = found ? found.id : null;
+      // 7×7 grid: tileW=80, tileH=40, originY=80 (must match worldMapRenderer)
+      const { x: gx, y: gy } = screenToGrid(mx, my, 400, 80, 80, 40);
+      // Only odd col/row cells are plots; convert to plot coords
+      if (gx >= 0 && gx < 7 && gy >= 0 && gy < 7 && gx % 2 === 1 && gy % 2 === 1) {
+        const px = (gx - 1) / 2;
+        const py = (gy - 1) / 2;
+        const found = state.plots.find((p) => p.xCoord === px && p.yCoord === py);
+        state.hoveredPlotId = found ? found.id : null;
+      } else {
+        state.hoveredPlotId = null;
+      }
     } else if (state.activeView === 'BUILDER') {
       const { x, y } = screenToGrid(mx, my, 400, 50, 28, 14);
       if (x >= 0 && x < 20 && y >= 0 && y < 20) {
@@ -337,7 +367,63 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   canvas.addEventListener('click', async () => {
-    if (state.activeView === 'MAP') {
+    if (state.activeView === 'ONBOARDING') {
+      const rect = canvas.getBoundingClientRect();
+      const mx = (state._lastMx || 400);
+      const my = (state._lastMy || 300);
+
+      // Check Character Cards
+      const cardW = 160;
+      const cardH = 180;
+      const startX = (600 - (cardW * 3 + 40)) / 2;
+      const cardY = 110;
+
+      [1, 2, 3].forEach((id, idx) => {
+        const cx = startX + idx * (cardW + 20);
+        if (mx >= cx && mx <= cx + cardW && my >= cardY && my <= cardY + cardH) {
+          state.characterModel = id;
+          state.onboarding.characterModel = id;
+          showToast(`Selected Character Model #${id}`, 'info');
+        }
+      });
+
+      // Check Camo Swatches
+      const colorKeys = ['WHITE', 'YELLOW', 'GREEN', 'RED', 'BLUE'];
+      const swatchSize = 40;
+      const swatchStartX = (600 - (colorKeys.length * (swatchSize + 16) - 16)) / 2;
+      const swatchY = 365;
+
+      colorKeys.forEach((key, idx) => {
+        const sx = swatchStartX + idx * (swatchSize + 16);
+        const dist = Math.hypot(mx - (sx + swatchSize / 2), my - (swatchY + swatchSize / 2));
+        if (dist <= swatchSize / 2) {
+          state.camoColor = key;
+          hudCamo.textContent = state.camoColor;
+          showToast(`Assigned Camouflage Strategy: ${key}`, 'info');
+        }
+      });
+
+      // Check Enter World Button
+      const btnW = 200;
+      const btnH = 44;
+      const btnX = (600 - btnW) / 2;
+      const btnY = 460;
+
+      if (mx >= btnX && mx <= btnX + btnW && my >= btnY && my <= btnY + btnH) {
+        try {
+          await setupPlayer(state.userId, state.characterModel, state.camoColor);
+          showToast('Operative Setup Saved to Backend!', 'success');
+        } catch (e) {
+          showToast('Player setup saved locally', 'info');
+        }
+        state.activeView = 'MAP';
+        setActiveTab(tabMap);
+        viewTitle.textContent = 'Shared World Map (2.5D Isometric)';
+        viewBadge.textContent = 'Click Unclaimed Plot to Claim';
+        loadMapData();
+      }
+
+    } else if (state.activeView === 'MAP') {
       if (!state.hoveredPlotId) return;
       const targetPlot = state.plots.find((p) => p.id === state.hoveredPlotId);
       if (!targetPlot) return;
@@ -455,7 +541,9 @@ document.addEventListener('DOMContentLoaded', () => {
 // Continuous Animation Render Loop (60FPS for LERP Gliding)
 function startRenderLoop(ctx) {
   function loop() {
-    if (state.activeView === 'MAP') {
+    if (state.activeView === 'ONBOARDING') {
+      renderOnboarding(ctx, state);
+    } else if (state.activeView === 'MAP') {
       renderWorldMap(ctx, state.plots, state.userId, state.hoveredPlotId);
     } else if (state.activeView === 'BUILDER') {
       renderBaseBuilder(ctx, state);

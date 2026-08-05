@@ -8,18 +8,19 @@
   <!-- Google Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&family=Outfit:wght@400;600;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Outfit:wght@400;600;800&display=swap" rel="stylesheet">
 
   <link rel="stylesheet" href="/src/style.css" />
 </head>
 <body>
   <div id="app">
+    <!-- ─── Floating Top Game Header HUD ─── -->
     <header class="app-header">
       <div class="logo-container">
         <span class="logo-icon">🛡️</span>
         <div>
           <h1>SHADOW PALETTE</h1>
-          <p class="subtitle">Stealth &amp; Siege Engine</p>
+          <p class="subtitle">Stealth &amp; Siege</p>
         </div>
       </div>
 
@@ -31,38 +32,36 @@
 
       <div class="hud-bar">
         <div class="hud-pill">
-          <span>User:</span> <strong id="hud-user-id">12</strong>
+          <span>User</span> <strong id="hud-user-id">#12</strong>
         </div>
         <div class="hud-pill">
-          <span>Coins:</span> <strong id="hud-coins">500</strong> 🪙
+          <span>Coins</span> <strong id="hud-coins">500</strong> 🪙
         </div>
         <div class="hud-pill">
-          <span>Ink:</span> <strong id="hud-ink">100</strong> ✒️
+          <span>Ink</span> <strong id="hud-ink">100</strong> ✒️
         </div>
         <div class="hud-pill">
-          <span>Chips:</span> <strong id="hud-chips">200</strong> 💎
+          <span>Chips</span> <strong id="hud-chips">200</strong> 💎
         </div>
         <div class="hud-pill">
-          <span>Active Plot:</span> <strong id="hud-plot">#1</strong>
+          <span>Base</span> <strong id="hud-plot">#1</strong>
         </div>
       </div>
     </header>
 
-    <main class="main-layout">
-      <section class="canvas-panel">
-        <div class="panel-header">
-          <h2 id="view-title">Shared World Map (5×5 Grid)</h2>
-          <span id="view-badge" class="badge">Click Unclaimed Plot to Claim</span>
-        </div>
-        <div class="canvas-wrapper">
-          <canvas id="gameCanvas" width="600" height="600"></canvas>
-        </div>
-      </section>
+    <!-- ─── Main Fullscreen Game Viewport ─── -->
+    <main class="game-viewport">
+      <div class="view-badge-container">
+        <span id="view-badge" class="view-badge">Click Unclaimed Plot to Claim</span>
+      </div>
 
-      <aside class="control-panel">
-        <!-- Palette Tool Card -->
-        <div class="card" id="card-palette">
-          <h3>5-Color Surface Palette</h3>
+      <canvas id="gameCanvas" width="800" height="600"></canvas>
+
+      <!-- ─── Floating CoC-Style Bottom Action Dock ─── -->
+      <div class="game-bottom-dock">
+        <!-- Palette Color Swatches -->
+        <div class="dock-card" id="card-palette">
+          <span class="dock-title">Camo Surface Palette</span>
           <div class="color-swatches">
             <button class="color-swatch active" data-color="#F1FAEE" style="background-color: #F1FAEE;" title="White (35% Max Quota)"></button>
             <button class="color-swatch" data-color="#F4C245" style="background-color: #F4C245;" title="Yellow (35% Max Quota)"></button>
@@ -72,9 +71,9 @@
           </div>
         </div>
 
-        <!-- Placement Menu Card -->
-        <div class="card" id="card-placement">
-          <h3>Structure Placement Menu</h3>
+        <!-- Structure Placement Toolbar -->
+        <div class="dock-card" id="card-placement">
+          <span class="dock-title">Build &amp; Defense Dock</span>
           <div class="tool-grid">
             <button class="tool-btn active" data-tool="CRAFT_HOUSE">
               <span>🏠 Craft House</span>
@@ -89,38 +88,43 @@
               <small>3×3 (9 Tiles)</small>
             </button>
             <button class="tool-btn" data-tool="COIN_GENERATOR">
-              <span>💰 Coin Generator</span>
+              <span>💰 Mint Generator</span>
               <small>4×3 (12 Tiles)</small>
             </button>
             <button class="tool-btn" data-tool="LIGHTHOUSE">
               <span>💡 Lighthouse</span>
-              <small>Defense (1 Max)</small>
+              <small>Spotlight Defense</small>
             </button>
             <button class="tool-btn" data-tool="PATROL_ROBOT">
               <span>🤖 PatrolRobot</span>
-              <small>Defense (3 Raids)</small>
+              <small>Guard Robot</small>
             </button>
           </div>
         </div>
+      </div>
 
+      <!-- ─── Floating Collapsible Side Widgets ─── -->
+      <aside class="floating-widget">
         <!-- Stealth Raid Card -->
-        <div class="card" id="card-raid">
-          <h3>Raid Control Center</h3>
+        <div class="widget-card" id="card-raid">
+          <h3>⚔️ Stealth Raid Launcher</h3>
           <div style="display: flex; flex-direction: column; gap: 8px;">
-            <label style="font-size: 0.8rem; color: var(--text-muted);">Defender User ID:</label>
-            <input type="number" id="input-defender-id" value="34" min="1" style="padding: 6px; border-radius: 6px; background: #000; border: 1px solid var(--border-color); color: #fff;" />
-            <button id="btn-start-raid" class="btn" style="background: var(--accent-rose); color: #fff; border: none; padding: 10px; border-radius: 6px; font-weight: bold; cursor: pointer;">⚔️ Launch Raid</button>
-            <button id="btn-hit-wall" class="btn" style="background: var(--bg-card); color: var(--accent-gold); border: 1px solid var(--accent-gold); padding: 8px; border-radius: 6px; font-weight: bold; cursor: pointer; display: none;">🔨 Hit Gate Wall (Spacebar)</button>
-            <button id="btn-submit-raid" class="btn" style="background: var(--accent-emerald); color: #000; border: none; padding: 10px; border-radius: 6px; font-weight: bold; cursor: pointer; display: none;">✅ Extract &amp; Complete Raid</button>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <label style="font-size: 0.75rem; color: var(--text-muted);">Target User ID:</label>
+              <input type="number" id="input-defender-id" value="34" min="1" style="width: 70px; padding: 4px 8px; border-radius: 8px; background: rgba(0,0,0,0.5); border: 1px solid var(--border-color); color: #fff; text-align: center; font-weight: bold;" />
+            </div>
+            <button id="btn-start-raid" class="btn-game" style="background: linear-gradient(135deg, #f43f5e 0%, #be123c 100%); color: #fff; box-shadow: 0 4px 12px rgba(244, 63, 94, 0.4);">⚔️ Launch Stealth Raid</button>
+            <button id="btn-hit-wall" class="btn-game" style="background: rgba(251, 191, 36, 0.2); color: var(--accent-gold); border: 1px solid var(--accent-gold); display: none;">🔨 Hit Gate Wall (Spacebar)</button>
+            <button id="btn-submit-raid" class="btn-game" style="background: linear-gradient(135deg, #10b981 0%, #047857 100%); color: #fff; display: none;">✅ Extract &amp; Complete Raid</button>
           </div>
         </div>
 
         <!-- Player Config Card -->
-        <div class="card">
-          <h3>Player Configuration</h3>
-          <div style="display: flex; gap: 8px;">
-            <input type="number" id="input-user-id" value="12" min="1" style="width: 80px; padding: 6px; border-radius: 6px; background: #000; border: 1px solid var(--border-color); color: #fff;" />
-            <button id="btn-set-user" class="btn btn-primary" style="flex: 1;">Switch User ID</button>
+        <div class="widget-card">
+          <h3>👤 Operative Profile</h3>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <input type="number" id="input-user-id" value="12" min="1" style="width: 70px; padding: 4px 8px; border-radius: 8px; background: rgba(0,0,0,0.5); border: 1px solid var(--border-color); color: #fff; text-align: center; font-weight: bold;" />
+            <button id="btn-set-user" class="btn-game" style="flex: 1; background: rgba(255, 255, 255, 0.08); color: var(--text-primary); border: 1px solid var(--border-color);">Switch ID</button>
           </div>
         </div>
       </aside>
