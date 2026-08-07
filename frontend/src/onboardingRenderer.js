@@ -4,8 +4,9 @@ import { COLORS } from './colors.js';
 
 export function renderOnboarding(ctx, state) {
   const canvas = ctx.canvas;
-  const width = canvas.width;
-  const height = canvas.height;
+  const dpr = window.devicePixelRatio || 1;
+  const width = canvas.clientWidth || (canvas.width / dpr);
+  const height = canvas.clientHeight || (canvas.height / dpr);
 
   // Background
   const bgGradient = ctx.createLinearGradient(0, 0, width, height);

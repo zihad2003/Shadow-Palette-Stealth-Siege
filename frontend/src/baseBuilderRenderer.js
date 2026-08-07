@@ -49,18 +49,25 @@ const COLOR_TO_FLOOR = {
   '#264653': '/assets/tiles/floor_blue.png',
 };
 
+export function getBaseBuilderOrigin(width, height, zoomScale = 1.0) {
+  const baseTileW = Math.max(48, Math.min(95, Math.floor(width / 21.5)));
+  const tileW = Math.floor(baseTileW * zoomScale);
+  const tileH = Math.floor(tileW / 2);
+  const originX = width / 2;
+  const islandHeight = 20 * tileH;
+  const originY = Math.max(60, Math.floor((height - islandHeight) / 2.3));
+  return { originX, originY, tileW, tileH };
+}
+
 // ─── Main Render Function ────────────────────────────────────────────
 
 export function renderBaseBuilder(ctx, state) {
   const canvas = ctx.canvas;
-  const width = canvas.width;
-  const height = canvas.height;
+  const dpr = window.devicePixelRatio || 1;
+  const width = canvas.clientWidth || (canvas.width / dpr);
+  const height = canvas.clientHeight || (canvas.height / dpr);
 
-  // Isometric Grid Config
-  const tileW = 28;
-  const tileH = 14;
-  const originX = width / 2;
-  const originY = 50;
+  const { originX, originY, tileW, tileH } = getBaseBuilderOrigin(width, height, state.zoomScale || 1.0);
 
   // 1. Clear & Draw Rich Terrain Atmospheric Background
   const bgGradient = ctx.createLinearGradient(0, 0, width, height);
