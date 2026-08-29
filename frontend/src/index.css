@@ -1,0 +1,117 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ═══════════════════════════════════════════════════════════════════════
+   SHADOW PALETTE: STEALTH & SIEGE — CORE GAME UI DESIGN SYSTEM
+   ═══════════════════════════════════════════════════════════════════════ */
+
+:root {
+  --bg-primary: #050709;
+  --bg-secondary: #0b111c;
+  --accent-gold: #fbbf24;
+  --accent-cyan: #38bdf8;
+  --accent-emerald: #10b981;
+  --accent-rose: #f43f5e;
+  --font-heading: 'Outfit', sans-serif;
+  --font-body: 'Inter', sans-serif;
+}
+
+html, body, #root {
+  width: 100vw;
+  height: 100vh;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background-color: var(--bg-primary);
+  color: #f1f5f9;
+  font-family: var(--font-body);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ─── Premium Glassmorphism Utility Classes ────────────────────────── */
+.glass-panel {
+  background: rgba(11, 18, 33, 0.55);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45), 0 2px 8px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.glass-panel-deep {
+  background: rgba(7, 12, 24, 0.75);
+  backdrop-filter: blur(28px);
+  -webkit-backdrop-filter: blur(28px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.65), 0 4px 16px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.glass-panel:hover, .glass-panel-deep:hover {
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+/* ─── Animated Plot Polygons on Island ──────────────────────────────── */
+.plot-polygon {
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  transform-origin: center;
+}
+
+.plot-group:hover .plot-polygon {
+  filter: drop-shadow(0 0 16px rgba(56, 189, 248, 0.8));
+  stroke: #ffffff;
+  stroke-width: 3;
+}
+
+.plot-group.selected .plot-polygon {
+  filter: drop-shadow(0 0 22px rgba(251, 191, 36, 0.95));
+  stroke: #fbbf24;
+  stroke-width: 3.5;
+}
+
+/* ─── Shimmer & Glow Keyframes ──────────────────────────────────────── */
+@keyframes glassShimmer {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
+@keyframes radarRotate {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(-30px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.25s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+.animate-slideIn {
+  animation: slideIn 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+.animate-radar-sweep {
+  animation: radarRotate 1.2s linear infinite;
+}
+
+/* ─── Custom Scrollbar ─────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(56, 189, 248, 0.3);
+  border-radius: 3px;
+}
