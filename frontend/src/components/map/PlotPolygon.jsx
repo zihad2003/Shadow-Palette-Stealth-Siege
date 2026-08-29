@@ -11,23 +11,23 @@ export default function PlotPolygon({
 }) {
   const { id, points, centerX, centerY, status, ownerId, buildingType } = plot;
 
-  // Determine appearance based on ownership and hover states
-  let fillColor = 'rgba(16, 185, 129, 0.30)'; // Emerald for Unclaimed
-  let strokeColor = 'rgba(52, 211, 153, 0.6)';
-  let strokeWidth = 1.5;
+  // Determine styling based on ownership & hover state
+  let fillColor = 'rgba(16, 185, 129, 0.18)'; // Soft Emerald for Unclaimed
+  let strokeColor = 'rgba(251, 191, 36, 0.75)'; // Golden boundary light
+  let strokeWidth = 2;
   let strokeDash = '4,4';
-  let badgeBg = 'rgba(16, 185, 129, 0.85)';
+  let badgeBg = 'rgba(16, 185, 129, 0.9)';
   let labelText = `#${id}`;
 
   if (status === 'CLAIMED_SELF') {
-    fillColor = 'rgba(59, 130, 246, 0.45)';
+    fillColor = 'rgba(59, 130, 246, 0.38)';
     strokeColor = '#60a5fa';
     strokeWidth = 2.5;
     strokeDash = 'none';
     badgeBg = 'rgba(37, 99, 235, 0.95)';
     labelText = `#${id} BASE`;
   } else if (status === 'CLAIMED_ENEMY') {
-    fillColor = 'rgba(239, 68, 68, 0.40)';
+    fillColor = 'rgba(239, 68, 68, 0.32)';
     strokeColor = '#f87171';
     strokeWidth = 2;
     strokeDash = 'none';
@@ -37,17 +37,17 @@ export default function PlotPolygon({
 
   if (isHovered) {
     fillColor = status === 'CLAIMED_SELF'
-      ? 'rgba(96, 165, 250, 0.65)'
-      : (status === 'CLAIMED_ENEMY' ? 'rgba(248, 113, 113, 0.65)' : 'rgba(52, 211, 153, 0.60)');
+      ? 'rgba(96, 165, 250, 0.55)'
+      : (status === 'CLAIMED_ENEMY' ? 'rgba(248, 113, 113, 0.55)' : 'rgba(56, 189, 248, 0.50)');
     strokeColor = '#ffffff';
-    strokeWidth = 3;
+    strokeWidth = 3.5;
     strokeDash = 'none';
   }
 
   if (isSelected) {
-    fillColor = 'rgba(251, 191, 36, 0.55)';
+    fillColor = 'rgba(251, 191, 36, 0.50)';
     strokeColor = '#fbbf24';
-    strokeWidth = 3.5;
+    strokeWidth = 4;
     strokeDash = 'none';
   }
 
@@ -61,7 +61,7 @@ export default function PlotPolygon({
       onMouseLeave={onLeave}
       onClick={() => onClick(plot)}
     >
-      {/* Sector Plot Polygon */}
+      {/* Interactive Sector Plot Polygon */}
       <polygon
         points={points}
         fill={fillColor}
@@ -73,16 +73,16 @@ export default function PlotPolygon({
 
       {/* Floating Center Badge Anchor */}
       <g transform={`translate(${centerX}, ${centerY})`} className="pointer-events-none">
-        {/* Soft shadow glow behind badge */}
-        <circle r="14" fill="rgba(0,0,0,0.6)" filter="blur(2px)" />
+        {/* Soft shadow blur behind badge */}
+        <circle r="15" fill="rgba(0,0,0,0.65)" filter="blur(2px)" />
 
         {/* Badge Pill */}
         <rect
           x="-24"
-          y="-10"
+          y="-11"
           width="48"
-          height="20"
-          rx="10"
+          height="22"
+          rx="11"
           fill={badgeBg}
           stroke="rgba(255,255,255,0.4)"
           strokeWidth="1"
@@ -95,7 +95,7 @@ export default function PlotPolygon({
           y="4"
           textAnchor="middle"
           fill="#ffffff"
-          fontSize="9"
+          fontSize="9.5"
           fontWeight="bold"
           fontFamily="Outfit, sans-serif"
           className="select-none tracking-wider"
@@ -103,14 +103,14 @@ export default function PlotPolygon({
           {labelText}
         </text>
 
-        {/* Status Indicator Icon on Top of Badge */}
+        {/* Status Indicator Icon */}
         {status === 'CLAIMED_SELF' && (
-          <text x="0" y="-12" textAnchor="middle" fontSize="12" className="animate-bounce">
+          <text x="0" y="-14" textAnchor="middle" fontSize="13" className="animate-bounce">
             👑
           </text>
         )}
         {status === 'CLAIMED_ENEMY' && (
-          <text x="0" y="-12" textAnchor="middle" fontSize="11">
+          <text x="0" y="-14" textAnchor="middle" fontSize="12">
             🏰
           </text>
         )}

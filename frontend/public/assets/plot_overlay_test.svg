@@ -1,0 +1,42 @@
+<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1024 819' width='1024' height='819'>
+  <image href='e:/A uiu/9th trimester/AOOP/Shadow Palette/frontend/public/assets/island_map.png' width='1024' height='819'/>  <polygon points='450,230 558,228 535,372 470,372' fill='rgba(16, 185, 129, 0.4)' stroke='#fbbf24' stroke-width='2' stroke-dasharray='4,4'/>
+  <circle cx='504' cy='300' r='14' fill='rgba(0,0,0,0.8)' stroke='#ffffff' stroke-width='1'/>
+  <text x='504' y='304' fill='#ffffff' font-size='10' font-family='sans-serif' font-weight='bold' text-anchor='middle'>#1</text>  <polygon points='578,252 690,305 605,410 540,378' fill='rgba(16, 185, 129, 0.4)' stroke='#fbbf24' stroke-width='2' stroke-dasharray='4,4'/>
+  <circle cx='605' cy='335' r='14' fill='rgba(0,0,0,0.8)' stroke='#ffffff' stroke-width='1'/>
+  <text x='605' y='339' fill='#ffffff' font-size='10' font-family='sans-serif' font-weight='bold' text-anchor='middle'>#2</text>  <polygon points='698,328 780,410 655,475 605,420' fill='rgba(16, 185, 129, 0.4)' stroke='#fbbf24' stroke-width='2' stroke-dasharray='4,4'/>
+  <circle cx='685' cy='408' r='14' fill='rgba(0,0,0,0.8)' stroke='#ffffff' stroke-width='1'/>
+  <text x='685' y='412' fill='#ffffff' font-size='10' font-family='sans-serif' font-weight='bold' text-anchor='middle'>#3</text>  <polygon points='650,488 740,562 610,610 550,520' fill='rgba(16, 185, 129, 0.4)' stroke='#fbbf24' stroke-width='2' stroke-dasharray='4,4'/>
+  <circle cx='638' cy='545' r='14' fill='rgba(0,0,0,0.8)' stroke='#ffffff' stroke-width='1'/>
+  <text x='638' y='549' fill='#ffffff' font-size='10' font-family='sans-serif' font-weight='bold' text-anchor='middle'>#4</text>  <polygon points='468,528 542,525 570,665 440,668' fill='rgba(16, 185, 129, 0.4)' stroke='#fbbf24' stroke-width='2' stroke-dasharray='4,4'/>
+  <circle cx='505' cy='595' r='14' fill='rgba(0,0,0,0.8)' stroke='#ffffff' stroke-width='1'/>
+  <text x='505' y='599' fill='#ffffff' font-size='10' font-family='sans-serif' font-weight='bold' text-anchor='middle'>#5</text>  <polygon points='380,488 445,520 385,618 290,565' fill='rgba(16, 185, 129, 0.4)' stroke='#fbbf24' stroke-width='2' stroke-dasharray='4,4'/>
+  <circle cx='375' cy='548' r='14' fill='rgba(0,0,0,0.8)' stroke='#ffffff' stroke-width='1'/>
+  <text x='375' y='552' fill='#ffffff' font-size='10' font-family='sans-serif' font-weight='bold' text-anchor='middle'>#6</text>  <polygon points='335,395 398,422 388,485 245,465' fill='rgba(16, 185, 129, 0.4)' stroke='#fbbf24' stroke-width='2' stroke-dasharray='4,4'/>
+  <circle cx='342' cy='442' r='14' fill='rgba(0,0,0,0.8)' stroke='#ffffff' stroke-width='1'/>
+  <text x='342' y='446' fill='#ffffff' font-size='10' font-family='sans-serif' font-weight='bold' text-anchor='middle'>#7</text>  <polygon points='345,295 440,250 460,375 390,405' fill='rgba(16, 185, 129, 0.4)' stroke='#fbbf24' stroke-width='2' stroke-dasharray='4,4'/>
+  <circle cx='408' cy='332' r='14' fill='rgba(0,0,0,0.8)' stroke='#ffffff' stroke-width='1'/>
+  <text x='408' y='336' fill='#ffffff' font-size='10' font-family='sans-serif' font-weight='bold' text-anchor='middle'>#8</text>  <polygon points='440,90 568,90 580,210 435,210' fill='rgba(16, 185, 129, 0.4)' stroke='#fbbf24' stroke-width='2' stroke-dasharray='4,4'/>
+  <circle cx='504' cy='150' r='14' fill='rgba(0,0,0,0.8)' stroke='#ffffff' stroke-width='1'/>
+  <text x='504' y='154' fill='#ffffff' font-size='10' font-family='sans-serif' font-weight='bold' text-anchor='middle'>#9</text>  <polygon points='615,125 745,188 680,285 580,235' fill='rgba(16, 185, 129, 0.4)' stroke='#fbbf24' stroke-width='2' stroke-dasharray='4,4'/>
+  <circle cx='655' cy='208' r='14' fill='rgba(0,0,0,0.8)' stroke='#ffffff' stroke-width='1'/>
+  <text x='655' y='212' fill='#ffffff' font-size='10' font-family='sans-serif' font-weight='bold' text-anchor='middle'>#10</text>  <polygon points='758,205 870,290 770,390 692,310' fill='rgba(16, 185, 129, 0.4)' stroke='#fbbf24' stroke-width='2' stroke-dasharray='4,4'/>
+  <circle cx='772' cy='300' r='14' fill='rgba(0,0,0,0.8)' stroke='#ffffff' stroke-width='1'/>
+  <text x='772' y='304' fill='#ffffff' font-size='10' font-family='sans-serif' font-weight='bold' text-anchor='middle'>#11</text>  <polygon points='785,420 890,510 740,580 670,490' fill='rgba(16, 185, 129, 0.4)' stroke='#fbbf24' stroke-width='2' stroke-dasharray='4,4'/>
+  <circle cx='772' cy='500' r='14' fill='rgba(0,0,0,0.8)' stroke='#ffffff' stroke-width='1'/>
+  <text x='772' y='504' fill='#ffffff' font-size='10' font-family='sans-serif' font-weight='bold' text-anchor='middle'>#12</text>  <polygon points='445,680 575,680 540,780 470,780' fill='rgba(16, 185, 129, 0.4)' stroke='#fbbf24' stroke-width='2' stroke-dasharray='4,4'/>
+  <circle cx='508' cy='730' r='14' fill='rgba(0,0,0,0.8)' stroke='#ffffff' stroke-width='1'/>
+  <text x='508' y='734' fill='#ffffff' font-size='10' font-family='sans-serif' font-weight='bold' text-anchor='middle'>#13</text>  <polygon points='270,575 375,630 330,730 180,665' fill='rgba(16, 185, 129, 0.4)' stroke='#fbbf24' stroke-width='2' stroke-dasharray='4,4'/>
+  <circle cx='290' cy='650' r='14' fill='rgba(0,0,0,0.8)' stroke='#ffffff' stroke-width='1'/>
+  <text x='290' y='654' fill='#ffffff' font-size='10' font-family='sans-serif' font-weight='bold' text-anchor='middle'>#14</text>  <polygon points='140,430 235,468 280,560 120,530' fill='rgba(16, 185, 129, 0.4)' stroke='#fbbf24' stroke-width='2' stroke-dasharray='4,4'/>
+  <circle cx='195' cy='495' r='14' fill='rgba(0,0,0,0.8)' stroke='#ffffff' stroke-width='1'/>
+  <text x='195' y='499' fill='#ffffff' font-size='10' font-family='sans-serif' font-weight='bold' text-anchor='middle'>#15</text>  <polygon points='185,268 325,285 320,380 150,350' fill='rgba(16, 185, 129, 0.4)' stroke='#fbbf24' stroke-width='2' stroke-dasharray='4,4'/>
+  <circle cx='245' cy='320' r='14' fill='rgba(0,0,0,0.8)' stroke='#ffffff' stroke-width='1'/>
+  <text x='245' y='324' fill='#ffffff' font-size='10' font-family='sans-serif' font-weight='bold' text-anchor='middle'>#16</text>  <polygon points='765,115 885,170 855,255 745,195' fill='rgba(16, 185, 129, 0.4)' stroke='#fbbf24' stroke-width='2' stroke-dasharray='4,4'/>
+  <circle cx='812' cy='185' r='14' fill='rgba(0,0,0,0.8)' stroke='#ffffff' stroke-width='1'/>
+  <text x='812' y='189' fill='#ffffff' font-size='10' font-family='sans-serif' font-weight='bold' text-anchor='middle'>#17</text>  <polygon points='850,305 940,380 885,465 795,400' fill='rgba(16, 185, 129, 0.4)' stroke='#fbbf24' stroke-width='2' stroke-dasharray='4,4'/>
+  <circle cx='868' cy='388' r='14' fill='rgba(0,0,0,0.8)' stroke='#ffffff' stroke-width='1'/>
+  <text x='868' y='392' fill='#ffffff' font-size='10' font-family='sans-serif' font-weight='bold' text-anchor='middle'>#18</text>  <polygon points='145,545 255,580 230,685 85,630' fill='rgba(16, 185, 129, 0.4)' stroke='#fbbf24' stroke-width='2' stroke-dasharray='4,4'/>
+  <circle cx='180' cy='610' r='14' fill='rgba(0,0,0,0.8)' stroke='#ffffff' stroke-width='1'/>
+  <text x='180' y='614' fill='#ffffff' font-size='10' font-family='sans-serif' font-weight='bold' text-anchor='middle'>#19</text>  <polygon points='85,215 220,175 255,255 120,295' fill='rgba(16, 185, 129, 0.4)' stroke='#fbbf24' stroke-width='2' stroke-dasharray='4,4'/>
+  <circle cx='170' cy='235' r='14' fill='rgba(0,0,0,0.8)' stroke='#ffffff' stroke-width='1'/>
+  <text x='170' y='239' fill='#ffffff' font-size='10' font-family='sans-serif' font-weight='bold' text-anchor='middle'>#20</text></svg>

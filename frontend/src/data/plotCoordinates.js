@@ -1,86 +1,252 @@
-// High-Precision Plot Coordinate Map for the 2.5D Isometric Island (1024 x 819 ViewBox)
-// Mapped to the 8 radial stone spoke avenues and the inner/outer lawn sectors.
+// High-Fidelity 360-Degree Plot Coordinate Map for 2.5D Isometric Island (1024 x 819 ViewBox)
+// Exactly mapped to all 20 grassy lawn sectors (8 Inner + 8 Outer + 4 Corner Cliffs).
 
-const cx = 512;
-const cy = 445; // Center stone circle plaza
+export const PLOT_COORDINATES = [
+  // ─── INNER 8 SECTOR PLOTS (Encircling Center Stone Plaza) ─────────────
+  {
+    id: 1,
+    name: 'North Citadel (Plot #1)',
+    ring: 'INNER',
+    centerX: 504,
+    centerY: 300,
+    points: '450,230 558,228 535,372 470,372',
+    status: 'CLAIMED_SELF',
+    ownerId: 12,
+    buildingType: 'CRAFT_HOUSE',
+    level: 1,
+  },
+  {
+    id: 2,
+    name: 'North-East Sector (Plot #2)',
+    ring: 'INNER',
+    centerX: 605,
+    centerY: 335,
+    points: '578,252 690,305 605,410 540,378',
+    status: 'UNCLAIMED',
+    ownerId: null,
+    buildingType: null,
+    level: 0,
+  },
+  {
+    id: 3,
+    name: 'East Bastion (Plot #3)',
+    ring: 'INNER',
+    centerX: 685,
+    centerY: 408,
+    points: '698,328 780,410 655,475 605,420',
+    status: 'CLAIMED_ENEMY',
+    ownerId: 34,
+    buildingType: 'INK_HOUSE',
+    level: 2,
+  },
+  {
+    id: 4,
+    name: 'South-East Sector (Plot #4)',
+    ring: 'INNER',
+    centerX: 638,
+    centerY: 545,
+    points: '650,488 740,562 610,610 550,520',
+    status: 'UNCLAIMED',
+    ownerId: null,
+    buildingType: null,
+    level: 0,
+  },
+  {
+    id: 5,
+    name: 'South Stronghold (Plot #5)',
+    ring: 'INNER',
+    centerX: 505,
+    centerY: 595,
+    points: '468,528 542,525 570,665 440,668',
+    status: 'UNCLAIMED',
+    ownerId: null,
+    buildingType: null,
+    level: 0,
+  },
+  {
+    id: 6,
+    name: 'South-West Sector (Plot #6)',
+    ring: 'INNER',
+    centerX: 375,
+    centerY: 548,
+    points: '380,488 445,520 385,618 290,565',
+    status: 'CLAIMED_ENEMY',
+    ownerId: 77,
+    buildingType: 'SLEEP_HOUSE',
+    level: 1,
+  },
+  {
+    id: 7,
+    name: 'West Sanctuary (Plot #7)',
+    ring: 'INNER',
+    centerX: 342,
+    centerY: 442,
+    points: '335,395 398,422 388,485 245,465',
+    status: 'UNCLAIMED',
+    ownerId: null,
+    buildingType: null,
+    level: 0,
+  },
+  {
+    id: 8,
+    name: 'North-West Sector (Plot #8)',
+    ring: 'INNER',
+    centerX: 408,
+    centerY: 332,
+    points: '345,295 440,250 460,375 390,405',
+    status: 'UNCLAIMED',
+    ownerId: null,
+    buildingType: null,
+    level: 0,
+  },
 
-// Helper to calculate perspective-compressed radial points
-function getRadialPoint(angleDeg, radius, yStretch = 0.70) {
-  const rad = (angleDeg * Math.PI) / 180;
-  // Isometric perspective factor (slight tilt down)
-  const perspective = yStretch + Math.sin(rad) * 0.08;
-  const x = Math.round(cx + Math.cos(rad) * radius);
-  const y = Math.round(cy + Math.sin(rad) * radius * perspective);
-  return { x, y };
-}
+  // ─── OUTER 8 SECTOR PLOTS (Outer Concentric Ring) ─────────────────────
+  {
+    id: 9,
+    name: 'Northern Terrace (Plot #9)',
+    ring: 'OUTER',
+    centerX: 504,
+    centerY: 150,
+    points: '440,90 568,90 580,210 435,210',
+    status: 'UNCLAIMED',
+    ownerId: null,
+    buildingType: null,
+    level: 0,
+  },
+  {
+    id: 10,
+    name: 'North-East Terrace (Plot #10)',
+    ring: 'OUTER',
+    centerX: 655,
+    centerY: 208,
+    points: '615,125 745,188 680,285 580,235',
+    status: 'UNCLAIMED',
+    ownerId: null,
+    buildingType: null,
+    level: 0,
+  },
+  {
+    id: 11,
+    name: 'Eastern Overlook (Plot #11)',
+    ring: 'OUTER',
+    centerX: 772,
+    centerY: 300,
+    points: '758,205 870,290 770,390 692,310',
+    status: 'CLAIMED_ENEMY',
+    ownerId: 55,
+    buildingType: 'COIN_GENERATOR',
+    level: 3,
+  },
+  {
+    id: 12,
+    name: 'South-East Terrace (Plot #12)',
+    ring: 'OUTER',
+    centerX: 772,
+    centerY: 500,
+    points: '785,420 890,510 740,580 670,490',
+    status: 'UNCLAIMED',
+    ownerId: null,
+    buildingType: null,
+    level: 0,
+  },
+  {
+    id: 13,
+    name: 'Southern Cliffs (Plot #13)',
+    ring: 'OUTER',
+    centerX: 508,
+    centerY: 730,
+    points: '445,680 575,680 540,780 470,780',
+    status: 'UNCLAIMED',
+    ownerId: null,
+    buildingType: null,
+    level: 0,
+  },
+  {
+    id: 14,
+    name: 'South-West Terrace (Plot #14)',
+    ring: 'OUTER',
+    centerX: 290,
+    centerY: 650,
+    points: '270,575 375,630 330,730 180,665',
+    status: 'CLAIMED_ENEMY',
+    ownerId: 89,
+    buildingType: 'INK_HOUSE',
+    level: 2,
+  },
+  {
+    id: 15,
+    name: 'Western Terrace (Plot #15)',
+    ring: 'OUTER',
+    centerX: 195,
+    centerY: 495,
+    points: '140,430 235,468 280,560 120,530',
+    status: 'UNCLAIMED',
+    ownerId: null,
+    buildingType: null,
+    level: 0,
+  },
+  {
+    id: 16,
+    name: 'North-West Terrace (Plot #16)',
+    ring: 'OUTER',
+    centerX: 245,
+    centerY: 320,
+    points: '185,268 325,285 320,380 150,350',
+    status: 'UNCLAIMED',
+    ownerId: null,
+    buildingType: null,
+    level: 0,
+  },
 
-// 8 Radial Sectors:
-// Sector 0: Top (North) ~ -90° (270°)
-// Sector 1: Top-Right (NE) ~ -45° (315°)
-// Sector 2: Right (East) ~ 0°
-// Sector 3: Bottom-Right (SE) ~ 45°
-// Sector 4: Bottom (South) ~ 90°
-// Sector 5: Bottom-Left (SW) ~ 135°
-// Sector 6: Left (West) ~ 180°
-// Sector 7: Top-Left (NW) ~ 225°
-
-const sectorAngles = [
-  { start: 275, end: 310, name: 'North' },
-  { start: 320, end: 355, name: 'North-East' },
-  { start: 5,   end: 40,  name: 'East' },
-  { start: 50,  end: 85,  name: 'South-East' },
-  { start: 95,  end: 130, name: 'South' },
-  { start: 140, end: 175, name: 'South-West' },
-  { start: 185, end: 220, name: 'West' },
-  { start: 230, end: 265, name: 'North-West' },
+  // ─── 4 CORNER CLIFF PLOTS ─────────────────────────────────────────────
+  {
+    id: 17,
+    name: 'Sunlit Peak (Plot #17)',
+    ring: 'CORNER',
+    centerX: 812,
+    centerY: 185,
+    points: '765,115 885,170 855,255 745,195',
+    status: 'UNCLAIMED',
+    ownerId: null,
+    buildingType: null,
+    level: 0,
+  },
+  {
+    id: 18,
+    name: 'Amber Shore (Plot #18)',
+    ring: 'CORNER',
+    centerX: 868,
+    centerY: 388,
+    points: '850,305 940,380 885,465 795,400',
+    status: 'CLAIMED_ENEMY',
+    ownerId: 99,
+    buildingType: 'CRAFT_HOUSE',
+    level: 1,
+  },
+  {
+    id: 19,
+    name: 'Misty Cove (Plot #19)',
+    ring: 'CORNER',
+    centerX: 180,
+    centerY: 610,
+    points: '145,545 255,580 230,685 85,630',
+    status: 'UNCLAIMED',
+    ownerId: null,
+    buildingType: null,
+    level: 0,
+  },
+  {
+    id: 20,
+    name: 'Emerald Ridge (Plot #20)',
+    ring: 'CORNER',
+    centerX: 170,
+    centerY: 235,
+    points: '85,215 220,175 255,255 120,295',
+    status: 'UNCLAIMED',
+    ownerId: null,
+    buildingType: null,
+    level: 0,
+  },
 ];
 
-const innerPlots = sectorAngles.map((sec, idx) => {
-  const rIn = 95;
-  const rOut = 215;
-  const p1 = getRadialPoint(sec.start, rIn);
-  const p2 = getRadialPoint(sec.start, rOut);
-  const p3 = getRadialPoint(sec.end, rOut);
-  const p4 = getRadialPoint(sec.end, rIn);
-  const midAngle = (sec.start + sec.end) / 2;
-  const center = getRadialPoint(midAngle, (rIn + rOut) / 2);
-
-  return {
-    id: idx + 1,
-    ring: 'INNER',
-    name: `Sector Plot #${idx + 1} (${sec.name})`,
-    centerX: center.x,
-    centerY: center.y,
-    points: `${p1.x},${p1.y} ${p2.x},${p2.y} ${p3.x},${p3.y} ${p4.x},${p4.y}`,
-    status: idx === 0 ? 'CLAIMED_SELF' : (idx === 2 || idx === 5 ? 'CLAIMED_ENEMY' : 'UNCLAIMED'),
-    ownerId: idx === 0 ? 12 : (idx === 2 ? 34 : (idx === 5 ? 77 : null)),
-    buildingType: idx === 0 ? 'CRAFT_HOUSE' : (idx === 2 ? 'INK_HOUSE' : null),
-  };
-});
-
-const outerPlots = sectorAngles.map((sec, idx) => {
-  const rIn = 235;
-  const rOut = 375;
-  const p1 = getRadialPoint(sec.start - 2, rIn);
-  const p2 = getRadialPoint(sec.start - 2, rOut);
-  const p3 = getRadialPoint(sec.end + 2, rOut);
-  const p4 = getRadialPoint(sec.end + 2, rIn);
-  const midAngle = (sec.start + sec.end) / 2;
-  const center = getRadialPoint(midAngle, (rIn + rOut) / 2);
-
-  const plotId = idx + 9;
-  return {
-    id: plotId,
-    ring: 'OUTER',
-    name: `Outer Fortress #${plotId} (${sec.name})`,
-    centerX: center.x,
-    centerY: center.y,
-    points: `${p1.x},${p1.y} ${p2.x},${p2.y} ${p3.x},${p3.y} ${p4.x},${p4.y}`,
-    status: plotId === 11 ? 'CLAIMED_ENEMY' : (plotId === 14 ? 'CLAIMED_ENEMY' : 'UNCLAIMED'),
-    ownerId: plotId === 11 ? 55 : (plotId === 14 ? 89 : null),
-    buildingType: plotId === 11 ? 'COIN_GENERATOR' : null,
-  };
-});
-
-export const PLOT_COORDINATES = [...innerPlots, ...outerPlots];
 export const MAP_DIMENSIONS = { width: 1024, height: 819 };
