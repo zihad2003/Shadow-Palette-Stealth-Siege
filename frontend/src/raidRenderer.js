@@ -135,7 +135,7 @@ export function renderGrayscaleRaid(ctx, raidState, zoomScale = 1.0) {
   // === GRAYSCALE FILTER START ===
   // Everything drawn between here and FILTER END is the defender's base in grayscale
   ctx.save();
-  ctx.filter = 'grayscale(85%) brightness(0.8)';
+  ctx.filter = 'grayscale(100%) contrast(1.05) brightness(0.92)';
 
   // 2. Render Grayscale 2.5D Isometric Ground Tiles
   for (let r = 0; r < GRID_SIZE; r++) {
@@ -286,12 +286,7 @@ export function renderGrayscaleRaid(ctx, raidState, zoomScale = 1.0) {
     ctx.restore();
   }
 
-  // === GRAYSCALE FILTER END ===
-  ctx.restore();
-
-  // Everything below is drawn WITHOUT grayscale (player, robot, HUD)
-
-  // 6. Render Patrol Robot
+  // 6. Render Patrol Robot (still inside grayscale world)
   const { x: rsx, y: rsy } = gridToScreen(
     currentRobotRenderPos.x, currentRobotRenderPos.y,
     originX, originY, tileW, tileH
@@ -386,7 +381,10 @@ export function renderGrayscaleRaid(ctx, raidState, zoomScale = 1.0) {
   ctx.textAlign = 'center';
   ctx.shadowColor = '#000000';
   ctx.shadowBlur = 4;
-  ctx.fillText('🥷 YOU (1.25x Speed)', psx, psy - 16);
+  ctx.fillText('YOU (1.25x Speed)', psx, psy - 16);
+
+  // === GRAYSCALE FILTER END — HUD stays colored ===
+  ctx.restore();
 
   // 8. Alarm Status HUD Overlay
   if (raidState.isAlarmTriggered) {

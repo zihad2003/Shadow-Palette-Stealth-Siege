@@ -7,7 +7,10 @@ import com.shadowpalette.observer.DetectionEvent;
 import com.shadowpalette.state.PatrolRobotContext;
 import com.shadowpalette.stealth.DetectionResult;
 import com.shadowpalette.stealth.LighthouseDetectionEngine;
+import com.shadowpalette.stealth.SearchlightColorEngine;
 import com.shadowpalette.strategy.CamouflageStrategyFactory;
+import com.shadowpalette.util.Colors;
+import com.shadowpalette.util.StealthConstants;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -25,6 +28,9 @@ public class RaidValidator {
      * Applies GDD Section 9 Alarm Escalation (+25% Lighthouse sweep speed, +1 tile cone range).
      */
     public ValidatedOutcomeDto validateSession(RaidCompleteRequest request, String attackerCamoColor, int defenderChipsAvailable) {
+        if (request.getLockedCamoColor() != null && request.getTileColors() != null) {
+            return validateColorCamoSession(request, attackerCamoColor, defenderChipsAvailable);
+        }
         int playerBand = strategyFactory.getLuminanceBandForColor(attackerCamoColor);
         int surroundingBand = 3; // Default ground luminance band
 
@@ -84,30 +90,87 @@ public class RaidValidator {
             }
         }
 
+        return award(isCaught, isDetected, request, defenderChipsAvailable);
+    }
+
+    /**
+     * Replays movement against stored defender tile colors and the locked raid camo.
+     * Client isDetected / stolen chips are ignored.
+     */
+    private ValidatedOutcomeDto validateColorCamoSession(
+            RaidCompleteRequest request,
+            String attackerCamoColor,
+            int defenderChipsAvailable
+    ) {
+        String locked = request.getLockedCamoColor() != null
+                ? request.getLockedCamoColor().trim().toUpperCase()
+                : (attackerCamoColor != null ? attackerCamoColor.trim().toUpperCase() : "BLUE");
+        if (!Colors.ALLOWED_CAMO_COLORS.contains(locked)) {
+            locked = "BLUE";
+        }
+
+        boolean alarm = false;
+        boolean caught = false;
+        double meter = 0;
+        List<SessionLogTickDto> ticks = request.getSessionLog();
+
+        if (ticks != null) {
+            for (int i = 0; i < ticks.size(); i++) {
+                SessionLogTickDto tick = ticks.get(i);
+                double px = tick.getXPos();
+                double py = tick.getYPos();
+                double sweep = StealthConstants.SEARCHLIGHT_SWEEP_DEG * (alarm ? 1.25 : 1.0);
+                double beam = (tick.getTick() * sweep / 8.0) % 360.0;
+                double range = StealthConstants.SEARCHLIGHT_RANGE + (alarm ? 1.0 : 0.0);
+
+                SearchlightColorEngine.BeamResult beamHit = SearchlightColorEngine.evaluateBeam(
+                        StealthConstants.SEARCHLIGHT_X,
+                        StealthConstants.SEARCHLIGHT_Y,
+                        beam,
+                        StealthConstants.SEARCHLIGHT_CONE,
+                        range,
+                        px,
+                        py
+                );
+
+                int col = (int) Math.round(px);
+                int row = (int) Math.round(py);
+                String tileColor = request.getTileColors().get(col + "," + row);
+
+                SearchlightColorEngine.TickResult result = SearchlightColorEngine.evaluateTick(
+                        beamHit, locked, tileColor, 0.2, meter, alarm
+                );
+                meter = result.meter();
+                alarm = result.alarmLatched();
+
+                if (alarm && i > 8) {
+                    double robotX = StealthConstants.SEARCHLIGHT_X;
+                    double robotY = StealthConstants.SEARCHLIGHT_Y;
+                    if (Math.hypot(px - robotX, py - robotY) <= 0.55) {
+                        caught = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        return award(caught, alarm, request, defenderChipsAvailable);
+    }
+
+    private ValidatedOutcomeDto award(boolean caught, boolean detected, RaidCompleteRequest request, int defenderChipsAvailable) {
         int requestedChips = request.getClientReportedOutcome() != null ? request.getClientReportedOutcome().getChipsRequested() : 0;
         int baseChips = Math.min(requestedChips, defenderChipsAvailable > 0 ? defenderChipsAvailable : 200);
 
-        if (isCaught) {
-            return ValidatedOutcomeDto.builder()
-                    .isDetected(true)
-                    .outcome("CAUGHT")
-                    .chipsAwarded(0)
-                    .build();
-        } else if (isDetected) {
-            // Detected but Escaped -> 1.5x loot multiplier per GDD 10
-            int awarded = (int) Math.round(baseChips * 1.5);
+        if (caught) {
+            return ValidatedOutcomeDto.builder().isDetected(true).outcome("CAUGHT").chipsAwarded(0).build();
+        }
+        if (detected) {
             return ValidatedOutcomeDto.builder()
                     .isDetected(true)
                     .outcome("ESCAPED")
-                    .chipsAwarded(awarded)
-                    .build();
-        } else {
-            // Silent Extraction -> 1.0x loot multiplier
-            return ValidatedOutcomeDto.builder()
-                    .isDetected(false)
-                    .outcome("SILENT")
-                    .chipsAwarded(baseChips)
+                    .chipsAwarded((int) Math.round(baseChips * 1.5))
                     .build();
         }
+        return ValidatedOutcomeDto.builder().isDetected(false).outcome("SILENT").chipsAwarded(baseChips).build();
     }
 }

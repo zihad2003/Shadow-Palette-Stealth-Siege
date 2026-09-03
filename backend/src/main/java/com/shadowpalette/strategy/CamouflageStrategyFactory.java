@@ -12,7 +12,8 @@ public class CamouflageStrategyFactory {
             "YELLOW", new YellowStrategy(),
             "GREEN", new GreenStrategy(),
             "RED", new RedStrategy(),
-            "BLUE", new BlueStrategy()
+            "BLUE", new BlueStrategy(),
+            "PURPLE", new PurpleStrategy()
     );
 
     public CamouflageStrategy getStrategy(String colorName) {

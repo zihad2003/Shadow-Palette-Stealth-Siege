@@ -43,12 +43,12 @@ public class PlayerService {
                     .inkEnergy(100)
                     .chips(200)
                     .characterModel(request.getCharacterModel() > 0 ? request.getCharacterModel() : 1)
-                    .camoColor(request.getCamoColor() != null ? request.getCamoColor().toUpperCase() : "WHITE")
+                    .camoColor(request.getCamoColor() != null ? request.getCamoColor().toUpperCase() : "BLUE")
                     .prestigeLevel(0)
                     .build();
         } else {
             user.setCharacterModel(request.getCharacterModel() > 0 ? request.getCharacterModel() : 1);
-            user.setCamoColor(request.getCamoColor() != null ? request.getCamoColor().toUpperCase() : "WHITE");
+            user.setCamoColor(request.getCamoColor() != null ? request.getCamoColor().toUpperCase() : "BLUE");
         }
 
         User saved = userRepository.save(user);

@@ -3,13 +3,14 @@ package com.shadowpalette.util;
 import java.util.Set;
 
 public class Colors {
+    public static final String RED = "#E74C3C";
+    public static final String GREEN = "#72B83F";
+    public static final String BLUE = "#536DDE";
+    public static final String YELLOW = "#E5B93D";
+    public static final String PURPLE = "#8D5CC7";
     public static final String WHITE = "#F1FAEE";
-    public static final String YELLOW = "#F4C245";
-    public static final String GREEN = "#2A9D8F";
-    public static final String RED = "#E63946";
-    public static final String BLUE = "#264653";
 
-    public static final Set<String> ALLOWED_CAMO_COLORS = Set.of("WHITE", "YELLOW", "GREEN", "RED", "BLUE");
+    public static final Set<String> ALLOWED_CAMO_COLORS = Set.of("RED", "GREEN", "BLUE", "YELLOW", "PURPLE");
     public static final double MAX_COLOR_QUOTA_PERCENT = 35.0;
     public static final int PLOT_TOTAL_TILES = 400; // 20x20 grid
 

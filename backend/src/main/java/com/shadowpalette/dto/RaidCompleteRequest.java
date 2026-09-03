@@ -7,6 +7,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.util.List;
+import java.util.Map;
 
 @Data
 @NoArgsConstructor
@@ -23,4 +24,12 @@ public class RaidCompleteRequest {
     private List<WallBreakEventDto> wallBreakEvents;
     private List<SessionLogTickDto> sessionLog;
     private ClientReportedOutcomeDto clientReportedOutcome;
+
+    /** Locked when the raid starts. Server ignores later client color changes. */
+    private String lockedCamoColor;
+
+    /** Defender real tile colors keyed "column,row". Visual grayscale is ignored. */
+    private Map<String, String> tileColors;
+
+    private Integer searchlightLevel;
 }

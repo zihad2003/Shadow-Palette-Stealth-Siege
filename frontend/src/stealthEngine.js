@@ -1,4 +1,8 @@
-// Shared Stealth & Lighthouse Detection Engine (Client-Side ES Module)
+import { evaluateBeam } from './raid/SearchlightSensor.js';
+import { isMatch } from './raid/ColorMatchSystem.js';
+import { evaluateDetectionTick, computeStealthScore } from './raid/DetectionSystem.js';
+
+export { evaluateBeam, isMatch, evaluateDetectionTick, computeStealthScore };
 
 export const CAMO_BANDS = {
   WHITE: 5,
@@ -6,21 +10,17 @@ export const CAMO_BANDS = {
   GREEN: 3,
   RED: 2,
   BLUE: 1,
+  PURPLE: 2,
 };
 
 export function getLuminanceBand(camoColor) {
-  if (!camoColor) return CAMO_BANDS.WHITE;
+  if (!camoColor) return CAMO_BANDS.BLUE;
   const key = camoColor.trim().toUpperCase();
-  return CAMO_BANDS[key] || CAMO_BANDS.WHITE;
+  return CAMO_BANDS[key] || CAMO_BANDS.BLUE;
 }
 
 /**
- * Evaluates Lighthouse spotlight detection.
- *
- * @param {Object} lh - { x, y, beamAngleDeg, coneAngleDeg, coneRangeTiles }
- * @param {Object} player - { x, y, camoBand }
- * @param {number} surroundingBand - Luminance band (1-5) of floor/surface
- * @returns {Object} { isDetected, inCoreZone, inEdgeZone, reason }
+ * Legacy luminance-band lighthouse check. New raids use SearchlightSensor + ColorMatchSystem.
  */
 export function checkLighthouseDetection(lh, player, surroundingBand) {
   const dx = player.x - lh.x;
@@ -33,7 +33,6 @@ export function checkLighthouseDetection(lh, player, surroundingBand) {
 
   const playerAngleDeg = (Math.atan2(dy, dx) * 180) / Math.PI;
   const angleDiffDeg = Math.abs(normalizeAngleDiff(playerAngleDeg - lh.beamAngleDeg));
-
   const halfConeAngle = lh.coneAngleDeg / 2.0;
 
   if (angleDiffDeg > halfConeAngle) {
@@ -44,15 +43,15 @@ export function checkLighthouseDetection(lh, player, surroundingBand) {
 
   if (angleDiffDeg <= coreHalfAngle) {
     return { isDetected: true, inCoreZone: true, inEdgeZone: false, reason: 'CORE_ZONE' };
-  } else {
-    const isMatch = player.camoBand === surroundingBand;
-    return {
-      isDetected: !isMatch,
-      inCoreZone: false,
-      inEdgeZone: true,
-      reason: isMatch ? 'SAFE_EDGE_ZONE_MATCH' : 'EDGE_ZONE_MISMATCH',
-    };
   }
+
+  const matched = player.camoBand === surroundingBand;
+  return {
+    isDetected: !matched,
+    inCoreZone: false,
+    inEdgeZone: true,
+    reason: matched ? 'SAFE_EDGE_ZONE_MATCH' : 'EDGE_ZONE_MISMATCH',
+  };
 }
 
 function normalizeAngleDiff(diff) {

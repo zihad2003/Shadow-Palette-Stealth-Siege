@@ -16,7 +16,10 @@ export class SensorSubject {
   }
 
   notifyObservers(event) {
-    this.observers.forEach((obs) => obs.onDetectionTriggered(event));
+    this.observers.forEach((obs) => {
+      if (typeof obs.onAlarmTriggered === 'function') obs.onAlarmTriggered(event);
+      else if (typeof obs.onDetectionTriggered === 'function') obs.onDetectionTriggered(event);
+    });
   }
 }
 

@@ -13,6 +13,7 @@ function getBuildingSpritePath(buildingType, level) {
     'INK_HOUSE': 'ink_house',
     'SLEEP_HOUSE': 'sleep_house',
     'COIN_GENERATOR': 'coin_generator',
+    'MAKEUP_HOUSE': 'makeup_house',
   };
   const key = typeMap[buildingType] || 'craft_house';
   return `/assets/buildings/${key}_lv${lvl}.png`;
@@ -25,6 +26,7 @@ export function getBuildingSize(buildingType) {
     case 'INK_HOUSE': return { w: 3, h: 3 };
     case 'SLEEP_HOUSE': return { w: 3, h: 3 };
     case 'COIN_GENERATOR': return { w: 4, h: 3 };
+    case 'MAKEUP_HOUSE': return { w: 3, h: 3 };
     default: return { w: 2, h: 2 };
   }
 }
@@ -36,6 +38,7 @@ function getBuildingFallbackColor(buildingType) {
     case 'INK_HOUSE':      return '#4f46e5'; // Indigo
     case 'SLEEP_HOUSE':    return '#0891b2'; // Cyan
     case 'COIN_GENERATOR': return '#ca8a04'; // Gold
+    case 'MAKEUP_HOUSE':   return '#e63946'; // Camo studio
     default:               return '#6b7280'; // Gray
   }
 }

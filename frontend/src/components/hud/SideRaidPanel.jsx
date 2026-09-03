@@ -1,10 +1,23 @@
 import React, { useState } from 'react';
+import { Swords, DoorOpen } from 'lucide-react';
 import { useGameState } from '../../state/GameStateContext.jsx';
 import { completeRaid } from '../../api.js';
 import { soundEngine } from '../../soundEngine.js';
+import { DEFAULT_SEARCHLIGHT_LEVEL } from '../../raid/stealthConstants.js';
+import ClayPanel from '../ui/ClayPanel.jsx';
+import ClayButton from '../ui/ClayButton.jsx';
 
-export default function SideRaidPanel({ onHitWall, wallHits, isEscaped }) {
-  const { raidTargetId, setRaidTargetId, transitionTo, userId, showToast, chips, setChips } = useGameState();
+export default function SideRaidPanel({
+  lockedCamo,
+  detectionState,
+  meter,
+  remaining,
+  isAlarmTriggered,
+  sessionLog,
+  paintedTiles,
+  onExtract,
+}) {
+  const { raidTargetId, userId, raidSession, showToast } = useGameState();
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleSubmitRaid = async () => {
@@ -14,69 +27,67 @@ export default function SideRaidPanel({ onHitWall, wallHits, isEscaped }) {
       const payload = {
         attackerId: userId,
         defenderId: raidTargetId,
-        durationSeconds: 45,
-        wallBreakEvents: [{ wallBlockId: 9, hits: wallHits || 4, gateWasLocked: true }],
-        sessionLog: [{ tick: 0, xPos: 10, yPos: 19 }],
+        durationSeconds: Math.round(90 - (remaining || 0)),
+        lockedCamoColor: raidSession?.camoColor || lockedCamo,
+        tileColors: paintedTiles,
+        searchlightLevel: DEFAULT_SEARCHLIGHT_LEVEL,
+        sessionLog: sessionLog?.current || [],
         clientReportedOutcome: {
-          isDetected: true,
-          outcome: isEscaped ? 'ESCAPED' : 'CAUGHT',
-          chipsRequested: isEscaped ? 300 : 0,
+          isDetected: !!isAlarmTriggered,
+          outcome: isAlarmTriggered ? 'ESCAPED' : 'SILENT',
+          chipsRequested: 200,
         },
       };
-
       const res = await completeRaid(payload);
       if (res.success && res.validatedOutcome) {
         soundEngine.playSuccessSound();
-        showToast(
-          `Raid Validated! Outcome: ${res.validatedOutcome.outcome} | Chips Awarded: +${res.validatedOutcome.chipsAwarded} 💎`,
-          'success'
-        );
-        setChips((prev) => prev + (res.validatedOutcome.chipsAwarded || 0));
-        transitionTo('WORLD_MAP');
+        showToast(`Server validated: ${res.validatedOutcome.outcome}`, 'success');
       }
     } catch (e) {
-      showToast(`Raid Submission Failed: ${e.message}`, 'error');
+      showToast('Server offline — using local raid outcome', 'info');
     } finally {
       setIsSubmitting(false);
+      if (onExtract) onExtract();
     }
   };
 
   return (
     <aside className="absolute top-20 right-5 z-50 w-64 flex flex-col gap-3 pointer-events-auto">
-      <div className="glass-panel-deep p-4 rounded-2xl flex flex-col gap-3 shadow-glassDeep">
-        <h3 className="text-xs font-heading font-bold text-amber-400 uppercase tracking-wider flex items-center gap-2">
-          <span>⚔️</span> Stealth Raid Controls
+      <ClayPanel depth="deep" className="p-4 rounded-[24px] flex flex-col gap-3">
+        <h3 className="text-xs font-heading font-bold text-clay-accent uppercase tracking-wider flex items-center gap-2">
+          <Swords size={13} /> Stealth Raid
         </h3>
 
-        {/* Defender ID input */}
-        <div className="flex items-center justify-between text-xs text-slate-300">
-          <label className="text-slate-400">Target User ID:</label>
-          <input
-            type="number"
-            value={raidTargetId}
-            onChange={(e) => setRaidTargetId(parseInt(e.target.value, 10) || 1)}
-            min="1"
-            className="w-16 px-2 py-1 rounded-lg bg-black/40 border border-white/10 text-white text-center font-bold"
-          />
+        <div className="clay-inset rounded-2xl p-3 flex flex-col gap-1">
+          <p className="text-[10px] text-clay-muted uppercase tracking-wider">Locked camo</p>
+          <p className="font-heading font-extrabold text-sm text-clay-text">{lockedCamo}</p>
+          <p className="text-[10px] text-clay-muted">No color change in raid</p>
         </div>
 
-        {/* Hit Gate Wall Button */}
-        <button
-          onClick={onHitWall}
-          className="w-full py-2.5 px-3 rounded-xl font-heading font-bold text-xs bg-amber-500/20 text-amber-300 border border-amber-400/40 hover:bg-amber-500/30 transition-all flex items-center justify-center gap-2 shadow-neonGold"
-        >
-          <span>🔨</span> Hit Gate Wall ({wallHits || 0}/4)
-        </button>
+        <div>
+          <div className="flex items-center justify-between text-[10px] font-bold text-clay-muted mb-1">
+            <span>{detectionState}</span>
+            <span>{Math.round(meter || 0)}%</span>
+          </div>
+          <div className="h-2 rounded-full clay-inset overflow-hidden">
+            <div
+              className={`h-full rounded-full ${isAlarmTriggered ? 'bg-clay-danger' : 'bg-clay-accent'}`}
+              style={{ width: `${Math.min(100, meter || 0)}%` }}
+            />
+          </div>
+        </div>
 
-        {/* Submit & Complete Raid */}
-        <button
+        <ClayButton
+          variant="success"
           disabled={isSubmitting}
           onClick={handleSubmitRaid}
-          className="w-full py-2.5 px-3 rounded-xl font-heading font-bold text-xs bg-gradient-to-r from-emerald-500 to-emerald-600 text-white hover:from-emerald-400 hover:to-emerald-500 transition-all flex items-center justify-center gap-2 shadow-neonEmerald disabled:opacity-50"
+          className={`w-full py-2.5 px-3 rounded-2xl text-xs flex items-center justify-center gap-2 ${
+            isAlarmTriggered ? 'clay-alarm' : ''
+          }`}
         >
-          <span>✅</span> Extract & Complete Raid
-        </button>
-      </div>
+          <DoorOpen size={14} /> Extract
+        </ClayButton>
+      </ClayPanel>
     </aside>
   );
 }

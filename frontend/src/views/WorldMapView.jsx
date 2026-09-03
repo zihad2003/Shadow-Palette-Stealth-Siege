@@ -1,100 +1,91 @@
-import React, { useState } from 'react';
-import IslandBackground from '../components/map/IslandBackground.jsx';
-import SVGPlotOverlay from '../components/map/SVGPlotOverlay.jsx';
+import React, { useState, Suspense, lazy } from 'react';
+import { Plus, Minus } from 'lucide-react';
+import { motion } from 'framer-motion';
 import TopResourceBar from '../components/hud/TopResourceBar.jsx';
 import NavigationTabs from '../components/hud/NavigationTabs.jsx';
 import SideProfilePanel from '../components/hud/SideProfilePanel.jsx';
 import RTSCommandPanel from '../components/hud/RTSCommandPanel.jsx';
 import RTSMinimapPanel from '../components/hud/RTSMinimapPanel.jsx';
+import HudBanner from '../components/ui/HudBanner.jsx';
+import ClayPanel from '../components/ui/ClayPanel.jsx';
+import ClayButton from '../components/ui/ClayButton.jsx';
 import { useGameState } from '../state/GameStateContext.jsx';
 
+const WorldMapScene = lazy(() => import('../components/worldmap/WorldMapScene.jsx'));
+
 export default function WorldMapView() {
-  const { transitionTo } = useGameState();
+  const { plots, selectedPlot, setSelectedPlot, hoveredPlotId, setHoveredPlotId, transitionTo } =
+    useGameState();
   const [zoomScale, setZoomScale] = useState(1.0);
 
   const handlePlotClick = (plot) => {
+    setSelectedPlot(plot);
     if (plot.status === 'CLAIMED_SELF') {
       transitionTo('BASE_BUILDER', { plotId: plot.id });
     }
   };
 
   return (
-    <div className="relative w-screen h-screen overflow-hidden bg-[#05070a] flex flex-col">
-      {/* ─── Top Floating Game Header HUD ─── */}
-      <header className="absolute top-4 left-5 right-5 z-50 flex items-center justify-between pointer-events-none">
-        {/* Logo Banner */}
-        <div className="glass-panel px-4 py-2 rounded-2xl flex items-center gap-3 pointer-events-auto shadow-glass">
-          <span className="text-xl p-1.5 rounded-xl bg-amber-400/20 border border-amber-400/30 shadow-inner">
-            🛡️
-          </span>
-          <div>
-            <h1 className="font-heading font-extrabold text-sm md:text-base leading-tight bg-gradient-to-r from-white via-amber-300 to-sky-300 bg-clip-text text-transparent">
-              SHADOW PALETTE
-            </h1>
-            <p className="text-[10px] font-heading font-bold text-sky-400 uppercase tracking-widest">
-              Stealth &amp; Siege
-            </p>
-          </div>
-        </div>
-
-        {/* Center Mode Switcher Tabs */}
+    <div className="relative w-screen h-screen overflow-hidden bg-clay-bg flex flex-col">
+      <header className="absolute top-4 left-5 right-5 z-50 flex items-center justify-between pointer-events-none gap-3 flex-nowrap">
+        <HudBanner icon="🛡️" title="Shadow Palette" subtitle="Stealth & Siege" />
         <NavigationTabs />
-
-        {/* Right Resource Bar */}
         <TopResourceBar />
       </header>
 
-      {/* ─── Subtitle Guide Badge ─── */}
       <div className="absolute top-20 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
-        <span className="glass-panel px-5 py-1.5 rounded-full text-xs font-bold text-sky-300 border border-sky-400/30 tracking-wide shadow-neonCyan flex items-center gap-2">
-          <span>✨</span> Click any Sector Plot to Inspect or Claim Territory
-        </span>
+        <ClayPanel className="px-5 py-1.5 rounded-full text-xs font-bold text-clay-accent tracking-wide">
+          Drag to orbit · click a sector to inspect or claim
+        </ClayPanel>
       </div>
 
-      {/* ─── Main Island Diorama Viewport Stage ─── */}
-      <main className="w-full h-full flex items-center justify-center relative overflow-hidden bg-radial-vignette">
-        {/* Ambient Diorama Halo Glow behind Island */}
-        <div className="absolute w-[800px] h-[600px] rounded-full bg-emerald-500/10 filter blur-[100px] pointer-events-none" />
-
-        {/* 1024x819 Aspect-Ratio Locked Container (100% Pixel Aligned) */}
-        <div
-          style={{ transform: `scale(${zoomScale})` }}
-          className="relative w-full max-w-[1400px] max-h-[85vh] aspect-[1024/819] transition-transform duration-200 ease-out select-none flex items-center justify-center"
+      <main className="w-full h-full relative overflow-hidden">
+        <motion.div
+          className="absolute inset-0"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.2 }}
         >
-          {/* Layer 0: Static High-Resolution Island Terrain Image */}
-          <IslandBackground />
-
-          {/* Layer 1: Interactive SVG Vector Plot Overlay */}
-          <SVGPlotOverlay onPlotClick={handlePlotClick} />
-        </div>
+          <Suspense fallback={<div className="absolute inset-0 bg-clay-bg" />}>
+            <WorldMapScene
+              plots={plots}
+              selectedPlot={selectedPlot}
+              hoveredPlotId={hoveredPlotId}
+              onHoverPlot={setHoveredPlotId}
+              onSelectPlot={handlePlotClick}
+              zoomScale={zoomScale}
+            />
+          </Suspense>
+        </motion.div>
       </main>
 
-      {/* ─── Floating Zoom Controls ─── */}
-      <div className="absolute top-24 left-5 z-40 glass-panel p-1.5 rounded-xl flex flex-col gap-1.5 shadow-glass pointer-events-auto">
-        <button
+      <ClayPanel className="absolute top-24 left-5 z-40 p-1.5 rounded-2xl flex flex-col gap-1.5 pointer-events-auto">
+        <ClayButton
+          variant="ghost"
           onClick={() => setZoomScale((z) => Math.min(1.4, z + 0.1))}
-          className="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/15 text-white flex items-center justify-center font-bold text-sm"
+          className="w-8 h-8 rounded-xl flex items-center justify-center"
           title="Zoom In"
         >
-          ➕
-        </button>
-        <button
+          <Plus size={14} />
+        </ClayButton>
+        <ClayButton
+          variant="primary"
           onClick={() => setZoomScale(1.0)}
-          className="w-8 h-8 rounded-lg bg-sky-500/20 text-sky-300 border border-sky-400/30 flex items-center justify-center font-bold text-xs"
+          className="w-8 h-8 rounded-xl flex items-center justify-center text-[10px]"
           title="Reset Zoom"
         >
           1x
-        </button>
-        <button
+        </ClayButton>
+        <ClayButton
+          variant="ghost"
           onClick={() => setZoomScale((z) => Math.max(0.7, z - 0.1))}
-          className="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/15 text-white flex items-center justify-center font-bold text-sm"
+          className="w-8 h-8 rounded-xl flex items-center justify-center"
           title="Zoom Out"
         >
-          ➖
-        </button>
-      </div>
+          <Minus size={14} />
+        </ClayButton>
+      </ClayPanel>
 
-      {/* ─── Floating Tactical HUD Overlays ─── */}
       <SideProfilePanel />
       <RTSCommandPanel />
       <RTSMinimapPanel />
