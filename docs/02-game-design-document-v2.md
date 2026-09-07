@@ -2,20 +2,21 @@
 
 ## 1. Onboarding
 - Character model: 3 cosmetic options, no gameplay difference
-- Camo color: 5 options (White, Red, Green, Blue, Yellow), chosen once, **permanent** — this is the player's Strategy pattern assignment for the whole game
+- Camo color: 5 options (White, Red, Green, Blue, Yellow), chosen at setup; body color can be changed later at the Makeup House (raid locks camo for that attempt)
 - Starting coins: 500 (enough for ~2-3 Lvl-1 buildings; tune after playtesting)
+- **New user → new base automatically** — no world-map / plot selection step
 
 ## 2. Economy
 | Resource | Source | Sink |
 |---|---|---|
-| Coins | Raids, daily login (+100/day) | Plots, upgrades, unlocking PatrolRobot |
+| Coins | Raids, daily login (+100/day) | Building place/upgrades, unlocking PatrolRobot |
 | Ink Energy | Regenerates +1/min (cap 100), or instant refill via coins | Painting a tile (5 Ink), placing a building (15 Ink) |
 | Chips | Stored on base, stolen in raids | Traded 1:1 for coins, or spent on Prestige |
 
-## 3. Plot
-- Fixed: **20×20 = 400 tiles** per base
-- First plot: free placement, player-chosen location
-- Additional/expansion plots (if supported later): cost scales with distance from world center
+## 3. Home Base (Plot)
+- Playable fortress board shared visually with raid mode (colored at home, grayscale in raid)
+- First base: **auto-assigned on `POST /player/setup`** — player never picks a sector on a world map
+- Expansion plots: out of scope / deferred
 
 ## 4. Buildings
 | Building | Footprint (≤16 tile cap) | Levels | Effect per level |

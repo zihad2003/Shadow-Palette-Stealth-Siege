@@ -9,6 +9,7 @@ import BaseBuilderView from './views/BaseBuilderView.jsx';
 import RaidFinderView from './views/RaidFinderView.jsx';
 import StealthRaidView from './views/StealthRaidView.jsx';
 import OptionsModal from './components/hud/OptionsModal.jsx';
+import MetaEconomyPanel from './components/hud/MetaEconomyPanel.jsx';
 import LoadingOverlay from './components/hud/LoadingOverlay.jsx';
 import ToastContainer from './components/hud/ToastContainer.jsx';
 
@@ -54,6 +55,7 @@ export default function App() {
       <div className="w-screen h-screen overflow-hidden bg-clay-bg text-clay-text font-body relative select-none">
         <GameViewRouter />
         <OptionsModal />
+        <MetaEconomyPanel />
         <LoadingOverlay />
         <ToastContainer />
       </div>

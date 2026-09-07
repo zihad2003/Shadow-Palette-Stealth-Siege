@@ -1,12 +1,12 @@
 import React, { useEffect, useRef } from 'react';
-import { buildCharacter } from '../../character/buildCharacter.js';
+import { buildCharacter, tickCharacter } from '../../character/buildCharacter.js';
 import * as THREE from 'three';
 
 function clayMat(color, extras = {}) {
   return new THREE.MeshStandardMaterial({
     color,
-    roughness: 0.44,
-    metalness: 0.06,
+    roughness: 0.48,
+    metalness: 0.05,
     ...extras,
   });
 }
@@ -27,9 +27,9 @@ export default function CharacterPreview({
     const scene = new THREE.Scene();
     scene.background = null;
 
-    const camera = new THREE.PerspectiveCamera(32, 1, 0.1, 20);
-    camera.position.set(0, 1.35, 4.2);
-    camera.lookAt(0, 0.95, 0);
+    const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 24);
+    camera.position.set(0.55, 1.45, 4.4);
+    camera.lookAt(0, 1.05, 0);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -42,19 +42,30 @@ export default function CharacterPreview({
     mount.style.overflow = 'hidden';
     mount.appendChild(canvas);
 
-    scene.add(new THREE.HemisphereLight(0xf1faee, 0x0d1b1e, 0.95));
-    const key = new THREE.DirectionalLight(0xffe0c2, 1.15);
-    key.position.set(2.4, 4.2, 3.2);
+    scene.add(new THREE.HemisphereLight(0xf1faee, 0x0d1b1e, 0.9));
+    const key = new THREE.DirectionalLight(0xffe0c2, 1.25);
+    key.position.set(2.6, 4.4, 3.4);
     key.castShadow = true;
     scene.add(key);
-    const fill = new THREE.DirectionalLight(0x72b83f, 0.35);
-    fill.position.set(-3, 1.5, -1);
+    const rim = new THREE.DirectionalLight(0x8d5cc7, 0.4);
+    rim.position.set(-2.8, 2.2, -2);
+    scene.add(rim);
+    const fill = new THREE.DirectionalLight(0x72b83f, 0.28);
+    fill.position.set(-2.2, 1.2, 1.5);
     scene.add(fill);
 
-    const ground = new THREE.Mesh(new THREE.CylinderGeometry(1.15, 1.15, 0.18, 32), clayMat('#152428'));
-    ground.position.y = -0.09;
+    const ground = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.25, 0.16, 36), clayMat('#152428'));
+    ground.position.y = -0.08;
     ground.receiveShadow = true;
     scene.add(ground);
+
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(0.95, 0.03, 10, 40),
+      clayMat('#F4A261', { transparent: true, opacity: 0.55 })
+    );
+    ring.rotation.x = Math.PI / 2;
+    ring.position.y = 0.01;
+    scene.add(ring);
 
     let figure = buildCharacter(stateRef.current.characterModel, stateRef.current.camoColor);
     scene.add(figure);
@@ -93,12 +104,16 @@ export default function CharacterPreview({
     let raf = 0;
     const clock = new THREE.Clock();
     const tick = () => {
+      const elapsed = clock.getElapsedTime();
       const sig = `${stateRef.current.characterModel}:${stateRef.current.camoColor}`;
       if (sig !== lastSig) {
         lastSig = sig;
         rebuild();
       }
-      figure.rotation.y = Math.sin(clock.getElapsedTime() * 0.35) * 0.18;
+      figure.rotation.y = elapsed * 0.35;
+      figure.position.y = Math.sin(elapsed * 1.6) * 0.02;
+      tickCharacter(figure, elapsed);
+      ring.rotation.z = elapsed * 0.25;
       renderer.render(scene, camera);
       raf = requestAnimationFrame(tick);
     };

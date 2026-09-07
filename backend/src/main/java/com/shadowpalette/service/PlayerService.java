@@ -31,9 +31,7 @@ public class PlayerService {
         User user = userRepository.findById(request.getUserId())
                 .orElse(null);
 
-        if (user != null && user.getCamoColor() != null && !user.getCamoColor().trim().isEmpty()) {
-            throw new ApiException(HttpStatus.CONFLICT, "CAMO_COLOR_ALREADY_SET");
-        }
+        boolean camoAlreadySet = user != null && user.getCamoColor() != null && !user.getCamoColor().trim().isEmpty();
 
         if (user == null) {
             user = User.builder()
@@ -46,18 +44,44 @@ public class PlayerService {
                     .camoColor(request.getCamoColor() != null ? request.getCamoColor().toUpperCase() : "BLUE")
                     .prestigeLevel(0)
                     .build();
-        } else {
+        } else if (!camoAlreadySet) {
             user.setCharacterModel(request.getCharacterModel() > 0 ? request.getCharacterModel() : 1);
             user.setCamoColor(request.getCamoColor() != null ? request.getCamoColor().toUpperCase() : "BLUE");
         }
 
         User saved = userRepository.save(user);
+        Plot homePlot = ensureHomePlot(saved);
+
+        if (camoAlreadySet) {
+            // Idempotent: returning players still receive their home plot id (no map pick).
+            return PlayerSetupResponse.builder()
+                    .success(true)
+                    .characterModel(saved.getCharacterModel())
+                    .camoColor(saved.getCamoColor())
+                    .plotId(homePlot.getId())
+                    .error("CAMO_COLOR_ALREADY_SET")
+                    .build();
+        }
 
         return PlayerSetupResponse.builder()
                 .success(true)
                 .characterModel(saved.getCharacterModel())
                 .camoColor(saved.getCamoColor())
+                .plotId(homePlot.getId())
                 .build();
+    }
+
+    private Plot ensureHomePlot(User user) {
+        List<Plot> owned = plotRepository.findByOwnerId(user.getId());
+        if (owned != null && !owned.isEmpty()) {
+            return owned.get(0);
+        }
+        return plotRepository.save(Plot.builder()
+                .xCoord(0)
+                .yCoord(0)
+                .ownerId(user.getId())
+                .isOccupied(true)
+                .build());
     }
 
     @Transactional

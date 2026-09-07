@@ -1,8 +1,13 @@
 import React from 'react';
-import { Paintbrush } from 'lucide-react';
+import { Paintbrush, Lock } from 'lucide-react';
 import { GAME_COLOR_KEYS, GAME_COLORS, COLOR_NAMES } from '../../colors.js';
 import { UPGRADE_COSTS } from '../../data/raidTargets.js';
-import { useGameState } from '../../state/GameStateContext.jsx';
+import {
+  useGameState,
+  PLACE_BUILDING_COST,
+  PATROL_UNLOCK_RAIDS,
+  PATROL_UNLOCK_COINS,
+} from '../../state/GameStateContext.jsx';
 import { soundEngine } from '../../soundEngine.js';
 import ClayPanel from '../ui/ClayPanel.jsx';
 import ClayButton from '../ui/ClayButton.jsx';
@@ -17,23 +22,25 @@ export default function BottomBuildDock() {
     buildings,
     handleUpgradeSelected,
     quotaFor,
+    patrolUnlocked,
+    successfulRaids,
+    unlockPatrolRobot,
+    defenses,
   } = useGameState();
 
   const selected = buildings.find((b) => b.id === selectedBuildingId);
   const nextCost = selected && selected.level < 3 ? UPGRADE_COSTS[selected.level] : null;
+  const hasPatrol = defenses.some((d) => (d.type || d.defenseType) === 'PATROL_ROBOT');
 
-  const colorList = GAME_COLOR_KEYS;
   const usagePct = Math.round(quotaFor(selectedColor) * 100);
   const quotaTone = usagePct >= 35 ? 'bg-clay-danger' : usagePct >= 30 ? 'bg-clay-accent' : 'bg-clay-success';
 
-  // Lighthouse is not buildable — it stands at the center of every base
   const tools = [
     { id: 'PAINT', label: 'Paint', footprint: '5 ink' },
-    { id: 'MAKEUP_HOUSE', label: 'Makeup House', footprint: '3×3 recamo' },
-    { id: 'SLEEP_HOUSE', label: 'Sleep House', footprint: '3×3' },
-    { id: 'INK_HOUSE', label: 'Ink House', footprint: '3×3' },
-    { id: 'CRAFT_HOUSE', label: 'Craft House', footprint: '4×4' },
-    { id: 'COIN_GENERATOR', label: 'Coin Mint', footprint: '4×3' },
+    { id: 'SLEEP_HOUSE', label: 'Sleep House', footprint: '2×2' },
+    { id: 'INK_HOUSE', label: 'Ink House', footprint: '2×2' },
+    { id: 'CRAFT_HOUSE', label: 'Craft House', footprint: '2×2' },
+    { id: 'COIN_GENERATOR', label: 'Coin Mint', footprint: '2×2' },
     { id: 'PATROL_ROBOT', label: 'Patrol Robot', footprint: 'Guard' },
   ];
 
@@ -44,7 +51,7 @@ export default function BottomBuildDock() {
           Paint Palette
         </span>
         <div className="flex items-center gap-2">
-          {colorList.map((key) => {
+          {GAME_COLOR_KEYS.map((key) => {
             const isSelected = selectedColor === key;
             return (
               <ClayButton
@@ -54,10 +61,9 @@ export default function BottomBuildDock() {
                 onClick={() => {
                   soundEngine.playPaintSound();
                   setSelectedColor(key);
+                  setSelectedTool('PAINT');
                 }}
-                className={`w-8 h-8 rounded-full clay-blob p-0 ${
-                  isSelected ? 'ring-2 ring-clay-text' : ''
-                }`}
+                className={`w-8 h-8 rounded-full clay-blob p-0 ${isSelected ? 'ring-2 ring-clay-text' : ''}`}
                 title={`${COLOR_NAMES[key]} — 35% quota`}
                 aria-label={COLOR_NAMES[key]}
               />
@@ -73,6 +79,9 @@ export default function BottomBuildDock() {
           </div>
           <span className="text-[10px] font-bold text-clay-muted whitespace-nowrap">{usagePct}/35%</span>
         </div>
+        <p className="text-[10px] text-clay-muted text-center">
+          Place cost {PLACE_BUILDING_COST.coins}c / {PLACE_BUILDING_COST.ink} ink
+        </p>
       </ClayPanel>
 
       <ClayPanel depth="deep" className="px-4 py-3 rounded-[24px] flex flex-col gap-2">
@@ -82,21 +91,37 @@ export default function BottomBuildDock() {
         <div className="flex items-center gap-2 overflow-x-auto pb-1 max-w-[58vw]">
           {tools.map((t) => {
             const isActive = selectedTool === t.id;
+            const isPatrol = t.id === 'PATROL_ROBOT';
+            const locked = isPatrol && !patrolUnlocked;
             return (
               <ClayButton
                 key={t.id}
                 variant={isActive ? 'primary' : 'ghost'}
                 onClick={() => {
                   soundEngine.playClickSound();
+                  if (locked) {
+                    unlockPatrolRobot();
+                    return;
+                  }
+                  if (isPatrol && hasPatrol) {
+                    return;
+                  }
                   setSelectedTool(t.id);
                 }}
                 className="px-3 py-2 rounded-2xl flex flex-col items-center gap-0.5 min-w-[92px]"
               >
                 <span className="font-heading font-bold text-xs flex items-center gap-1">
                   {t.id === 'PAINT' && <Paintbrush size={12} />}
+                  {locked && <Lock size={11} />}
                   {t.label}
                 </span>
-                <small className="text-[10px] opacity-70">{t.footprint}</small>
+                <small className="text-[10px] opacity-70">
+                  {locked
+                    ? `${successfulRaids}/${PATROL_UNLOCK_RAIDS} · ${PATROL_UNLOCK_COINS}c`
+                    : isPatrol && hasPatrol
+                      ? 'Deployed'
+                      : t.footprint}
+                </small>
               </ClayButton>
             );
           })}

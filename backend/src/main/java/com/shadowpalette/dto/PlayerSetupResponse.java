@@ -15,5 +15,7 @@ public class PlayerSetupResponse {
     private boolean success;
     private Integer characterModel;
     private String camoColor;
+    /** Auto-assigned home base plot — no world-map selection. */
+    private Long plotId;
     private String error;
 }

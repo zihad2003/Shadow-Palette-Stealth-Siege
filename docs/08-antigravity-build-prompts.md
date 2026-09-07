@@ -84,22 +84,20 @@ successful RaidLog entries with outcome != CAUGHT before allowing it.
 
 ---
 
-## Phase 4 — Frontend: World Map & Base Builder Canvas
-**Attach:** master-plan-v2.md, asset-list-v2.md
+## Phase 4 — Frontend: Home Base Builder (no world map)
+**Attach:** master-plan-v2.md, asset-list-v2.md, game-design-document-v2.md
 
 ```
 In the /frontend Vite project, build:
-1. A world map screen (Canvas) that fetches GET /api/map and renders
-   plots + roads. Clicking an unclaimed plot calls POST /api/plot/claim.
-2. A base builder screen (Canvas) for the player's own 20x20 tile grid,
-   with a 5-color palette tool (White/Yellow/Green/Red/Blue) for painting
-   floor tiles and building faces, and a placement menu for the 4 building
-   types + Lighthouse + PatrolRobot (if unlocked).
+1. Onboarding (character + camo) calls POST /api/player/setup, which
+   auto-assigns a home base plotId. There is NO world-map plot picker.
+2. A base builder screen using the same fortress GameMap as raid mode
+   (colored at home), with a 5-color palette for painting tiles and a
+   placement dock for Sleep/Ink/Craft/Coin houses + PatrolRobot (if unlocked).
+3. Raid finder lists targets; stealth raid uses the grayscale GameMap.
 
-Use placeholder colored rectangles for any sprite not yet available —
+Use placeholder / procedural meshes for any sprite not yet available —
 reference asset-list-v2.md for the full sprite list to swap in later.
-Call the backend endpoints from Phase 2/3 for every action; no game state
-should live only in the frontend.
 ```
 
 ---

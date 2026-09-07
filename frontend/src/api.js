@@ -30,6 +30,7 @@ export async function setupPlayer(userId, characterModel, camoColor) {
   });
 }
 
+/** @deprecated World-map plot picking removed — home bases are auto-assigned at setup. */
 export async function claimPlot(userId, plotId) {
   return request('/api/plot/claim', {
     method: 'POST',

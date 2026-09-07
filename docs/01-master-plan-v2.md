@@ -1,18 +1,18 @@
 # 🎮 Shadow Palette: Stealth & Siege — Master Plan v2
 
-## 📋 Overview
-- AOOP academic project — Spring Boot (REST, JPA, MySQL) backend + HTML5 Canvas/JS frontend
-- Single shared 2.5D persistent world (Clash of Clans style) with roads connecting plots
-- Raid model: **async, instanced** — attacker enters a private simulation built from the defender's last-saved layout. No real-time multiplayer sync needed anywhere in the game.
+## Overview
+- AOOP academic project — Spring Boot (REST, JPA, MySQL) backend + Vite/React frontend
+- Async, instanced raids — attacker enters a private simulation from the defender's last-saved layout
+- Home base is auto-provisioned per player (no shared world-map plot picker)
 
 ---
 
-## 🌍 World & Onboarding Flow
+## World & Onboarding Flow
 1. Player picks 1 of **3 character models** (cosmetic only)
-2. Player picks **1 of 5 camo colors** (permanent, used only during raid/escape — not swapped in real time)
-3. Player browses the shared world map and freely selects a plot
+2. Player picks **1 of 5 camo colors** (permanent for raids; recamo later via Makeup House)
+3. **No world-map plot selection** — a new user is **auto-assigned a personal home base** on setup
 4. Player receives a fixed starting coin amount, enough to build a decent starter base
-5. Player enters **Build Mode** on their own 20×20 (400-tile) plot
+5. Player enters **Build Mode** on their colored fortress board (same layout language as raid map)
 
 ---
 

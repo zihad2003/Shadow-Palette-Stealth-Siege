@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GRID } from './gridUtils.js';
 import { BASE_CLAY } from './clayMaterials.js';
+import { GAME_COLORS, isGameColor } from '../colors.js';
 
 const PX_PER_CELL = 32;
 const SIZE = GRID * PX_PER_CELL;
@@ -70,8 +71,9 @@ export function createGroundFill() {
     mesh,
     updatePaint(paintedTiles) {
       drawBase(ctx);
-      Object.entries(paintedTiles).forEach(([key, hex]) => {
-        if (!hex) return;
+      Object.entries(paintedTiles).forEach(([key, value]) => {
+        if (!value) return;
+        const hex = isGameColor(value) ? GAME_COLORS[String(value).toUpperCase()] : value;
         const [x, y] = key.split(',').map(Number);
         drawSplat(ctx, x, y, hex);
       });

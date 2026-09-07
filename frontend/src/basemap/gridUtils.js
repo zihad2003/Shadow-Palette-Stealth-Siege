@@ -27,3 +27,17 @@ export function inPlaza(x, y, w = 1, h = 1) {
 export function footprintCenter(xPos, yPos, w, h) {
   return { wx: xPos + w / 2 - HALF, wz: yPos + h / 2 - HALF };
 }
+
+function overlapsBuilding(buildings, x, y, w, h) {
+  return buildings.some((b) => {
+    const bw = b.footprintWidth || 2;
+    const bh = b.footprintHeight || 2;
+    return x < b.xPos + bw && x + w > b.xPos && y < b.yPos + bh && y + h > b.yPos;
+  });
+}
+
+export function canPlaceAt(buildings, x, y, w, h) {
+  if (!inGrid(x, y) || !inGrid(x + w - 1, y + h - 1)) return false;
+  if (inPlaza(x, y, w, h)) return false;
+  return !overlapsBuilding(buildings, x, y, w, h);
+}

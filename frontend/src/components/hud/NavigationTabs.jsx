@@ -5,7 +5,7 @@ import ClayPanel from '../ui/ClayPanel.jsx';
 import ClayButton from '../ui/ClayButton.jsx';
 
 export default function NavigationTabs() {
-  const { gameState, transitionTo, setIsOptionsOpen } = useGameState();
+  const { gameState, transitionTo, setIsOptionsOpen, setIsMetaOpen } = useGameState();
 
   const tabs = [
     { key: 'BASE_BUILDER', label: 'Home Base', icon: Home },
@@ -30,6 +30,15 @@ export default function NavigationTabs() {
           </ClayButton>
         );
       })}
+
+      <ClayButton
+        variant="ghost"
+        onClick={() => setIsMetaOpen(true)}
+        className="px-2.5 py-2 rounded-xl text-clay-accent text-[10px] font-heading font-bold"
+        aria-label="Economy and prestige"
+      >
+        Meta
+      </ClayButton>
 
       <ClayButton
         variant="ghost"

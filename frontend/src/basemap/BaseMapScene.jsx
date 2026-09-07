@@ -20,24 +20,13 @@ import { createPlacementGhost } from './PlacementGhost.js';
 import { createDecorField } from './decor.js';
 import { createAmbientDust, createCloudLayer } from './atmosphere.js';
 import { createPatrolRobot } from './PatrolRobot.js';
+import { GAME_COLORS } from '../colors.js';
 import { disposeObject } from './clayMaterials.js';
-import { inGrid, inPlaza, footprintCenter, cellToWorld } from './gridUtils.js';
+import { inGrid, footprintCenter, cellToWorld, canPlaceAt } from './gridUtils.js';
 
 const PLACEABLE = ['CRAFT_HOUSE', 'INK_HOUSE', 'SLEEP_HOUSE', 'COIN_GENERATOR', 'MAKEUP_HOUSE'];
 
-function overlapsBuilding(buildings, x, y, w, h) {
-  return buildings.some((b) => {
-    const bw = b.footprintWidth || 2;
-    const bh = b.footprintHeight || 2;
-    return x < b.xPos + bw && x + w > b.xPos && y < b.yPos + bh && y + h > b.yPos;
-  });
-}
-
-export function canPlaceAt(buildings, x, y, w, h) {
-  if (!inGrid(x, y) || !inGrid(x + w - 1, y + h - 1)) return false;
-  if (inPlaza(x, y, w, h)) return false;
-  return !overlapsBuilding(buildings, x, y, w, h);
-}
+export { canPlaceAt };
 
 export default function BaseMapScene({
   buildings,
@@ -180,12 +169,16 @@ export default function BaseMapScene({
       }
       if (hover.cell && st.selectedTool === 'PAINT') {
         const { wx, wz } = cellToWorld(hover.cell.x, hover.cell.y);
-        ghost.showPaint(wx, wz, st.selectedColor);
+        ghost.showPaint(wx, wz, GAME_COLORS[st.selectedColor] || GAME_COLORS.GREEN);
       } else if (hover.cell && PLACEABLE.includes(st.selectedTool)) {
         const { w, h } = getFootprint(st.selectedTool);
         const ok = canPlaceAt(st.buildings, hover.cell.x, hover.cell.y, w, h);
         const { wx, wz } = footprintCenter(hover.cell.x, hover.cell.y, w, h);
         ghost.showBuilding(wx, wz, w, h, ok);
+      } else if (hover.cell && st.selectedTool === 'PATROL_ROBOT') {
+        const ok = canPlaceAt(st.buildings, hover.cell.x, hover.cell.y, 1, 1);
+        const { wx, wz } = cellToWorld(hover.cell.x, hover.cell.y);
+        ghost.showBuilding(wx, wz, 1, 1, ok);
       } else {
         ghost.hide();
       }

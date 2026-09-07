@@ -1,14 +1,16 @@
 import React from 'react';
-import { MAP_ROWS, MAP_COLS } from '../../gamemap/mapConfig.js';
+import { MAP_COLS, MAP_ROWS } from '../../gamemap/mapConfig.js';
 import { useGameState } from '../../state/GameStateContext.jsx';
 import ClayPanel from '../ui/ClayPanel.jsx';
 import ClayButton from '../ui/ClayButton.jsx';
 
-const TOTAL = MAP_ROWS * MAP_COLS;
+const TOTAL = MAP_COLS * MAP_ROWS;
 
-export default function BaseStatusPanel({ selectedTile }) {
-  const { paintedTiles, inkEnergy } = useGameState();
+export default function BaseStatusPanel({ selectedTile, onBuildClick }) {
+  const { paintedTiles, inkEnergy, buildings, defenses, selectedTool } = useGameState();
   const painted = Object.keys(paintedTiles).length;
+  const houseCount = buildings.length;
+  const hasPatrol = defenses.some((d) => (d.type || d.defenseType) === 'PATROL_ROBOT');
 
   return (
     <ClayPanel enter delay={0.06} depth="deep" className="w-[188px] p-4 rounded-[26px] flex flex-col gap-3 pointer-events-auto">
@@ -29,6 +31,13 @@ export default function BaseStatusPanel({ selectedTile }) {
       </div>
 
       <div>
+        <p className="text-[10px] text-clay-muted uppercase tracking-wider">Structures</p>
+        <p className="font-heading font-bold text-xs text-clay-text">
+          {houseCount} houses · {hasPatrol ? 'Patrol on' : 'No patrol'}
+        </p>
+      </div>
+
+      <div>
         <p className="text-[10px] text-clay-muted uppercase tracking-wider">Selected tile</p>
         <p className="font-heading font-bold text-xs text-clay-text">
           {selectedTile ? `R${selectedTile.row + 1} · C${selectedTile.column + 1}` : 'None'}
@@ -36,11 +45,11 @@ export default function BaseStatusPanel({ selectedTile }) {
       </div>
 
       <div>
-        <p className="text-[10px] text-clay-muted uppercase tracking-wider">Searchlight</p>
-        <p className="font-heading font-bold text-xs text-clay-text">Center · Level 1</p>
+        <p className="text-[10px] text-clay-muted uppercase tracking-wider">Tool</p>
+        <p className="font-heading font-bold text-xs text-clay-text">{selectedTool.replace(/_/g, ' ')}</p>
       </div>
 
-      <ClayButton variant="ghost" disabled className="w-full py-2 rounded-2xl text-[10px]">
+      <ClayButton variant="primary" onClick={onBuildClick} className="w-full py-2 rounded-2xl text-[10px]">
         Build
       </ClayButton>
     </ClayPanel>

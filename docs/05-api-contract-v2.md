@@ -5,25 +5,26 @@ Base URL: `/api`
 ---
 
 ## `POST /player/setup`
-One-time onboarding: pick character model + camo color.
+Onboarding: pick character model + camo color. **Also auto-assigns a home base plot** (no world-map selection).
 
 **Request**
 ```json
 { "userId": 12, "characterModel": 2, "camoColor": "BLUE" }
 ```
-**Response 200**
+**Response 200** (first-time setup)
 ```json
-{ "success": true, "characterModel": 2, "camoColor": "BLUE" }
+{ "success": true, "characterModel": 2, "camoColor": "BLUE", "plotId": 7 }
 ```
-**Response 409** (already set — camo color is permanent)
+**Response 200** (idempotent re-entry — camo already set; plot still ensured)
 ```json
-{ "success": false, "error": "CAMO_COLOR_ALREADY_SET" }
+{ "success": true, "characterModel": 2, "camoColor": "BLUE", "plotId": 7, "error": "CAMO_COLOR_ALREADY_SET" }
 ```
 
+Camo is not overwritten on re-entry. **Every successful setup returns `plotId`** for the player's auto-assigned home base.
 ---
 
-## `GET /map`
-Load global world map & plots (with roads metadata for rendering).
+## `GET /map` (legacy / optional)
+Previously loaded a shared world map of claimable sectors. **Not used by the current client flow** (home bases are auto-assigned). Endpoint may remain for tooling/admin.
 
 **Response 200**
 ```json
@@ -32,8 +33,8 @@ Load global world map & plots (with roads metadata for rendering).
 
 ---
 
-## `POST /plot/claim`
-Claim the player's first free plot, or buy an additional plot (distance-priced).
+## `POST /plot/claim` (deprecated)
+Manual plot claim from a world map. **Deprecated** — prefer auto-assignment via `/player/setup`. Kept for backward compatibility / admin.
 
 **Request**
 ```json

@@ -8,6 +8,7 @@ import { paintTile, clearTile, setTileHover, pulseTile, tickTile } from './Tile.
 import { applyGrayscaleWorld } from './applyGrayscale.js';
 import { createSearchlight } from './Searchlight.js';
 import { createMakeupHouse } from './MakeupHouse.js';
+import { buildGameHouse, placeHouseOnTile, createGamePatrolRobot } from './buildStructure.js';
 import { createAttacker } from '../character/buildCharacter.js';
 import {
   CAMERA,
@@ -27,9 +28,13 @@ export default function GameMap({
   onTileClick,
   onTileHover,
   onMakeupHouseClick,
+  onBuildingClick,
   apiRef,
   grayscale = false,
   paintedTiles = {},
+  buildings = [],
+  defenses = [],
+  selectedBuildingId = null,
   showSearchlight = true,
   showMakeupHouse = false,
   searchlightLevel = DEFAULT_SEARCHLIGHT_LEVEL,
@@ -37,11 +42,17 @@ export default function GameMap({
 }) {
   const mountRef = useRef(null);
   const callbacksRef = useRef({});
-  callbacksRef.current = { onTileClick, onTileHover, onMakeupHouseClick };
+  callbacksRef.current = { onTileClick, onTileHover, onMakeupHouseClick, onBuildingClick };
   const paintedRef = useRef(paintedTiles);
   paintedRef.current = paintedTiles;
   const attackerRef = useRef(attacker);
   attackerRef.current = attacker;
+  const buildingsRef = useRef(buildings);
+  buildingsRef.current = buildings;
+  const defensesRef = useRef(defenses);
+  defensesRef.current = defenses;
+  const selectedBuildingRef = useRef(selectedBuildingId);
+  selectedBuildingRef.current = selectedBuildingId;
   const worldRef = useRef(null);
 
   useEffect(() => {
@@ -115,6 +126,77 @@ export default function GameMap({
     const makeupHouse = showMakeupHouse && !grayscale ? createMakeupHouse() : null;
     if (makeupHouse) scene.add(makeupHouse);
 
+    const buildingsGroup = new THREE.Group();
+    scene.add(buildingsGroup);
+    let patrol = null;
+
+    const selectRing = new THREE.Mesh(
+      new THREE.TorusGeometry(TILE_SIZE * 0.95, 0.05, 10, 36),
+      new THREE.MeshBasicMaterial({ color: 0xf4a261, transparent: true, opacity: 0.9 })
+    );
+    selectRing.rotation.x = Math.PI / 2;
+    selectRing.position.y = TILE_HEIGHT + 0.04;
+    selectRing.visible = false;
+    scene.add(selectRing);
+
+    const syncBuildings = () => {
+      while (buildingsGroup.children.length) {
+        const child = buildingsGroup.children[0];
+        buildingsGroup.remove(child);
+        child.traverse((n) => {
+          if (n.geometry) n.geometry.dispose();
+          if (n.material) {
+            if (Array.isArray(n.material)) n.material.forEach((m) => m.dispose());
+            else n.material.dispose();
+          }
+        });
+      }
+      (buildingsRef.current || []).forEach((b) => {
+        if (b.buildingType === 'MAKEUP_HOUSE') return;
+        const w = b.footprintWidth || 2;
+        const h = b.footprintHeight || 2;
+        const house = buildGameHouse(b.buildingType, b.hexColor, b.level || 1, w, h);
+        placeHouseOnTile(house, b.xPos, b.yPos, w, h);
+        house.userData.buildingId = b.id;
+        house.traverse((n) => {
+          n.userData.buildingId = b.id;
+        });
+        buildingsGroup.add(house);
+      });
+    };
+    syncBuildings();
+
+    const syncPatrol = () => {
+      const has = (defensesRef.current || []).some((d) => (d.type || d.defenseType) === 'PATROL_ROBOT');
+      if (has && !patrol) {
+        patrol = createGamePatrolRobot();
+        scene.add(patrol.object);
+      } else if (!has && patrol) {
+        scene.remove(patrol.object);
+        patrol = null;
+      }
+    };
+    syncPatrol();
+
+    const syncSelection = () => {
+      const id = selectedBuildingRef.current;
+      const building = (buildingsRef.current || []).find((b) => b.id === id);
+      if (!building || building.buildingType === 'MAKEUP_HOUSE') {
+        selectRing.visible = false;
+        return;
+      }
+      const w = building.footprintWidth || 2;
+      const h = building.footprintHeight || 2;
+      const cx = building.xPos + (w - 1) / 2;
+      const cy = building.yPos + (h - 1) / 2;
+      const p = tileWorldPos(cx, cy);
+      selectRing.visible = true;
+      selectRing.position.set(p.x, TILE_HEIGHT + 0.04, p.z);
+      const scale = Math.max(w, h) * 0.85;
+      selectRing.scale.set(scale, scale, 1);
+    };
+    syncSelection();
+
     let attackerMesh = null;
     const syncAttacker = () => {
       const data = attackerRef.current;
@@ -138,12 +220,12 @@ export default function GameMap({
     syncAttacker();
 
     const rimGeo = new THREE.EdgesGeometry(new THREE.BoxGeometry(TILE_SIZE * 1.02, TILE_HEIGHT * 1.08, TILE_SIZE * 1.02));
-    const selectRim = new THREE.LineSegments(
+    const tileRim = new THREE.LineSegments(
       rimGeo,
       new THREE.LineBasicMaterial({ color: grayscale ? 0xdddddd : 0xf4a261, transparent: true, opacity: 0.95 })
     );
-    selectRim.visible = false;
-    scene.add(selectRim);
+    tileRim.visible = false;
+    scene.add(tileRim);
 
     const applyPainted = () => {
       const tiles = paintedRef.current || {};
@@ -177,6 +259,16 @@ export default function GameMap({
         const houseHits = raycaster.intersectObject(makeupHouse, true);
         if (houseHits.length) return { type: 'makeup' };
       }
+      if (!grayscale && buildingsGroup.children.length) {
+        const bHits = raycaster.intersectObjects(buildingsGroup.children, true);
+        if (bHits.length) {
+          let node = bHits[0].object;
+          while (node && node.userData.buildingId === undefined) node = node.parent;
+          if (node && node.userData.buildingId !== undefined) {
+            return { type: 'building', buildingId: node.userData.buildingId };
+          }
+        }
+      }
       if (grayscale) return { type: 'none' };
       const hits = raycaster.intersectObjects(grid.tiles, false);
       return hits.length ? { type: 'tile', tile: hits[0].object } : { type: 'none' };
@@ -198,7 +290,8 @@ export default function GameMap({
       }
       const hit = pick(e);
       const tile = hit.type === 'tile' ? hit.tile : null;
-      canvas.style.cursor = hit.type === 'makeup' || tile ? 'pointer' : pointerDown ? 'grabbing' : 'default';
+      canvas.style.cursor =
+        hit.type === 'makeup' || hit.type === 'building' || tile ? 'pointer' : pointerDown ? 'grabbing' : 'default';
       if (tile === hoveredTile) return;
       if (hoveredTile) setTileHover(hoveredTile, false);
       hoveredTile = tile;
@@ -224,10 +317,15 @@ export default function GameMap({
         if (cb) cb();
         return;
       }
+      if (hit.type === 'building') {
+        const cb = callbacksRef.current.onBuildingClick;
+        if (cb) cb(hit.buildingId);
+        return;
+      }
       if (hit.type !== 'tile') return;
       selectedTile = hit.tile;
-      selectRim.visible = true;
-      selectRim.position.copy(hit.tile.position);
+      tileRim.visible = true;
+      tileRim.position.copy(hit.tile.position);
       pulseTile(hit.tile);
       const cb = callbacksRef.current.onTileClick;
       if (cb) cb({ ...hit.tile.userData }, hit.tile);
@@ -297,7 +395,7 @@ export default function GameMap({
       };
     }
 
-    worldRef.current = { grid, applyPainted, selectRim, syncAttacker };
+    worldRef.current = { grid, applyPainted, syncAttacker, syncBuildings, syncPatrol, syncSelection };
 
     const resize = () => {
       const w = Math.floor(mount.clientWidth);
@@ -319,11 +417,14 @@ export default function GameMap({
     const clock = new THREE.Clock();
     const tick = () => {
       const dt = Math.min(0.05, clock.getDelta());
+      const elapsed = clock.elapsedTime;
       camera.zoom += (targetZoom - camera.zoom) * 0.12;
       camera.updateProjectionMatrix();
       grid.tiles.forEach(tickTile);
-      if (selectRim.visible && selectedTile) selectRim.position.copy(selectedTile.position);
+      if (tileRim.visible && selectedTile) tileRim.position.copy(selectedTile.position);
       if (searchlight) searchlight.update(dt, { alarm });
+      if (patrol) patrol.update(elapsed);
+      selectRing.rotation.z = elapsed * 0.6;
       syncAttacker();
       renderer.render(scene, camera);
       raf = requestAnimationFrame(tick);
@@ -361,6 +462,24 @@ export default function GameMap({
   useEffect(() => {
     attackerRef.current = attacker;
   }, [attacker]);
+
+  useEffect(() => {
+    buildingsRef.current = buildings;
+    if (worldRef.current) {
+      worldRef.current.syncBuildings();
+      worldRef.current.syncSelection();
+    }
+  }, [buildings]);
+
+  useEffect(() => {
+    defensesRef.current = defenses;
+    if (worldRef.current) worldRef.current.syncPatrol();
+  }, [defenses]);
+
+  useEffect(() => {
+    selectedBuildingRef.current = selectedBuildingId;
+    if (worldRef.current) worldRef.current.syncSelection();
+  }, [selectedBuildingId]);
 
   return (
     <div

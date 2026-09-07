@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Plus, Minus } from 'lucide-react';
+import { Plus, Minus, DoorOpen, Hammer } from 'lucide-react';
 import TopResourceBar from '../components/hud/TopResourceBar.jsx';
 import NavigationTabs from '../components/hud/NavigationTabs.jsx';
 import SideRaidPanel from '../components/hud/SideRaidPanel.jsx';
@@ -18,6 +18,16 @@ import { chipsForOutcome, resolveRaidOutcome } from '../raid/RaidSession.js';
 import { GATE_SPAWN_TILE, MAP_COLS, MAP_ROWS, SEARCHLIGHT_TILE } from '../gamemap/mapConfig.js';
 import { GAME_COLORS } from '../colors.js';
 
+const WALL_BREAK_HITS = 4;
+
+function isPerimeter(column, row) {
+  return column === 0 || row === 0 || column === MAP_COLS - 1 || row === MAP_ROWS - 1;
+}
+
+function isAtGate(column, row) {
+  return column === GATE_SPAWN_TILE.column && row === GATE_SPAWN_TILE.row;
+}
+
 export default function StealthRaidView() {
   const {
     raidTargetId,
@@ -28,6 +38,7 @@ export default function StealthRaidView() {
     showToast,
     setChips,
     transitionTo,
+    recordRaidResult,
   } = useGameState();
 
   const lockedCamo = raidSession?.camoColor || camoColor;
@@ -41,6 +52,8 @@ export default function StealthRaidView() {
     chasing: false,
     caught: false,
   });
+  const wallHitsRef = useRef(0);
+  const gateLockedRef = useRef(false);
 
   const [attacker, setAttacker] = useState({
     column: GATE_SPAWN_TILE.column,
@@ -61,6 +74,9 @@ export default function StealthRaidView() {
     shimmer: false,
     exposed: false,
     outcome: null,
+    wallHits: 0,
+    gateLocked: false,
+    breaking: false,
   });
 
   const alarmSystem = useRef(null);
@@ -68,6 +84,7 @@ export default function StealthRaidView() {
     alarmSystem.current = createAlarmSystem({
       onAlarmTriggered() {
         robot.current.chasing = true;
+        gateLockedRef.current = true;
       },
     });
   }
@@ -108,7 +125,7 @@ export default function StealthRaidView() {
         });
         soundEngine.playAlarmSound();
         sceneApi.current?.setAlarm?.(true);
-        showToast('SIREN — patrol robot activated', 'error');
+        showToast('SIREN — gate locked · break a wall to escape', 'error');
       }
 
       if (robot.current.chasing && !robot.current.caught) {
@@ -143,6 +160,7 @@ export default function StealthRaidView() {
             meter: result.meter,
             state: DETECTION_STATES.ALARM,
             alarm: true,
+            gateLocked: true,
             remaining: 0,
             outcome: 'CAUGHT',
           };
@@ -164,6 +182,9 @@ export default function StealthRaidView() {
           shimmer: result.beam.canSee && result.colorMatch,
           exposed: result.exposed,
           outcome: null,
+          wallHits: wallHitsRef.current,
+          gateLocked: gateLockedRef.current || result.alarmLatched,
+          breaking: prev.breaking,
         };
       });
 
@@ -175,7 +196,7 @@ export default function StealthRaidView() {
 
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (hud.outcome) return;
+      if (hud.outcome || hud.breaking) return;
       let { column, row } = attackerRef.current;
       let moved = false;
       if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') {
@@ -200,22 +221,71 @@ export default function StealthRaidView() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [hud.outcome]);
+  }, [hud.outcome, hud.breaking]);
 
   const settled = useRef(false);
   const finishRaid = (forcedOutcome) => {
     if (settled.current) return;
     settled.current = true;
-    const outcome = forcedOutcome || hud.outcome || resolveRaidOutcome({ alarmTriggered: hud.alarm, caught: robot.current.caught });
+    const outcome =
+      forcedOutcome ||
+      hud.outcome ||
+      resolveRaidOutcome({ alarmTriggered: hud.alarm, caught: robot.current.caught });
     const base = raidLoot?.chips || 200;
     const awarded = chipsForOutcome(outcome, base);
     setChips((prev) => prev + awarded);
+    recordRaidResult(outcome);
     showToast(
-      outcome === 'CAUGHT' ? 'Caught — 0 chips' : outcome === 'ESCAPED' ? `Escaped with 1.5× loot (+${awarded})` : `Silent extraction (+${awarded})`,
+      outcome === 'CAUGHT'
+        ? 'Caught — 0 chips · 5 min cooldown'
+        : outcome === 'ESCAPED'
+          ? `Escaped with 1.5× loot (+${awarded})`
+          : `Silent extraction (+${awarded})`,
       outcome === 'CAUGHT' ? 'error' : 'success'
     );
     transitionTo('BASE_BUILDER');
   };
+
+  const climbGate = () => {
+    if (hud.outcome) return;
+    if (!isAtGate(attacker.column, attacker.row)) {
+      showToast('Reach the south gate to climb out', 'info');
+      return;
+    }
+    if (hud.gateLocked || hud.alarm) {
+      showToast('Gate locked by alarm — break a perimeter wall', 'error');
+      return;
+    }
+    finishRaid('SILENT');
+  };
+
+  const hitWall = () => {
+    if (hud.outcome || robot.current.caught) return;
+    if (!isPerimeter(attacker.column, attacker.row)) {
+      showToast('Stand on a perimeter tile to break the wall', 'info');
+      return;
+    }
+    if (!hud.alarm && !hud.gateLocked) {
+      showToast('Wall break is for escape after alarm — or climb the open gate', 'info');
+      return;
+    }
+    setHud((prev) => ({ ...prev, breaking: true }));
+    wallHitsRef.current = Math.min(WALL_BREAK_HITS, wallHitsRef.current + 1);
+    const hits = wallHitsRef.current;
+    soundEngine.playBuildSound();
+    setHud((prev) => ({ ...prev, wallHits: hits, breaking: hits < WALL_BREAK_HITS }));
+    if (hits >= WALL_BREAK_HITS) {
+      showToast('Wall breached — escaping!', 'success');
+      setHud((prev) => ({ ...prev, outcome: 'ESCAPED', remaining: 0, breaking: false }));
+    } else {
+      showToast(`Wall hit ${hits}/${WALL_BREAK_HITS}`, 'info');
+    }
+  };
+
+  const atGate = isAtGate(attacker.column, attacker.row);
+  const atWall = isPerimeter(attacker.column, attacker.row);
+  const canClimb = atGate && !hud.gateLocked && !hud.alarm && !hud.outcome;
+  const canBreak = atWall && (hud.alarm || hud.gateLocked) && !hud.outcome;
 
   const stateTone =
     hud.state === DETECTION_STATES.ALARM
@@ -287,11 +357,64 @@ export default function StealthRaidView() {
             className="absolute top-36 left-1/2 -translate-x-1/2 z-40 pointer-events-none"
           >
             <ClayPanel depth="deep" className="px-6 py-2 rounded-full clay-alarm text-clay-danger font-heading font-extrabold text-sm tracking-widest">
-              🚨 SIREN — ROBOT ACTIVE
+              🚨 SIREN — GATE LOCKED · BREAK WALL
             </ClayPanel>
           </motion.div>
         )}
       </AnimatePresence>
+
+      {!hud.outcome && (
+        <ClayPanel
+          depth="deep"
+          className="absolute bottom-5 left-1/2 -translate-x-1/2 z-50 px-4 py-3 rounded-[24px] flex flex-col gap-2 pointer-events-auto min-w-[280px]"
+        >
+          <span className="text-[11px] font-heading uppercase font-bold text-clay-accent text-center tracking-wider">
+            Escape
+          </span>
+          {(hud.alarm || hud.gateLocked) && (
+            <div className="flex items-center gap-2">
+              <div className="flex-1 h-2.5 rounded-full clay-inset overflow-hidden flex gap-0.5 p-0.5">
+                {Array.from({ length: WALL_BREAK_HITS }).map((_, i) => (
+                  <div
+                    key={i}
+                    className={`flex-1 rounded-sm ${i < hud.wallHits ? 'bg-clay-accent' : 'bg-transparent'}`}
+                  />
+                ))}
+              </div>
+              <span className="text-[10px] font-bold text-clay-muted whitespace-nowrap">
+                {hud.wallHits}/{WALL_BREAK_HITS}
+              </span>
+            </div>
+          )}
+          <div className="flex items-center gap-2">
+            <ClayButton
+              variant={canClimb ? 'success' : 'ghost'}
+              disabled={!canClimb}
+              onClick={climbGate}
+              className="flex-1 py-2 rounded-2xl text-xs flex items-center justify-center gap-1"
+            >
+              <DoorOpen size={13} /> Climb Gate
+            </ClayButton>
+            <ClayButton
+              variant={canBreak ? 'danger' : 'ghost'}
+              disabled={!canBreak}
+              onClick={hitWall}
+              className="flex-1 py-2 rounded-2xl text-xs flex items-center justify-center gap-1"
+            >
+              <Hammer size={13} /> Break Wall
+            </ClayButton>
+          </div>
+          <p className="text-[10px] text-clay-muted text-center">
+            {hud.alarm || hud.gateLocked
+              ? atWall
+                ? 'Hit the wall 4 times (progress keeps)'
+                : 'Move to a perimeter tile'
+              : atGate
+                ? 'Gate open — climb for silent extract'
+                : 'Reach the south gate, or trigger alarm to wall-break'}
+          </p>
+        </ClayPanel>
+      )}
 
       <AnimatePresence>
         {hud.outcome && (
@@ -307,6 +430,7 @@ export default function StealthRaidView() {
               </h2>
               <p className="text-xs text-clay-muted">
                 Camo stayed {lockedCamo}. Loot {hud.outcome === 'CAUGHT' ? '0×' : hud.outcome === 'ESCAPED' ? '1.5×' : '1.0×'}.
+                {hud.outcome === 'CAUGHT' ? ' Capture cooldown started.' : ''}
               </p>
               <ClayButton variant="success" onClick={() => finishRaid(hud.outcome)} className="w-full py-2.5 rounded-2xl text-xs">
                 Return to base
@@ -343,7 +467,13 @@ export default function StealthRaidView() {
         isAlarmTriggered={hud.alarm}
         sessionLog={sessionLog}
         paintedTiles={paintedTiles}
-        onExtract={() => finishRaid(resolveRaidOutcome({ alarmTriggered: hud.alarm, caught: robot.current.caught }))}
+        onExtract={() => {
+          if (hud.alarm || hud.gateLocked) {
+            showToast('Alarm active — climb unavailable; break a wall', 'error');
+            return;
+          }
+          finishRaid(resolveRaidOutcome({ alarmTriggered: hud.alarm, caught: robot.current.caught }));
+        }}
       />
     </div>
   );

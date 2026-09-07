@@ -20,6 +20,7 @@ export default function MainMenuView() {
     transitionTo,
     showToast,
     isFirstRun,
+    provisionHomeBase,
   } = useGameState();
   const [selectedChar, setSelectedChar] = useState(characterModel || 1);
   const [selectedCamo, setSelectedCamo] = useState(camoColor || 'BLUE');
@@ -40,15 +41,18 @@ export default function MainMenuView() {
 
   const handleStartGame = async () => {
     soundEngine.playClickSound();
+    let plotId = null;
     try {
-      await setupPlayer(userId, selectedChar, selectedCamo);
+      const res = await setupPlayer(userId, selectedChar, selectedCamo);
+      plotId = res?.plotId;
       showToast('Operative setup synchronized!', 'success');
     } catch (e) {
-      showToast('Profile saved locally', 'info');
+      showToast('Profile saved locally — assigning home base', 'info');
     }
     setCharacterModel(selectedChar);
     setCamoColor(selectedCamo);
-    transitionTo(isFirstRun ? 'PAINT_TUTORIAL' : 'BASE_BUILDER');
+    provisionHomeBase(plotId);
+    transitionTo(isFirstRun ? 'PAINT_TUTORIAL' : 'BASE_BUILDER', plotId ? { plotId } : {});
   };
 
   return (
@@ -74,7 +78,8 @@ export default function MainMenuView() {
               Shadow Palette
             </h1>
             <p className="text-xs text-clay-muted">
-              Pick your operative and a starting camouflage. Change body color later at the Makeup House.
+              Pick your operative and starting camouflage. A new home base is assigned automatically — no map
+              selection. Recolor later at the Makeup House.
             </p>
           </div>
 

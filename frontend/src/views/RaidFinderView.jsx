@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Search } from 'lucide-react';
 import TopResourceBar from '../components/hud/TopResourceBar.jsx';
 import NavigationTabs from '../components/hud/NavigationTabs.jsx';
@@ -9,7 +9,15 @@ import { RAID_TARGETS } from '../data/raidTargets.js';
 import { useGameState } from '../state/GameStateContext.jsx';
 
 export default function RaidFinderView() {
-  const { transitionTo, setRaidTargetId, camoColor } = useGameState();
+  const { transitionTo, setRaidTargetId, camoColor, raidCooldownUntil } = useGameState();
+  const [cooldownLeft, setCooldownLeft] = useState(0);
+
+  useEffect(() => {
+    const tick = () => setCooldownLeft(Math.max(0, Math.ceil((raidCooldownUntil - Date.now()) / 1000)));
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, [raidCooldownUntil]);
 
   const handleRaid = (target) => {
     setRaidTargetId(target.ownerId);
@@ -26,7 +34,9 @@ export default function RaidFinderView() {
 
       <div className="absolute top-20 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
         <ClayPanel className="px-4 py-1.5 rounded-full text-xs font-bold text-clay-accent tracking-wide">
-          Camo {camoColor} locks on start · grayscale fortress · matching tiles hide you
+          {cooldownLeft > 0
+            ? `Capture cooldown ${cooldownLeft}s — raids locked`
+            : `Camo ${camoColor} locks on start · grayscale fortress · matching tiles hide you`}
         </ClayPanel>
       </div>
 
