@@ -1,6 +1,6 @@
 import { MAP_COLS, MAP_ROWS, SEARCHLIGHT_TILE } from './mapConfig.js';
 
-/** Compact footprints so structures fit the 12×10 raid-style fortress board. */
+/** Compact footprints so structures fit the fortress board. */
 export const GAME_FOOTPRINTS = {
   SLEEP_HOUSE: { w: 2, h: 2 },
   INK_HOUSE: { w: 2, h: 2 },
@@ -20,10 +20,11 @@ function inGrid(x, y) {
 export function inSearchlightPlaza(x, y, w = 1, h = 1) {
   const cx = Math.floor(SEARCHLIGHT_TILE.column);
   const cy = Math.floor(SEARCHLIGHT_TILE.row);
-  const minC = cx - 1;
-  const maxC = cx + 1;
-  const minR = cy - 1;
-  const maxR = cy + 1;
+  const clear = 2;
+  const minC = cx - clear;
+  const maxC = cx + clear;
+  const minR = cy - clear;
+  const maxR = cy + clear;
   return x + w - 1 >= minC && x <= maxC && y + h - 1 >= minR && y <= maxR;
 }
 

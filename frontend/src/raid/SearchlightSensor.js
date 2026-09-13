@@ -48,5 +48,10 @@ export function evaluateBeam(light, player) {
   };
 }
 
-export const SearchlightSensor = { evaluateBeam, normalizeAngleDiff };
+/** True when a map tile sits inside the current cone (for color reveal). */
+export function isTileInBeam(light, column, row) {
+  return evaluateBeam(light, { x: column, y: row }).inBeam;
+}
+
+export const SearchlightSensor = { evaluateBeam, normalizeAngleDiff, isTileInBeam };
 export default SearchlightSensor;

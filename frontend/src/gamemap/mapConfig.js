@@ -2,8 +2,9 @@
 // The playable grid is deliberately easy to resize: change ROWS/COLS and
 // everything (board slab, border, camera framing) follows.
 
-export const MAP_ROWS = 10;
-export const MAP_COLS = 12;
+/** 4× the original 12×10 fortress (48×40). */
+export const MAP_ROWS = 40;
+export const MAP_COLS = 48;
 
 export const TILE_SIZE = 1.15; // world units per tile — big paver look
 export const TILE_GAP = 0.08; // seams so each slab reads as a separate clay piece
@@ -15,6 +16,8 @@ export const TILE_HOVER_SCALE = 1.02;
 export const TILE_PITCH = TILE_SIZE + TILE_GAP;
 export const GRID_WIDTH = MAP_COLS * TILE_PITCH - TILE_GAP; // world width (x)
 export const GRID_DEPTH = MAP_ROWS * TILE_PITCH - TILE_GAP; // world depth (z)
+export const MAP_TILE_COUNT = MAP_COLS * MAP_ROWS;
+export const LARGE_MAP = MAP_TILE_COUNT > 400;
 
 // Palette matched to the clay-board reference: cream pavers, grey stone wall,
 // warm lamps, deep layered purple terrain. Playable tiles stay one neutral
@@ -57,18 +60,47 @@ export const RAID_COLORS = Object.fromEntries(
 // screen, board reads as a large rectangle (not a diamond).
 export const CAMERA = {
   azimuthDeg: 0,
-  elevationDeg: 56,
-  fov: 28,
-  fill: 0.84, // fortress occupies most of the view
-  zoomMin: 0.88,
-  zoomMax: 1.55,
-  defaultZoom: 1,
+  elevationDeg: LARGE_MAP ? 44 : 52,
+  fov: LARGE_MAP ? 38 : 32,
+  // >1 = closer than a full-sphere fit (flat board looks tiny otherwise)
+  fill: LARGE_MAP ? 1.42 : 0.92,
+  zoomMin: LARGE_MAP ? 0.85 : 0.45,
+  zoomMax: LARGE_MAP ? 2.6 : 2.2,
+  defaultZoom: LARGE_MAP ? 1.55 : 1,
 };
 
+/** GTA-style third-person follow — character framed above bottom HUD. */
+export const CHASE_CAM = {
+  distance: 5.6,
+  height: 2.85,
+  lookAhead: 1.05,
+  lookAtHeight: 0.55,
+  shoulder: 0.38,
+  fov: 58,
+  lookPitch: 0.2,
+  minDist: 3.6,
+  maxDist: 7.5,
+};
+
+/** Seconds to glide from one tile center to the next (WASD). */
+export const WALK_TILE_SECONDS = 0.28;
+
 export function cameraDistance() {
-  const radius = Math.hypot(GRID_WIDTH / 2 + 1.7, GRID_DEPTH / 2 + 2.2);
+  // Flat board ≠ bounding sphere: use the larger half-extent so 48×40 fills the view.
+  const halfW = GRID_WIDTH / 2 + (LARGE_MAP ? 0.8 : 1.7);
+  const halfD = GRID_DEPTH / 2 + (LARGE_MAP ? 1.0 : 2.2);
+  const radius = LARGE_MAP ? Math.max(halfW, halfD) : Math.hypot(halfW, halfD);
   const vHalf = (CAMERA.fov * Math.PI) / 180 / 2;
   return radius / Math.sin(vHalf) / CAMERA.fill;
+}
+
+/** Fog that never swallows the playable board from the iso camera. */
+export function boardFogRange() {
+  const dist = cameraDistance();
+  return {
+    near: dist * 1.15,
+    far: dist * 2.4,
+  };
 }
 
 export function tileWorldPos(column, row) {

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { MAP_COLORS } from './mapConfig.js';
+import { MAP_COLORS, boardFogRange, LARGE_MAP } from './mapConfig.js';
 import { SLAB_HALF_W, SLAB_HALF_D } from './MapGround.js';
 
 // ─── Purple clay environment in the reference style ──────────────────────
@@ -116,7 +116,7 @@ export function createOuterTerrain() {
 
   // Deep base far past the frustum
   const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(260, 260),
+    new THREE.PlaneGeometry(Math.max(260, SLAB_HALF_W * 8), Math.max(260, SLAB_HALF_D * 8)),
     new THREE.MeshStandardMaterial({ color: MAP_COLORS.terrainBase, roughness: 0.9 })
   );
   ground.rotation.x = -Math.PI / 2;
@@ -135,29 +135,52 @@ export function createOuterTerrain() {
   L3.position.y = -1.05;
   group.add(L3);
 
-  // Clay flora scattered on the strata ring — never inside the walls,
-  // never on the board slab, and clear of the gate path corridor
-  for (let i = 0; i < 42; i++) {
-    const angle = (i / 42) * Math.PI * 2 + rand(i, 10) * 0.32;
+  // Clay flora scattered on the strata ring — denser on large maps
+  const floraCount = LARGE_MAP ? 140 : 42;
+  for (let i = 0; i < floraCount; i++) {
+    const angle = (i / floraCount) * Math.PI * 2 + rand(i, 10) * 0.32;
     const c = Math.cos(angle);
     const s = Math.sin(angle);
     const edgeX = SLAB_HALF_W + 0.8;
     const edgeZ = SLAB_HALF_D + 0.8;
     const n = 4.2;
     const ringBase = 1 / Math.pow(Math.pow(Math.abs(c) / edgeX, n) + Math.pow(Math.abs(s) / edgeZ, n), 1 / n);
-    const dist = ringBase + rand(i, 11) * 2.4;
+    const dist = ringBase + rand(i, 11) * (LARGE_MAP ? 4.5 : 2.4);
     const x = c * dist;
     const z = s * dist;
     if (Math.abs(x) < SLAB_HALF_W + 0.35 && Math.abs(z) < SLAB_HALF_D + 0.35) continue; // off the board
     if (Math.abs(x) < 2.6 && z > SLAB_HALF_D - 0.5) continue; // keep gate path clear
 
     const roll = rand(i, 12);
-    const item = roll < 0.38 ? blobTree(i) : roll < 0.62 ? pineTree(i) : roll < 0.82 ? bush(i) : rock(i);
+    const item = roll < 0.34 ? blobTree(i) : roll < 0.55 ? pineTree(i) : roll < 0.78 ? bush(i) : rock(i);
     item.position.set(x, -0.18, z);
     item.rotation.y = rand(i, 13) * Math.PI * 2;
-    const sc = 0.8 + rand(i, 14) * 0.5;
+    const sc = 0.75 + rand(i, 14) * 0.7;
     item.scale.multiplyScalar(sc);
+    if (LARGE_MAP) {
+      item.traverse((ch) => {
+        if (ch.isMesh) ch.castShadow = false;
+      });
+    }
     group.add(item);
+  }
+
+  // Extra scattered rock fields outside for a wilder world ring
+  if (LARGE_MAP) {
+    for (let i = 0; i < 60; i++) {
+      const angle = rand(i, 20) * Math.PI * 2;
+      const dist = SLAB_HALF_W + 3 + rand(i, 21) * 8;
+      const x = Math.cos(angle) * dist;
+      const z = Math.sin(angle) * dist * (SLAB_HALF_D / SLAB_HALF_W);
+      if (Math.abs(x) < SLAB_HALF_W + 0.5 && Math.abs(z) < SLAB_HALF_D + 0.5) continue;
+      const item = rand(i, 22) > 0.45 ? rock(i + 200) : bush(i + 200);
+      item.position.set(x, -0.2, z);
+      item.scale.multiplyScalar(0.7 + rand(i, 23) * 0.9);
+      item.traverse((ch) => {
+        if (ch.isMesh) ch.castShadow = false;
+      });
+      group.add(item);
+    }
   }
 
   return group;
@@ -166,5 +189,6 @@ export function createOuterTerrain() {
 /** Purple backdrop and gentle fog so the strata melt out at the edges. */
 export function applyMapAtmosphere(scene) {
   scene.background = new THREE.Color(MAP_COLORS.sky);
-  scene.fog = new THREE.Fog(MAP_COLORS.sky, 46, 130);
+  const { near, far } = boardFogRange();
+  scene.fog = new THREE.Fog(MAP_COLORS.sky, near, far);
 }

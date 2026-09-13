@@ -68,7 +68,8 @@ export default function RaidTargetCard({ target, onRaid }) {
         </span>
         <span className="flex items-center gap-1">
           <Shield size={12} />
-          {target.lighthouse ? 'Lighthouse on' : 'No lighthouse'}
+          {target.lighthouse ? 'Lighthouse' : 'No light'}
+          {target.patrol ? ' · Patrol' : ''}
         </span>
       </div>
 

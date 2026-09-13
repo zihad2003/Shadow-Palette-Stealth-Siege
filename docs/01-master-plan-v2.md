@@ -19,7 +19,8 @@
 ## 🏗️ Build Phase
 
 ### Plot
-- Fixed size: **20×20 = 400 tiles** per base (single grid, not multiple sub-plots)
+- Fixed size: **48×40 = 1920 tiles** per base (single grid, not multiple sub-plots) — set in `frontend/src/gamemap/mapConfig.js` (`MAP_COLS`/`MAP_ROWS`)
+- Starter houses spawn as **ruins** at fixed slots; the player walks up and repairs them (F) instead of placing from a menu
 
 ### Buildings (max 16 tiles footprint each, 2–3 model variants each)
 | Building | Suggested footprint | Purpose |

@@ -14,11 +14,15 @@
 | Chips | Stored on base, stolen in raids | Traded 1:1 for coins, or spent on Prestige |
 
 ## 3. Home Base (Plot)
+- Grid: **48×40 = 1920 tiles** (`MAP_COLS`/`MAP_ROWS` in `frontend/src/gamemap/mapConfig.js`; backend `Colors.PLOT_TOTAL_TILES` must match)
 - Playable fortress board shared visually with raid mode (colored at home, grayscale in raid)
+- Starter buildings pre-placed as **ruins**; player walks to them and repairs with F (no menu placement)
 - First base: **auto-assigned on `POST /player/setup`** — player never picks a sector on a world map
 - Expansion plots: out of scope / deferred
 
 ## 4. Buildings
+> Current build uses a uniform **2×2** footprint for all houses (`starterRuins.js`). The table below is the design target; align code or table before finalizing.
+
 | Building | Footprint (≤16 tile cap) | Levels | Effect per level |
 |---|---|---|---|
 | Ink House | 3×3 = 9 | 1–3 | +Ink regen rate |

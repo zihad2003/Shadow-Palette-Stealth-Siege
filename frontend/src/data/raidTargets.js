@@ -11,6 +11,7 @@ export const RAID_TARGETS = [
     camo: 'RED',
     buildings: 4,
     lighthouse: true,
+    patrol: false,
   },
   {
     id: 55,
@@ -24,6 +25,7 @@ export const RAID_TARGETS = [
     camo: 'BLUE',
     buildings: 7,
     lighthouse: true,
+    patrol: true,
   },
   {
     id: 77,
@@ -37,6 +39,7 @@ export const RAID_TARGETS = [
     camo: 'GREEN',
     buildings: 3,
     lighthouse: false,
+    patrol: false,
   },
   {
     id: 89,
@@ -50,6 +53,7 @@ export const RAID_TARGETS = [
     camo: 'YELLOW',
     buildings: 5,
     lighthouse: true,
+    patrol: true,
   },
   {
     id: 99,
@@ -63,6 +67,7 @@ export const RAID_TARGETS = [
     camo: 'PURPLE',
     buildings: 8,
     lighthouse: true,
+    patrol: true,
   },
   {
     id: 12,
@@ -76,6 +81,7 @@ export const RAID_TARGETS = [
     camo: 'BLUE',
     buildings: 2,
     lighthouse: false,
+    patrol: false,
   },
   {
     id: 18,
@@ -89,6 +95,7 @@ export const RAID_TARGETS = [
     camo: 'RED',
     buildings: 6,
     lighthouse: true,
+    patrol: true,
   },
   {
     id: 63,
@@ -102,6 +109,7 @@ export const RAID_TARGETS = [
     camo: 'GREEN',
     buildings: 6,
     lighthouse: true,
+    patrol: true,
   },
 ];
 

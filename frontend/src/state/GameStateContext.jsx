@@ -6,6 +6,7 @@ import { soundEngine } from '../soundEngine.js';
 import { createRaidSession, rejectColorChange } from '../raid/RaidSession.js';
 import { MAP_COLS, MAP_ROWS } from '../gamemap/mapConfig.js';
 import { canPlaceOnGameMap, getGameFootprint } from '../gamemap/placeUtils.js';
+import { createStarterRuins, REPAIR_BUILDING_COST, findRuinNear } from '../gamemap/starterRuins.js';
 
 const GameStateContext = createContext(null);
 
@@ -13,6 +14,7 @@ export const INTRO_DONE_KEY = 'sp_intro_done_v1';
 export const DAILY_LOGIN_KEY = 'sp_daily_login_v1';
 export const PAINT_TILE_INK = 5;
 export const PLACE_BUILDING_COST = { coins: 100, ink: 15 };
+export { REPAIR_BUILDING_COST };
 export const PATROL_UNLOCK_RAIDS = 3;
 export const PATROL_UNLOCK_COINS = 200;
 export const DAILY_LOGIN_COINS = 100;
@@ -78,23 +80,12 @@ export function GameStateProvider({ children }) {
   // New users receive this home base automatically — no world-map plot pick
   const [selectedColor, setSelectedColor] = useState('GREEN');
   const [selectedTool, setSelectedTool] = useState('PAINT');
-  const [buildings, setBuildings] = useState([
-    {
-      id: 1,
-      buildingType: 'SLEEP_HOUSE',
-      xPos: 1,
-      yPos: 1,
-      footprintWidth: 2,
-      footprintHeight: 2,
-      hexColor: '#F1FAEE',
-      level: 1,
-    },
-  ]);
+  const [buildings, setBuildings] = useState(() => createStarterRuins());
   const [defenses, setDefenses] = useState([]);
   const [paintedTiles, setPaintedTiles] = useState({});
   const [selectedBuildingId, setSelectedBuildingId] = useState(null);
   const [raidLoot, setRaidLoot] = useState(null);
-  const [nextEntityId, setNextEntityId] = useState(2);
+  const [nextEntityId, setNextEntityId] = useState(() => createStarterRuins().length + 1);
 
   const [raidTargetId, setRaidTargetId] = useState(34);
   const [raidData, setRaidData] = useState(null);
@@ -256,8 +247,13 @@ export function GameStateProvider({ children }) {
 
   const paintBuilding = (buildingId) => {
     const building = buildings.find((b) => b.id === buildingId);
+    if (!building) return false;
+    if (building.ruined) {
+      showToast('Repair this ruin first (walk close · press F)', 'info');
+      return false;
+    }
     const nextHex = hexForColor(selectedColor) || GAME_COLORS.GREEN;
-    if (!building || building.hexColor === nextHex) return false;
+    if (building.hexColor === nextHex) return false;
     if (inkEnergy < PAINT_TILE_INK) {
       showToast(`Painting needs ${PAINT_TILE_INK} Ink`, 'error');
       return false;
@@ -271,10 +267,53 @@ export function GameStateProvider({ children }) {
     return true;
   };
 
-  const houseCount = buildings.filter((b) =>
-    ['SLEEP_HOUSE', 'INK_HOUSE', 'CRAFT_HOUSE', 'COIN_GENERATOR'].includes(b.buildingType)
+  const repairedCount = buildings.filter(
+    (b) =>
+      !b.ruined && ['SLEEP_HOUSE', 'INK_HOUSE', 'CRAFT_HOUSE', 'COIN_GENERATOR'].includes(b.buildingType)
   ).length;
-  const taskStage = !hasRecamoed ? 'RECAMO' : houseCount < 4 ? 'BUILD_HOUSES' : 'READY_TO_RAID';
+  const taskStage = !hasRecamoed ? 'RECAMO' : repairedCount < 4 ? 'REPAIR_HOUSES' : 'READY_TO_RAID';
+
+  const repairBuilding = (buildingId) => {
+    const building = buildings.find((b) => b.id === buildingId);
+    if (!building) {
+      showToast('No ruin here', 'info');
+      return false;
+    }
+    if (!building.ruined) {
+      showToast('Already repaired', 'info');
+      return false;
+    }
+    if (coins < REPAIR_BUILDING_COST.coins || inkEnergy < REPAIR_BUILDING_COST.ink) {
+      showToast(
+        `Repair needs ${REPAIR_BUILDING_COST.coins} coins and ${REPAIR_BUILDING_COST.ink} ink`,
+        'error'
+      );
+      return false;
+    }
+    const hex = hexForColor(selectedColor) || GAME_COLORS.GREEN;
+    soundEngine.playBuildSound();
+    setCoins((v) => v - REPAIR_BUILDING_COST.coins);
+    setInkEnergy((v) => Math.max(0, v - REPAIR_BUILDING_COST.ink));
+    setBuildings((prev) =>
+      prev.map((b) =>
+        b.id === buildingId
+          ? { ...b, ruined: false, hexColor: hex, colorKey: selectedColor, level: 1 }
+          : b
+      )
+    );
+    setSelectedBuildingId(buildingId);
+    showToast(`Repaired ${building.buildingType.replace(/_/g, ' ')}`, 'success');
+    return true;
+  };
+
+  const repairRuinNear = (column, row) => {
+    const ruin = findRuinNear(buildings, column, row);
+    if (!ruin) {
+      showToast('Walk onto a ruined house · press F to repair', 'info');
+      return false;
+    }
+    return repairBuilding(ruin.id);
+  };
 
   const handlePlaceAt = async (x, y) => {
     if (selectedTool === 'PAINT') return paintTile(x, y);
@@ -306,47 +345,12 @@ export function GameStateProvider({ children }) {
       return true;
     }
 
-    if (!PLACEABLE_BUILDINGS.includes(selectedTool)) return false;
-
-    const { w, h } = getGameFootprint(selectedTool);
-    if (!canPlaceOnGameMap(buildings, x, y, w, h)) {
-      showToast('Invalid placement — searchlight plaza or overlap', 'error');
-      return false;
-    }
-    if (coins < PLACE_BUILDING_COST.coins || inkEnergy < PLACE_BUILDING_COST.ink) {
-      showToast(`Needs ${PLACE_BUILDING_COST.coins} coins and ${PLACE_BUILDING_COST.ink} ink`, 'error');
+    if (PLACEABLE_BUILDINGS.includes(selectedTool)) {
+      showToast('Houses start ruined — walk to one and press F to repair', 'info');
       return false;
     }
 
-    const hex = hexForColor(selectedColor) || GAME_COLORS.GREEN;
-    const id = nextEntityId;
-    setNextEntityId((n) => n + 1);
-    soundEngine.playBuildSound();
-    try {
-      await placeBuilding(userId, activePlotId, selectedTool, 1, x, y, hex);
-    } catch (e) {
-      /* offline ok */
-    }
-    setCoins((v) => v - PLACE_BUILDING_COST.coins);
-    setInkEnergy((v) => Math.max(0, v - PLACE_BUILDING_COST.ink));
-    setBuildings((prev) => [
-      ...prev,
-      {
-        id,
-        buildingType: selectedTool,
-        xPos: x,
-        yPos: y,
-        footprintWidth: w,
-        footprintHeight: h,
-        hexColor: hex,
-        colorKey: selectedColor,
-        level: 1,
-      },
-    ]);
-    setSelectedBuildingId(id);
-    setSelectedTool('PAINT');
-    showToast(`Placed ${selectedTool.replace(/_/g, ' ')}`, 'success');
-    return true;
+    return false;
   };
 
   const handleBuildingSelect = (buildingId) => {
@@ -361,6 +365,10 @@ export function GameStateProvider({ children }) {
     const building = buildings.find((b) => b.id === selectedBuildingId);
     if (!building) {
       showToast('Select a building on your base first', 'info');
+      return;
+    }
+    if (building.ruined) {
+      showToast('Repair this ruin first (walk close · press F)', 'info');
       return;
     }
     if (building.level >= 3) {
@@ -456,11 +464,13 @@ export function GameStateProvider({ children }) {
       showToast('Prestige capped at 5', 'info');
       return false;
     }
-    const upgradable = buildings.filter((b) =>
-      ['SLEEP_HOUSE', 'INK_HOUSE', 'CRAFT_HOUSE', 'COIN_GENERATOR'].includes(b.buildingType)
+    const upgradable = buildings.filter(
+      (b) =>
+        !b.ruined &&
+        ['SLEEP_HOUSE', 'INK_HOUSE', 'CRAFT_HOUSE', 'COIN_GENERATOR'].includes(b.buildingType)
     );
     if (upgradable.length < 4 || !upgradable.every((b) => (b.level || 1) >= 3)) {
-      showToast('All buildings must be Lvl 3 before Prestige', 'error');
+      showToast('Repair & upgrade 4 houses to Lvl 3 before Prestige', 'error');
       return false;
     }
     const next = prestigeLevel + 1;
@@ -468,22 +478,12 @@ export function GameStateProvider({ children }) {
     setDefenses([]);
     setPaintedTiles({});
     setSelectedBuildingId(null);
-    setBuildings([
-      {
-        id: 1,
-        buildingType: 'SLEEP_HOUSE',
-        xPos: 1,
-        yPos: 1,
-        footprintWidth: 2,
-        footprintHeight: 2,
-        hexColor: '#F1FAEE',
-        level: 1,
-      },
-    ]);
-    setNextEntityId(2);
+    const ruins = createStarterRuins();
+    setBuildings(ruins);
+    setNextEntityId(ruins.length + 1);
     setHasRecamoed(false);
     soundEngine.playSuccessSound();
-    showToast(`Prestige ${next} — base reset · +${next * 5}% stealth bonus`, 'success');
+    showToast(`Prestige ${next} — ruins reset · +${next * 5}% stealth bonus`, 'success');
     return true;
   };
 
@@ -542,6 +542,8 @@ export function GameStateProvider({ children }) {
     handleUpgradeSelected,
     handlePlaceAt,
     handleBuildingSelect,
+    repairBuilding,
+    repairRuinNear,
     unlockPatrolRobot,
     recordRaidResult,
     claimDailyLogin,

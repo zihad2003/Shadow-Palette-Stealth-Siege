@@ -1,16 +1,16 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
-import { MAP_COLORS } from './mapConfig.js';
+import { MAP_COLORS, LARGE_MAP } from './mapConfig.js';
 import { SLAB_HALF_W, SLAB_HALF_D } from './MapGround.js';
 
 // ─── Fortress border in the reference style ──────────────────────────────
 // Running-bond clay bricks, corner + mid-wall lamp towers, and a south gate
 // with red banners and a stone path. Searchlight + Makeup House are added by GameMap.
 
-const BRICK_L = 0.72;
+const BRICK_L = LARGE_MAP ? 2.4 : 0.72;
 const BRICK_H = 0.38;
-const BRICK_W = 0.7;
-const COURSES = 3;
+const BRICK_W = LARGE_MAP ? 0.85 : 0.7;
+const COURSES = LARGE_MAP ? 2 : 3;
 const GATE_HALF = 1.35;
 
 export const WALL_X = SLAB_HALF_W - 0.62;
@@ -41,7 +41,7 @@ function buildBrickRun(group, geo, mats, horizontal, fixed, from, to, seed) {
         brick.position.set(fixed, y, start + len / 2);
       }
       brick.rotation.z = (rand(i, 3) - 0.5) * 0.02;
-      brick.castShadow = true;
+      brick.castShadow = !LARGE_MAP;
       brick.receiveShadow = true;
       group.add(brick);
     }

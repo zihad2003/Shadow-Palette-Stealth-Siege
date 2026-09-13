@@ -12,7 +12,9 @@ public class Colors {
 
     public static final Set<String> ALLOWED_CAMO_COLORS = Set.of("RED", "GREEN", "BLUE", "YELLOW", "PURPLE");
     public static final double MAX_COLOR_QUOTA_PERCENT = 35.0;
-    public static final int PLOT_TOTAL_TILES = 400; // 20x20 grid
+    public static final int PLOT_COLS = 48;
+    public static final int PLOT_ROWS = 40;
+    public static final int PLOT_TOTAL_TILES = PLOT_COLS * PLOT_ROWS; // 48x40 grid (matches frontend mapConfig.js)
 
     public static String normalizeHex(String hex) {
         if (hex == null) return WHITE;

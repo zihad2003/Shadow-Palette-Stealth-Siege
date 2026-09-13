@@ -20,7 +20,7 @@ export function createTileGrid(grayscale = false) {
       tile.position.z = -GRID_DEPTH / 2 + TILE_SIZE / 2 + row * TILE_PITCH;
       group.add(tile);
       tiles.push(tile);
-      byId.set(tile.userData.tileId, tile);
+      byId.set(`tile_${column}_${row}`, tile);
     }
   }
 
@@ -28,7 +28,7 @@ export function createTileGrid(grayscale = false) {
     group,
     tiles, // flat array for raycaster.intersectObjects(tiles)
     getTile(row, column) {
-      return byId.get(`tile-${row}-${column}`) || null;
+      return byId.get(`tile_${column}_${row}`) || null;
     },
     dispose() {
       tiles.forEach((tile) => tile.material.dispose());

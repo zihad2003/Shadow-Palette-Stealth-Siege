@@ -45,7 +45,7 @@ export function createTile(row, column, grayscale = false) {
   });
 
   const tile = new THREE.Mesh(getTileGeometry(), material);
-  tile.castShadow = true;
+  tile.castShadow = false; // large grids stay performant; walls/buildings still cast
   tile.receiveShadow = true;
   tile.rotation.y = jitter(row, column, 1) * 0.012;
   tile.userData = {
@@ -87,12 +87,36 @@ export function paintTile(tile, colorKey) {
   tile.userData.paintFrom = tile.material.color.clone();
   tile.userData.paintTo = new THREE.Color(hex);
   tile.userData.paintT = 0;
+  tile.userData.paintBurst = 1;
+}
+
+export function revealTileColor(tile, reveal) {
+  const ud = tile.userData;
+  if (!ud.grayscale) return;
+  if (reveal && ud.realColor) {
+    const hex = hexForColor(ud.realColor);
+    if (!hex) return;
+    if (!ud.revealed) {
+      ud.revealed = true;
+      ud.paintFrom = tile.material.color.clone();
+      ud.paintTo = new THREE.Color(hex);
+      ud.paintT = 0;
+    } else if (ud.paintT >= 1) {
+      tile.material.color.set(hex);
+    }
+  } else if (ud.revealed) {
+    ud.revealed = false;
+    ud.paintFrom = tile.material.color.clone();
+    ud.paintTo = new THREE.Color(paletteFor(tile).tileNeutral);
+    ud.paintT = 0;
+  }
 }
 
 export function clearTile(tile) {
   tile.userData.painted = false;
   tile.userData.color = null;
   tile.userData.realColor = null;
+  tile.userData.revealed = false;
   tile.userData.paintFrom = tile.material.color.clone();
   tile.userData.paintTo = new THREE.Color(paletteFor(tile).tileNeutral);
   tile.userData.paintT = tile.userData.grayscale ? 1 : 0;
@@ -109,12 +133,18 @@ export function setTileHover(tile, hovered) {
 
 export function pulseTile(tile) {
   tile.userData.press = 1;
+  tile.userData.paintBurst = Math.max(tile.userData.paintBurst || 0, 0.85);
 }
 
 export function tickTile(tile) {
   const ud = tile.userData;
+  const animating = (ud.paintTo && ud.paintT < 1) || ud.hoverLift || ud.press || ud.paintBurst;
+  if (!animating && ud.paintT >= 1 && !ud.hoverTarget && !ud.press) {
+    // Skip math when idle — critical on large grids
+    if (Math.abs(ud.hoverLift) < 0.0001 && Math.abs(ud.hoverScale - 1) < 0.0001) return;
+  }
   if (ud.paintTo && ud.paintT < 1) {
-    ud.paintT = Math.min(1, ud.paintT + 0.09);
+    ud.paintT = Math.min(1, ud.paintT + 0.11);
     if (ud.paintFrom) {
       tile.material.color.copy(ud.paintFrom).lerp(ud.paintTo, easePaint(ud.paintT));
     }
@@ -122,7 +152,9 @@ export function tickTile(tile) {
   ud.hoverLift += (ud.hoverTarget - ud.hoverLift) * 0.22;
   ud.hoverScale += (ud.scaleTarget - ud.hoverScale) * 0.22;
   ud.press *= 0.78;
-  const squash = 1 - ud.press * 0.14;
-  tile.position.y = ud.baseY + ud.hoverLift;
-  tile.scale.set(ud.hoverScale, squash, ud.hoverScale);
+  if (ud.paintBurst) ud.paintBurst *= 0.88;
+  const burst = ud.paintBurst || 0;
+  const squash = 1 - ud.press * 0.14 + burst * 0.12;
+  tile.position.y = ud.baseY + ud.hoverLift + burst * 0.08;
+  tile.scale.set(ud.hoverScale * (1 + burst * 0.08), squash, ud.hoverScale * (1 + burst * 0.08));
 }

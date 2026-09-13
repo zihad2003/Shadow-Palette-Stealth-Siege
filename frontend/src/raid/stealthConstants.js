@@ -11,7 +11,7 @@ export const STEALTH_CONSTANTS = {
   alarmAt: 100,
 };
 
-export const RAID_DURATION_SECONDS = 90;
+export const RAID_DURATION_SECONDS = 150;
 
 export const RAID_OUTCOMES = {
   SILENT: { id: 'SILENT', label: 'Silent Extraction', chipMultiplier: 1.0 },
@@ -28,9 +28,9 @@ export const DETECTION_STATES = {
 
 /** Level changes radius + sweep speed, not the clay mesh size. */
 export const SEARCHLIGHT_LEVELS = {
-  1: { coneAngleDeg: 48, rangeTiles: 4.6, sweepDegPerSec: 38, alarmRangeBonus: 1 },
-  2: { coneAngleDeg: 56, rangeTiles: 6.0, sweepDegPerSec: 52, alarmRangeBonus: 1 },
-  3: { coneAngleDeg: 64, rangeTiles: 7.4, sweepDegPerSec: 68, alarmRangeBonus: 1 },
+  1: { coneAngleDeg: 48, rangeTiles: 8.5, sweepDegPerSec: 28, alarmRangeBonus: 2 },
+  2: { coneAngleDeg: 56, rangeTiles: 11, sweepDegPerSec: 38, alarmRangeBonus: 2 },
+  3: { coneAngleDeg: 64, rangeTiles: 14, sweepDegPerSec: 48, alarmRangeBonus: 3 },
 };
 
 export const DEFAULT_SEARCHLIGHT_LEVEL = 1;

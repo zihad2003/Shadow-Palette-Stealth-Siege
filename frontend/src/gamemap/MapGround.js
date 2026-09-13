@@ -18,6 +18,6 @@ export function createMapGround() {
   slab.name = 'MapGround';
   slab.position.y = -0.36;
   slab.receiveShadow = true;
-  slab.castShadow = true;
+  slab.castShadow = false;
   return slab;
 }

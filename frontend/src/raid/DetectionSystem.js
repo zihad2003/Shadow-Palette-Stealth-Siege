@@ -17,9 +17,7 @@ export function stateFromMeter(meter, alarmLatched) {
   return DETECTION_STATES.NORMAL;
 }
 
-/**
- * Pipeline: beam → real tile color → locked camo → match → stealth score → meter.
- */
+/** Instant alarm on color mismatch under the beam; match stays invisible. */
 export function evaluateDetectionTick({
   light,
   player,
@@ -36,11 +34,16 @@ export function evaluateDetectionTick({
   const exposed = beam.canSee && !colorMatch;
 
   let nextMeter = meter;
+  let nextAlarm = alarmLatched;
+  let justAlarmed = false;
+
   if (alarmLatched) {
     nextMeter = Math.max(meter, STEALTH_CONSTANTS.alarmAt);
   } else if (exposed) {
-    const exposure = stealthScore / STEALTH_CONSTANTS.baseVisibility;
-    nextMeter = meter + STEALTH_CONSTANTS.meterRisePerSec * exposure * dt;
+    // Instant siren when beam hits a mismatched tile
+    nextMeter = STEALTH_CONSTANTS.alarmAt;
+    nextAlarm = true;
+    justAlarmed = true;
   } else if (beam.canSee && colorMatch) {
     nextMeter = meter - STEALTH_CONSTANTS.matchMeterFallPerSec * dt;
   } else {
@@ -48,7 +51,6 @@ export function evaluateDetectionTick({
   }
   nextMeter = Math.max(0, Math.min(STEALTH_CONSTANTS.alarmAt, nextMeter));
 
-  const nextAlarm = alarmLatched || nextMeter >= STEALTH_CONSTANTS.alarmAt;
   const state = stateFromMeter(nextMeter, nextAlarm);
 
   return {
@@ -59,7 +61,7 @@ export function evaluateDetectionTick({
     meter: nextMeter,
     state,
     alarmLatched: nextAlarm,
-    justAlarmed: !alarmLatched && nextAlarm,
+    justAlarmed,
     reason: !beam.canSee
       ? beam.reason
       : colorMatch

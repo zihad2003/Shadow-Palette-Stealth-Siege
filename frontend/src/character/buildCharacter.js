@@ -152,7 +152,21 @@ export function markKeepColor(object) {
   });
 }
 
-function buildCore(camo, skin, ink) {
+/** Head pivots at the neck so gait sway / nods look natural. */
+const HEAD_PIVOT_Y = 1.45;
+/** Convert a world-space Y (figure at origin) to head-group local Y. */
+const hy = (worldY) => worldY - HEAD_PIVOT_Y;
+
+const HAIR_HEX = '#2A1F1E';
+const MOUTH_HEX = '#5A3A3A';
+const CHEEK_HEX = '#F2A08A';
+
+/** Find the forearm sub-group of an arm built by createArm. */
+function forearmOf(arm) {
+  return arm?.children.find((c) => c.isGroup) || null;
+}
+
+function buildCore(camo, skin, ink, accent) {
   const root = new THREE.Group();
   root.name = 'CoreFigure';
 
@@ -176,41 +190,87 @@ function buildCore(camo, skin, ink) {
   chest.rotation.x = -0.12;
   root.add(chest);
 
+  // Crossed chest straps
+  [-1, 1].forEach((side) => {
+    const strap = addShadow(new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.66, 0.04), ink));
+    strap.position.set(side * 0.02, 1.0, 0.315);
+    strap.rotation.z = side * 0.6;
+    root.add(strap);
+  });
+  const strapPin = addShadow(new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.03, 12), accent));
+  strapPin.rotation.x = Math.PI / 2;
+  strapPin.position.set(0, 1.0, 0.34);
+  root.add(strapPin);
+
   // Neck
   const neck = addShadow(new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 0.14, 12), skin));
   neck.position.y = 1.38;
   root.add(neck);
 
-  // Head
+  // Head group — everything on the head rides this pivot
+  const headGroup = new THREE.Group();
+  headGroup.name = 'Head';
+  headGroup.position.y = HEAD_PIVOT_Y;
+  root.add(headGroup);
+
   const head = addShadow(new THREE.Mesh(new THREE.SphereGeometry(0.3, 24, 20), skin));
-  head.position.y = 1.62;
-  root.add(head);
+  head.position.y = hy(1.62);
+  headGroup.add(head);
+
+  // Hair cap (peeks out under hats / hoods)
+  const hair = addShadow(
+    new THREE.Mesh(new THREE.SphereGeometry(0.312, 22, 14, 0, Math.PI * 2, 0, Math.PI * 0.5), clayMat(HAIR_HEX))
+  );
+  hair.position.set(0, hy(1.63), -0.02);
+  hair.rotation.x = -0.12;
+  headGroup.add(hair);
 
   // Ears
   const earGeo = new THREE.SphereGeometry(0.07, 10, 10);
   const leftEar = addShadow(new THREE.Mesh(earGeo, skin));
-  leftEar.position.set(-0.28, 1.62, 0);
+  leftEar.position.set(-0.28, hy(1.62), 0);
   leftEar.scale.set(0.55, 1, 0.7);
   const rightEar = leftEar.clone();
   rightEar.position.x = 0.28;
-  root.add(leftEar, rightEar);
+  headGroup.add(leftEar, rightEar);
 
-  // Eyes
+  // Eyes with iris + catchlight, expressive brows
   const eyeWhite = clayMat('#F8F4EC');
-  const pupil = ink;
+  const catchlight = clayMat('#FFFFFF', { emissive: new THREE.Color('#FFFFFF'), emissiveIntensity: 0.6 });
   [-0.1, 0.1].forEach((x) => {
     const socket = addShadow(new THREE.Mesh(new THREE.SphereGeometry(0.055, 12, 10), eyeWhite));
-    socket.position.set(x, 1.64, 0.24);
-    root.add(socket);
-    const iris = addShadow(new THREE.Mesh(new THREE.SphereGeometry(0.028, 10, 8), pupil));
-    iris.position.set(x, 1.645, 0.285);
-    root.add(iris);
+    socket.position.set(x, hy(1.64), 0.24);
+    headGroup.add(socket);
+    const iris = addShadow(new THREE.Mesh(new THREE.SphereGeometry(0.03, 10, 8), ink));
+    iris.position.set(x, hy(1.645), 0.285);
+    headGroup.add(iris);
+    const spark = new THREE.Mesh(new THREE.SphereGeometry(0.011, 8, 6), catchlight);
+    spark.position.set(x + 0.012, hy(1.66), 0.308);
+    headGroup.add(spark);
+
+    const brow = addShadow(new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.03, 0.04), clayMat(HAIR_HEX)));
+    brow.position.set(x, hy(1.725), 0.255);
+    brow.rotation.z = -x * 1.4;
+    headGroup.add(brow);
   });
 
-  // Soft brow ridge
-  const brow = addShadow(new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.04, 0.08), skin));
-  brow.position.set(0, 1.72, 0.22);
-  root.add(brow);
+  // Nose, mouth, cheeks
+  const nose = addShadow(new THREE.Mesh(new THREE.SphereGeometry(0.03, 10, 8), skin));
+  nose.position.set(0, hy(1.59), 0.3);
+  headGroup.add(nose);
+
+  const mouth = addShadow(new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.012, 6, 14, Math.PI), clayMat(MOUTH_HEX)));
+  mouth.position.set(0, hy(1.525), 0.272);
+  mouth.rotation.set(0.15, 0, Math.PI);
+  headGroup.add(mouth);
+
+  const cheekMat = clayMat(CHEEK_HEX, { transparent: true, opacity: 0.55, roughness: 0.8 });
+  [-0.17, 0.17].forEach((x) => {
+    const cheek = new THREE.Mesh(new THREE.SphereGeometry(0.045, 10, 8), cheekMat);
+    cheek.position.set(x, hy(1.565), 0.215);
+    cheek.scale.set(1, 0.7, 0.45);
+    headGroup.add(cheek);
+  });
 
   // Continuous arms (shoulder → elbow → wrist → hand) — no floating segments
   const leftArm = createArm(camo, ink, -1);
@@ -219,62 +279,131 @@ function buildCore(camo, skin, ink) {
   rightArm.position.set(0.4, 1.22, 0);
   root.add(leftArm, rightArm);
 
-  // Thighs
-  const thighGeo = new THREE.CapsuleGeometry(0.11, 0.28, 4, 10);
-  const leftThigh = addShadow(new THREE.Mesh(thighGeo, camo.clone()));
-  markCamo(leftThigh);
-  leftThigh.position.set(-0.16, 0.3, 0.02);
-  const rightThigh = leftThigh.clone();
-  rightThigh.position.x = 0.16;
-  markCamo(rightThigh);
-  root.add(leftThigh, rightThigh);
+  // Legs — pivoted at the hip so they can swing while walking
+  const leftLeg = createLeg(camo, ink, -1);
+  const rightLeg = createLeg(camo, ink, 1);
+  root.add(leftLeg, rightLeg);
 
-  // Shins
-  const shinGeo = new THREE.CapsuleGeometry(0.085, 0.22, 4, 10);
-  const leftShin = addShadow(new THREE.Mesh(shinGeo, camo.clone()));
-  markCamo(leftShin);
-  leftShin.position.set(-0.16, 0.08, 0.04);
-  const rightShin = leftShin.clone();
-  rightShin.position.x = 0.16;
-  markCamo(rightShin);
-  root.add(leftShin, rightShin);
-
-  // Boots
-  const bootGeo = new THREE.BoxGeometry(0.16, 0.12, 0.28);
-  const leftBoot = addShadow(new THREE.Mesh(bootGeo, ink));
-  leftBoot.position.set(-0.16, 0.02, 0.06);
-  const rightBoot = leftBoot.clone();
-  rightBoot.position.x = 0.16;
-  root.add(leftBoot, rightBoot);
-
-  // Belt
+  // Belt + buckle
   const belt = addShadow(new THREE.Mesh(new THREE.TorusGeometry(0.3, 0.045, 10, 24), ink));
   belt.rotation.x = Math.PI / 2;
   belt.position.y = 0.7;
   root.add(belt);
+  const buckle = addShadow(new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.09, 0.05), accent));
+  buckle.position.set(0, 0.7, 0.31);
+  root.add(buckle);
 
-  return { root, head, torso };
+  return {
+    root,
+    head: headGroup,
+    torso,
+    rig: { root, head: headGroup, torso, leftArm, rightArm, leftLeg, rightLeg },
+  };
+}
+
+/** Hip-pivoted leg: local origin at hip (y≈0.48 world), foot sole at y≈-0.52. */
+function createLeg(camo, ink, side = 1) {
+  const leg = new THREE.Group();
+  leg.name = side > 0 ? 'RightLeg' : 'LeftLeg';
+  leg.position.set(side * 0.16, 0.48, 0.02);
+
+  const hipBall = addShadow(new THREE.Mesh(new THREE.SphereGeometry(0.115, 12, 10), camo.clone()));
+  markCamo(hipBall);
+  leg.add(hipBall);
+
+  const thigh = addShadow(new THREE.Mesh(new THREE.CapsuleGeometry(0.11, 0.28, 4, 10), camo.clone()));
+  markCamo(thigh);
+  thigh.position.set(0, -0.18, 0);
+  leg.add(thigh);
+
+  const knee = addShadow(new THREE.Mesh(new THREE.SphereGeometry(0.09, 12, 10), camo.clone()));
+  markCamo(knee);
+  knee.position.set(0, -0.31, 0.01);
+  leg.add(knee);
+
+  const shin = addShadow(new THREE.Mesh(new THREE.CapsuleGeometry(0.085, 0.22, 4, 10), camo.clone()));
+  markCamo(shin);
+  shin.position.set(0, -0.4, 0.02);
+  leg.add(shin);
+
+  // Thigh strap
+  const strap = addShadow(new THREE.Mesh(new THREE.TorusGeometry(0.115, 0.018, 8, 18), ink));
+  strap.rotation.x = Math.PI / 2;
+  strap.position.set(0, -0.12, 0);
+  leg.add(strap);
+
+  // Boot: cuff, body, toe cap, sole
+  const cuff = addShadow(new THREE.Mesh(new THREE.CylinderGeometry(0.105, 0.1, 0.06, 14), ink));
+  cuff.position.set(0, -0.41, 0.03);
+  leg.add(cuff);
+
+  const boot = addShadow(new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.12, 0.28), ink));
+  boot.position.set(0, -0.46, 0.04);
+  leg.add(boot);
+
+  const toe = addShadow(new THREE.Mesh(new THREE.SphereGeometry(0.085, 12, 10), ink));
+  toe.position.set(0, -0.47, 0.17);
+  toe.scale.set(0.95, 0.7, 0.8);
+  leg.add(toe);
+
+  const sole = addShadow(new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.035, 0.31), clayMat('#3B3A38')));
+  sole.position.set(0, -0.515, 0.05);
+  leg.add(sole);
+
+  return leg;
 }
 
 function dressShadowNinja(group, camo, ink, accent) {
-  // Deep hood
+  const rig = group.userData.rig;
+  const head = rig.head;
+  const steel = clayMat('#C9CDD2', { metalness: 0.65, roughness: 0.28 });
+
+  // Deep hood — rides the head pivot
+  // Open at the front so the eyes/mask stay visible
   const hood = addShadow(
-    new THREE.Mesh(new THREE.SphereGeometry(0.38, 20, 16, 0, Math.PI * 2, 0, Math.PI * 0.62), ink)
+    new THREE.Mesh(new THREE.SphereGeometry(0.36, 20, 16, Math.PI * 0.2, Math.PI * 1.6, 0, Math.PI * 0.6), ink)
   );
-  hood.position.set(0, 1.68, -0.04);
-  hood.rotation.x = 0.22;
-  group.add(hood);
+  hood.position.set(0, hy(1.66), -0.05);
+  // Sphere gap sits at -X by default; quarter turn brings the opening to the face (+Z)
+  hood.rotation.set(0.05, Math.PI / 2, 0);
+  head.add(hood);
+
+  // Hood cap over the crown
+  const hoodTop = addShadow(
+    new THREE.Mesh(new THREE.SphereGeometry(0.36, 20, 12, 0, Math.PI * 2, 0, Math.PI * 0.32), ink)
+  );
+  hoodTop.position.set(0, hy(1.66), -0.05);
+  head.add(hoodTop);
+
+  // Hood rim framing the face
+  const hoodRim = addShadow(new THREE.Mesh(new THREE.TorusGeometry(0.31, 0.035, 8, 26, Math.PI * 1.1), ink));
+  hoodRim.position.set(0, hy(1.66), 0.02);
+  hoodRim.rotation.set(Math.PI / 2 - 0.35, 0, Math.PI * 0.95);
+  head.add(hoodRim);
 
   // Hood peak
-  const peak = addShadow(new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.28, 8), ink));
-  peak.position.set(0, 1.98, -0.12);
+  const peak = addShadow(new THREE.Mesh(new THREE.ConeGeometry(0.15, 0.26, 8), ink));
+  peak.position.set(0, hy(1.95), -0.14);
   peak.rotation.x = -0.5;
-  group.add(peak);
+  head.add(peak);
 
-  // Face wrap / mask
+  // Face wrap / mask with camo stripe
   const mask = addShadow(new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.14, 0.34), ink));
-  mask.position.set(0, 1.48, 0.12);
-  group.add(mask);
+  mask.position.set(0, hy(1.48), 0.12);
+  head.add(mask);
+  const maskStripe = addShadow(new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.035, 0.35), camo.clone()));
+  markCamo(maskStripe);
+  maskStripe.position.set(0, hy(1.49), 0.12);
+  head.add(maskStripe);
+
+  // Headband knot tails at the back
+  [-0.06, 0.06].forEach((x, i) => {
+    const tail = addShadow(new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.32, 0.02), camo.clone()));
+    markCamo(tail);
+    tail.position.set(x, hy(1.5), -0.33);
+    tail.rotation.set(0.55, 0, i === 0 ? 0.25 : -0.25);
+    head.add(tail);
+  });
 
   // Scarf tails
   const scarf = addShadow(new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.55, 0.08), camo.clone()));
@@ -282,6 +411,11 @@ function dressShadowNinja(group, camo, ink, accent) {
   scarf.position.set(0.22, 1.15, -0.2);
   scarf.rotation.set(0.35, 0.2, 0.4);
   group.add(scarf);
+  const scarf2 = addShadow(new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.42, 0.06), camo.clone()));
+  markCamo(scarf2);
+  scarf2.position.set(0.08, 1.12, -0.26);
+  scarf2.rotation.set(0.45, -0.1, 0.15);
+  group.add(scarf2);
 
   // Shoulder wraps
   [-0.42, 0.42].forEach((x, i) => {
@@ -291,89 +425,243 @@ function dressShadowNinja(group, camo, ink, accent) {
     group.add(wrap);
   });
 
-  // Kunai pouch
+  // Forearm wraps
+  [rig.leftArm, rig.rightArm].forEach((arm) => {
+    const fore = forearmOf(arm);
+    if (!fore) return;
+    [-0.14, -0.22, -0.3].forEach((y) => {
+      const band = addShadow(new THREE.Mesh(new THREE.TorusGeometry(0.078, 0.016, 6, 14), ink));
+      band.rotation.x = Math.PI / 2;
+      band.position.set(0, y, 0);
+      fore.add(band);
+    });
+  });
+
+  // Katana slung across the back
+  const katana = new THREE.Group();
+  katana.position.set(-0.12, 1.05, -0.34);
+  katana.rotation.set(0.08, 0, 0.62);
+  const blade = addShadow(new THREE.Mesh(new THREE.BoxGeometry(0.045, 1.0, 0.014), steel));
+  blade.position.y = 0.5;
+  katana.add(blade);
+  const guard = addShadow(new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.02, 14), accent));
+  katana.add(guard);
+  const grip = addShadow(new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.028, 0.3, 10), ink));
+  grip.position.y = -0.16;
+  katana.add(grip);
+  [-0.08, -0.16, -0.24].forEach((y) => {
+    const wrap = addShadow(new THREE.Mesh(new THREE.TorusGeometry(0.031, 0.008, 6, 12), camo.clone()));
+    markCamo(wrap);
+    wrap.rotation.x = Math.PI / 2;
+    wrap.position.y = y;
+    katana.add(wrap);
+  });
+  group.add(katana);
+
+  // Kunai pouch + thigh kunai
   const pouch = addShadow(new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.12, 0.1), accent));
   pouch.position.set(0.28, 0.68, 0.22);
   group.add(pouch);
+  const kunai = addShadow(new THREE.Mesh(new THREE.ConeGeometry(0.022, 0.16, 6), steel));
+  kunai.position.set(0.11, -0.2, 0.07);
+  kunai.rotation.set(0.1, 0, 0.1);
+  rig.rightLeg.add(kunai);
 }
 
 function dressForestScout(group, camo, ink, accent) {
-  // Scout cap
+  const rig = group.userData.rig;
+  const head = rig.head;
+  const leather = clayMat('#7A5230', { roughness: 0.7 });
+  const rope = clayMat('#C9A86A', { roughness: 0.85 });
+
+  // Scout cap + brim + button
   const cap = addShadow(
     new THREE.Mesh(new THREE.SphereGeometry(0.32, 18, 14, 0, Math.PI * 2, 0, Math.PI * 0.52), camo.clone())
   );
   markCamo(cap);
-  cap.position.y = 1.78;
-  group.add(cap);
+  cap.position.y = hy(1.78);
+  head.add(cap);
 
   const brim = addShadow(new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.42, 0.04, 20), camo.clone()));
   markCamo(brim);
-  brim.position.set(0, 1.66, 0.08);
-  group.add(brim);
+  brim.position.set(0, hy(1.66), 0.08);
+  head.add(brim);
+
+  const capBand = addShadow(new THREE.Mesh(new THREE.TorusGeometry(0.315, 0.02, 8, 24), leather));
+  capBand.rotation.x = Math.PI / 2;
+  capBand.position.y = hy(1.71);
+  head.add(capBand);
+
+  const button = addShadow(new THREE.Mesh(new THREE.SphereGeometry(0.035, 10, 8), ink));
+  button.position.y = hy(1.96);
+  head.add(button);
+
+  // Feather tucked in the band
+  const feather = addShadow(new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.3, 0.015), accent));
+  feather.position.set(0.25, hy(1.9), -0.06);
+  feather.rotation.set(-0.3, 0, -0.55);
+  head.add(feather);
 
   // Goggles on forehead
   const strap = addShadow(new THREE.Mesh(new THREE.TorusGeometry(0.3, 0.025, 8, 20), ink));
-  strap.position.y = 1.7;
+  strap.position.y = hy(1.7);
   strap.rotation.x = Math.PI / 2;
-  group.add(strap);
+  head.add(strap);
   [-0.1, 0.1].forEach((x) => {
+    const rim = addShadow(new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.05, 14), ink));
+    rim.rotation.x = Math.PI / 2;
+    rim.position.set(x, hy(1.72), 0.27);
+    head.add(rim);
     const lens = addShadow(
       new THREE.Mesh(
-        new THREE.CylinderGeometry(0.07, 0.07, 0.05, 14),
-        clayMat('#72B83F', { metalness: 0.35, roughness: 0.3 })
+        new THREE.CylinderGeometry(0.06, 0.06, 0.056, 14),
+        clayMat('#72B83F', { metalness: 0.35, roughness: 0.3, emissive: new THREE.Color('#2F5A1A'), emissiveIntensity: 0.3 })
       )
     );
     lens.rotation.x = Math.PI / 2;
-    lens.position.set(x, 1.72, 0.28);
-    group.add(lens);
+    lens.position.set(x, hy(1.72), 0.275);
+    head.add(lens);
   });
 
-  // Backpack
-  const pack = addShadow(new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.42, 0.22), ink));
+  // Backpack with bedroll, rope coil, canteen
+  const pack = addShadow(new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.42, 0.22), leather));
   pack.position.set(0, 1.05, -0.28);
   group.add(pack);
   const packLid = addShadow(new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.08, 0.24), accent));
   packLid.position.set(0, 1.28, -0.28);
   group.add(packLid);
+  [-0.09, 0.09].forEach((x) => {
+    const buckle = addShadow(new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.16, 0.03), ink));
+    buckle.position.set(x, 1.0, -0.4);
+    group.add(buckle);
+  });
+
+  const bedroll = addShadow(new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.44, 14), camo.clone()));
+  markCamo(bedroll);
+  bedroll.rotation.z = Math.PI / 2;
+  bedroll.position.set(0, 1.38, -0.3);
+  group.add(bedroll);
+  [-0.12, 0.12].forEach((x) => {
+    const tie = addShadow(new THREE.Mesh(new THREE.TorusGeometry(0.092, 0.012, 6, 14), rope));
+    tie.rotation.y = Math.PI / 2;
+    tie.position.set(x, 1.38, -0.3);
+    group.add(tie);
+  });
+
+  const coil = addShadow(new THREE.Mesh(new THREE.TorusGeometry(0.09, 0.03, 8, 18), rope));
+  coil.rotation.y = Math.PI / 2;
+  coil.position.set(0.23, 1.02, -0.3);
+  group.add(coil);
+
+  const canteen = addShadow(new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.09, 14), ink));
+  canteen.rotation.z = Math.PI / 2;
+  canteen.position.set(-0.25, 0.98, -0.28);
+  group.add(canteen);
+  const canteenCap = addShadow(new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.04, 8), accent));
+  canteenCap.rotation.z = Math.PI / 2;
+  canteenCap.position.set(-0.31, 0.98, -0.28);
+  group.add(canteenCap);
 
   // Utility pouches on belt
   [-0.22, 0.22].forEach((x) => {
-    const util = addShadow(new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.1, 0.1), accent));
+    const util = addShadow(new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.1, 0.1), leather));
     util.position.set(x, 0.68, 0.26);
     group.add(util);
+    const flap = addShadow(new THREE.Mesh(new THREE.BoxGeometry(0.125, 0.035, 0.105), accent));
+    flap.position.set(x, 0.72, 0.26);
+    group.add(flap);
   });
 
-  // Knee pads
-  [-0.16, 0.16].forEach((x) => {
+  // Shoulder patches + arm badge
+  [rig.leftArm, rig.rightArm].forEach((arm, i) => {
+    const patch = addShadow(new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.02), accent));
+    patch.position.set(0, -0.14, 0.09);
+    arm.add(patch);
+    if (i === 1) {
+      const badge = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.01, 10), ink);
+      badge.rotation.x = Math.PI / 2;
+      badge.position.set(0, -0.14, 0.102);
+      arm.add(badge);
+    }
+  });
+
+  // Knee pads — ride with the legs
+  [rig.leftLeg, rig.rightLeg].forEach((leg) => {
     const pad = addShadow(new THREE.Mesh(new THREE.SphereGeometry(0.08, 10, 8), ink));
-    pad.position.set(x, 0.2, 0.12);
+    pad.position.set(0, -0.3, 0.1);
     pad.scale.set(1.1, 0.7, 0.6);
-    group.add(pad);
+    leg.add(pad);
   });
 }
 
 function dressPhantomGhost(group, camo, ink, accent) {
-  // Soft translucent cloak
-  const cloak = addShadow(
-    new THREE.Mesh(
-      new THREE.ConeGeometry(0.55, 1.35, 16, 1, true),
-      clayMat(camo.color.getHex(), { transparent: true, opacity: 0.55, side: THREE.DoubleSide, roughness: 0.7 })
-    )
-  );
+  const rig = group.userData.rig;
+  const head = rig.head;
+  const camoHex = camo.color.getHex();
+  const mist = clayMat(camoHex, { transparent: true, opacity: 0.55, side: THREE.DoubleSide, roughness: 0.7 });
+  const glow = clayMat('#9FE7FF', { emissive: new THREE.Color('#9FE7FF'), emissiveIntensity: 0.9 });
+
+  // Layered translucent cloak + inner robe
+  const cloak = addShadow(new THREE.Mesh(new THREE.ConeGeometry(0.55, 1.35, 16, 1, true), mist));
   markCamo(cloak);
   cloak.position.set(0, 0.95, -0.08);
   cloak.rotation.x = Math.PI;
   group.add(cloak);
 
-  // Inner veil over face
+  const robe = addShadow(
+    new THREE.Mesh(
+      new THREE.CylinderGeometry(0.36, 0.46, 0.75, 16, 1, true),
+      clayMat(camoHex, { transparent: true, opacity: 0.4, side: THREE.DoubleSide, roughness: 0.8 })
+    )
+  );
+  markCamo(robe);
+  robe.position.set(0, 0.58, 0);
+  group.add(robe);
+
+  // Tattered hem
+  for (let i = 0; i < 10; i++) {
+    const a = (i / 10) * Math.PI * 2;
+    const tatter = addShadow(new THREE.Mesh(new THREE.ConeGeometry(0.075, 0.24, 5), mist.clone()));
+    markCamo(tatter);
+    tatter.position.set(Math.sin(a) * 0.52, 0.26, Math.cos(a) * 0.52 - 0.08);
+    tatter.rotation.set(Math.PI + (i % 2 ? 0.18 : -0.12), 0, (i % 3) * 0.1);
+    group.add(tatter);
+  }
+
+  // Rune belt
+  const runeBelt = addShadow(
+    new THREE.Mesh(
+      new THREE.TorusGeometry(0.34, 0.028, 10, 28),
+      clayMat('#F4A261', { emissive: new THREE.Color('#F4A261'), emissiveIntensity: 0.5 })
+    )
+  );
+  runeBelt.rotation.x = Math.PI / 2;
+  runeBelt.position.y = 0.74;
+  group.add(runeBelt);
+
+  // Inner veil + glowing eyes
   const veil = addShadow(
     new THREE.Mesh(
       new THREE.PlaneGeometry(0.42, 0.28),
       clayMat('#F1FAEE', { transparent: true, opacity: 0.35, side: THREE.DoubleSide })
     )
   );
-  veil.position.set(0, 1.55, 0.3);
-  group.add(veil);
+  veil.position.set(0, hy(1.55), 0.3);
+  head.add(veil);
+  [-0.1, 0.1].forEach((x) => {
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.034, 10, 8), glow);
+    eye.position.set(x, hy(1.645), 0.292);
+    head.add(eye);
+  });
+
+  // Wisp horns
+  [-1, 1].forEach((side) => {
+    const horn = addShadow(new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.24, 7), mist.clone()));
+    markCamo(horn);
+    horn.position.set(side * 0.2, hy(1.92), -0.04);
+    horn.rotation.z = side * -0.45;
+    head.add(horn);
+  });
 
   // Floating crest / halo
   const halo = addShadow(
@@ -383,11 +671,17 @@ function dressPhantomGhost(group, camo, ink, accent) {
     )
   );
   halo.rotation.x = Math.PI / 2;
-  halo.position.y = 2.05;
-  group.add(halo);
+  halo.position.y = hy(2.05);
+  head.add(halo);
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+    const gem = new THREE.Mesh(new THREE.OctahedronGeometry(0.035), glow);
+    gem.position.set(Math.sin(a) * 0.26, hy(2.05), Math.cos(a) * 0.26);
+    head.add(gem);
+  }
 
   // Spirit orbs
-  [ -0.55, 0.55 ].forEach((x, i) => {
+  [-0.55, 0.55].forEach((x, i) => {
     const orb = addShadow(
       new THREE.Mesh(
         new THREE.SphereGeometry(0.07, 12, 10),
@@ -403,6 +697,17 @@ function dressPhantomGhost(group, camo, ink, accent) {
     orb.userData.floatOrb = true;
     orb.userData.floatPhase = i * Math.PI;
     group.add(orb);
+  });
+
+  // Fading spirit trail behind
+  [0, 1, 2].forEach((i) => {
+    const puff = new THREE.Mesh(
+      new THREE.SphereGeometry(0.09 - i * 0.02, 10, 8),
+      clayMat(camoHex, { transparent: true, opacity: 0.32 - i * 0.09, roughness: 0.9 })
+    );
+    markCamo(puff);
+    puff.position.set((i % 2 ? -1 : 1) * 0.08, 0.42 + i * 0.12, -0.5 - i * 0.12);
+    group.add(puff);
   });
 
   // Soft collar
@@ -427,13 +732,16 @@ export function buildCharacter(modelId = 1, camoKey = 'BLUE') {
   const ink = clayMat('#0D1B1E');
   const accent = clayMat('#F4A261');
 
-  const { root } = buildCore(camo, skin, ink);
+  const { root, rig } = buildCore(camo, skin, ink, accent);
   group.add(root);
+  group.userData.rig = rig;
+  root.userData.rig = rig;
 
+  // Outfits attach to the core so they bob/lean with the body during gait
   const id = Number(modelId) || 1;
-  if (id === 2) dressForestScout(group, camo, ink, accent);
-  else if (id === 3) dressPhantomGhost(group, camo, ink, accent);
-  else dressShadowNinja(group, camo, ink, accent);
+  if (id === 2) dressForestScout(root, camo, ink, accent);
+  else if (id === 3) dressPhantomGhost(root, camo, ink, accent);
+  else dressShadowNinja(root, camo, ink, accent);
 
   // Idle float hooks for phantom orbs (preview/raid can animate via userData)
   group.userData.modelId = id;
@@ -471,12 +779,71 @@ export function applyCamoColor(figure, camoKey) {
   });
 }
 
-/** Optional subtle motion for preview / idle (orbs, scarf not needed). */
-export function tickCharacter(figure, elapsed) {
+/** Speed (in walk units: 1 = normal walk) at which the run gait kicks in. */
+export const RUN_GAIT_SPEED = 1.35;
+
+/**
+ * Animate the figure.
+ * @param {THREE.Object3D} figure
+ * @param {number} elapsed seconds since scene start
+ * @param {{ dt?: number, speed?: number }} [motion] speed in walk units (0 idle, 1 walk, ~1.9 sprint)
+ */
+export function tickCharacter(figure, elapsed, motion = null) {
   if (!figure) return;
   figure.traverse((child) => {
     if (!child.userData.floatOrb) return;
     const phase = child.userData.floatPhase || 0;
     child.position.y = 1.35 + Math.sin(elapsed * 2.2 + phase) * 0.08;
   });
+
+  const rig = figure.userData.rig;
+  if (!rig) return;
+  const dt = Math.min(0.05, Math.max(0.001, motion?.dt ?? 0.016));
+  const speed = Math.max(0, motion?.speed ?? 0);
+  const gait =
+    figure.userData.gait || (figure.userData.gait = { phase: 0, amp: 0, lean: 0, run: 0 });
+
+  // Amplitude eases in/out so starts and stops don't snap
+  const targetAmp = Math.min(1.3, speed);
+  gait.amp += (targetAmp - gait.amp) * (1 - Math.exp(-11 * dt));
+  const runTarget = speed > RUN_GAIT_SPEED ? 1 : 0;
+  gait.run += (runTarget - gait.run) * (1 - Math.exp(-7 * dt));
+
+  if (speed > 0.04) {
+    gait.phase += dt * (6.8 + speed * 4.2);
+  } else if (gait.amp > 0.02) {
+    // Glide legs back toward the neutral pose when stopping
+    const rest = Math.round(gait.phase / Math.PI) * Math.PI;
+    gait.phase += (rest - gait.phase) * (1 - Math.exp(-10 * dt));
+  }
+
+  const s = Math.sin(gait.phase);
+  const idle = 1 - Math.min(1, gait.amp);
+  const breathe = Math.sin(elapsed * 1.7);
+
+  // Legs swing opposite each other; run adds more stride + knee lift
+  const legSwing = (0.62 + gait.run * 0.3) * gait.amp;
+  rig.leftLeg.rotation.x = s * legSwing;
+  rig.rightLeg.rotation.x = -s * legSwing;
+
+  // Arms counter-swing, tuck in while running
+  const armSwing = (0.55 + gait.run * 0.35) * gait.amp;
+  rig.leftArm.rotation.x = 0.08 - s * armSwing;
+  rig.rightArm.rotation.x = 0.08 + s * armSwing;
+  const tuck = 0.55 - gait.amp * 0.16 - gait.run * 0.12;
+  rig.leftArm.rotation.z = -tuck + breathe * 0.03 * idle;
+  rig.rightArm.rotation.z = tuck - breathe * 0.03 * idle;
+
+  // Body bob (twice per stride) + idle breathing
+  const bob = Math.abs(s) * (0.05 + gait.run * 0.04) * gait.amp;
+  rig.root.position.y = bob + breathe * 0.012 * idle;
+
+  // Forward lean when running, hint of sway while walking
+  const targetLean = speed > 0.04 ? 0.05 + gait.run * 0.16 : 0;
+  gait.lean += (targetLean - gait.lean) * (1 - Math.exp(-6 * dt));
+  rig.root.rotation.x = gait.lean;
+  rig.root.rotation.z = -s * 0.035 * gait.amp;
+
+  // Head steadies against the bob
+  rig.head.rotation.x = -gait.lean * 0.6 + breathe * 0.02 * idle;
 }
