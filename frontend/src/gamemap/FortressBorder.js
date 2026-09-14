@@ -22,7 +22,7 @@ function rand(i, salt) {
 }
 
 // ---- Brick walls (WallBlocks) ----
-function buildBrickRun(group, geo, mats, horizontal, fixed, from, to, seed) {
+function buildBrickRun(group, geo, mats, horizontal, fixed, from, to, seed, bricks) {
   const span = to - from;
   for (let course = 0; course < COURSES; course++) {
     const y = BRICK_H / 2 + course * (BRICK_H + 0.015);
@@ -43,7 +43,11 @@ function buildBrickRun(group, geo, mats, horizontal, fixed, from, to, seed) {
       brick.rotation.z = (rand(i, 3) - 0.5) * 0.02;
       brick.castShadow = !LARGE_MAP;
       brick.receiveShadow = true;
+      brick.userData.isWallBrick = true;
+      brick.userData.intact = true;
+      brick.userData.hp = 4;
       group.add(brick);
+      bricks.push(brick);
     }
   }
 }
@@ -122,6 +126,8 @@ function makeBanner() {
 function buildGate(group) {
   const pillarGeo = new RoundedBoxGeometry(0.95, 1.35, 0.95, 3, 0.12);
   const pillarMat = new THREE.MeshStandardMaterial({ color: MAP_COLORS.towerStone, roughness: 0.74 });
+  const banners = [];
+  const pillars = [];
 
   [-1, 1].forEach((side) => {
     const pillar = new THREE.Mesh(pillarGeo, pillarMat);
@@ -129,6 +135,7 @@ function buildGate(group) {
     pillar.castShadow = true;
     pillar.receiveShadow = true;
     group.add(pillar);
+    pillars.push(pillar);
 
     const cap = new THREE.Mesh(
       new RoundedBoxGeometry(1.15, 0.24, 1.15, 3, 0.09),
@@ -142,6 +149,7 @@ function buildGate(group) {
     banner.position.set(side * GATE_HALF, 0.62, WALL_Z + 0.78);
     banner.rotation.x = 0.12;
     group.add(banner);
+    banners.push(banner);
 
     const lamp = makeLamp(0);
     lamp.position.set(side * GATE_HALF, 1.75, WALL_Z);
@@ -155,13 +163,56 @@ function buildGate(group) {
   );
   bar.position.set(0, 0.42, WALL_Z);
   bar.castShadow = true;
+  bar.userData.isGateBar = true;
   group.add(bar);
   const rail = new THREE.Mesh(
     new RoundedBoxGeometry(GATE_HALF * 2 - 0.55, 0.12, 0.3, 3, 0.05),
     new THREE.MeshStandardMaterial({ color: '#43403a', roughness: 0.55 })
   );
   rail.position.set(0, 0.66, WALL_Z);
+  rail.userData.isGateBar = true;
   group.add(rail);
+
+  // Iron portcullis — hidden high until alarm slams it down
+  const portcullis = new THREE.Group();
+  portcullis.name = 'Portcullis';
+  const iron = new THREE.MeshStandardMaterial({ color: '#2c2a28', roughness: 0.45, metalness: 0.55 });
+  const ironHi = new THREE.MeshStandardMaterial({
+    color: '#4a4742',
+    roughness: 0.4,
+    metalness: 0.6,
+    emissive: new THREE.Color('#3a1510'),
+    emissiveIntensity: 0,
+  });
+  const grateW = GATE_HALF * 2 - 0.35;
+  const grateH = 1.28;
+  const frame = new THREE.Mesh(new RoundedBoxGeometry(grateW, grateH, 0.12, 2, 0.04), iron);
+  frame.position.y = grateH / 2;
+  portcullis.add(frame);
+  for (let i = -3; i <= 3; i++) {
+    const spike = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.02, grateH + 0.22, 6), ironHi);
+    spike.position.set((i / 3.4) * (grateW * 0.42), grateH / 2 - 0.04, 0.02);
+    portcullis.add(spike);
+    const tip = new THREE.Mesh(new THREE.ConeGeometry(0.045, 0.16, 6), iron);
+    tip.position.set(spike.position.x, -0.08, 0.02);
+    portcullis.add(tip);
+  }
+  for (let r = 0; r < 3; r++) {
+    const cross = new THREE.Mesh(new RoundedBoxGeometry(grateW * 0.92, 0.07, 0.08, 1, 0.02), iron);
+    cross.position.set(0, 0.22 + r * 0.38, 0.03);
+    portcullis.add(cross);
+  }
+  portcullis.position.set(0, 1.85, WALL_Z + 0.08);
+  portcullis.visible = false;
+  portcullis.userData.restY = 0.02;
+  portcullis.userData.upY = 1.85;
+  portcullis.userData.locked = false;
+  portcullis.userData.dropT = 0;
+  portcullis.userData.keepColor = true;
+  portcullis.traverse((n) => {
+    n.userData.keepColor = true;
+  });
+  group.add(portcullis);
 
   // Stone path leaving the gate — proud of the terrain so it reads clearly
   const pathMat = new THREE.MeshStandardMaterial({ color: MAP_COLORS.path, roughness: 0.8 });
@@ -173,11 +224,14 @@ function buildGate(group) {
     slab.castShadow = true;
     group.add(slab);
   }
+
+  return { bar, rail, banners, pillars, portcullis };
 }
 
 export function createFortressBorder() {
   const group = new THREE.Group();
   group.name = 'FortressBorder';
+  const bricks = [];
 
   const brickGeo = new RoundedBoxGeometry(BRICK_L, BRICK_H, BRICK_W, 2, 0.08);
   // Three stone shades so the running bond reads from the top-down camera
@@ -189,12 +243,12 @@ export function createFortressBorder() {
 
   const cornerClear = 0.95; // bricks stop where towers stand
   // North wall + side walls run full length between corner towers
-  buildBrickRun(group, brickGeo, brickMats, true, -WALL_Z, -WALL_X + cornerClear, WALL_X - cornerClear, 11);
-  buildBrickRun(group, brickGeo, brickMats, false, -WALL_X, -WALL_Z + cornerClear, WALL_Z - cornerClear, 23);
-  buildBrickRun(group, brickGeo, brickMats, false, WALL_X, -WALL_Z + cornerClear, WALL_Z - cornerClear, 37);
+  buildBrickRun(group, brickGeo, brickMats, true, -WALL_Z, -WALL_X + cornerClear, WALL_X - cornerClear, 11, bricks);
+  buildBrickRun(group, brickGeo, brickMats, false, -WALL_X, -WALL_Z + cornerClear, WALL_Z - cornerClear, 23, bricks);
+  buildBrickRun(group, brickGeo, brickMats, false, WALL_X, -WALL_Z + cornerClear, WALL_Z - cornerClear, 37, bricks);
   // South wall splits around the gate opening
-  buildBrickRun(group, brickGeo, brickMats, true, WALL_Z, -WALL_X + cornerClear, -GATE_HALF - 0.55, 51);
-  buildBrickRun(group, brickGeo, brickMats, true, WALL_Z, GATE_HALF + 0.55, WALL_X - cornerClear, 67);
+  buildBrickRun(group, brickGeo, brickMats, true, WALL_Z, -WALL_X + cornerClear, -GATE_HALF - 0.55, 51, bricks);
+  buildBrickRun(group, brickGeo, brickMats, true, WALL_Z, GATE_HALF + 0.55, WALL_X - cornerClear, 67, bricks);
 
   // Corner anchors — larger than wall bricks, not giant towers
   [-1, 1].forEach((sx) => {
@@ -215,7 +269,63 @@ export function createFortressBorder() {
   midE.position.set(WALL_X, 0, 0);
   group.add(midE);
 
-  buildGate(group);
+  const gate = buildGate(group);
+  group.userData.bricks = bricks;
+  group.userData.gate = gate;
+  group.userData.shake = 0;
 
   return group;
+}
+
+export function lockFortressGate(border) {
+  const gate = border?.userData?.gate;
+  if (!gate?.portcullis || gate.portcullis.userData.locked) return false;
+  const p = gate.portcullis;
+  p.visible = true;
+  p.userData.locked = true;
+  p.userData.dropT = 0;
+  p.position.y = p.userData.upY;
+  p.traverse((n) => {
+    if (n.material?.emissive) {
+      n.material.emissive.set('#c4452d');
+      n.material.emissiveIntensity = 0.8;
+    }
+  });
+  border.userData.shake = 0.7;
+  gate.banners.forEach((b) => {
+    b.userData.flap = 1;
+  });
+  return true;
+}
+
+export function tickFortressBorder(border, dt, elapsed = 0) {
+  if (!border) return;
+  const gate = border.userData.gate;
+  if (gate?.portcullis?.userData.locked && !gate.portcullis.userData.smashed) {
+    const p = gate.portcullis;
+    p.userData.dropT = Math.min(1, (p.userData.dropT || 0) + dt * 3.4);
+    const t = p.userData.dropT;
+    const ease = 1 - (1 - t) * (1 - t);
+    p.position.y = p.userData.upY + (p.userData.restY - p.userData.upY) * ease;
+    if (t > 0.82 && t < 0.98) p.position.y += Math.sin(t * 40) * 0.03 * (1 - t);
+    p.traverse((n) => {
+      if (n.material?.emissive) n.material.emissiveIntensity = 0.55;
+    });
+  }
+  if (gate?.banners) {
+    gate.banners.forEach((b, i) => {
+      const flap = b.userData.flap || 0;
+      b.rotation.z = Math.sin(elapsed * 3 + i) * (0.04 + flap * 0.18);
+      if (flap) b.userData.flap = Math.max(0, flap - dt * 0.8);
+    });
+  }
+  if (border.userData.shake > 0) {
+    border.userData.shake = Math.max(0, border.userData.shake - dt * 1.8);
+    const mag = border.userData.shake * 0.06;
+    border.position.x = (Math.random() - 0.5) * mag;
+    border.position.z = (Math.random() - 0.5) * mag;
+  } else {
+    border.position.x = 0;
+    border.position.z = 0;
+  }
 }

@@ -9,15 +9,31 @@ import HudBanner from '../components/ui/HudBanner.jsx';
 import ClayPanel from '../components/ui/ClayPanel.jsx';
 import ClayButton from '../components/ui/ClayButton.jsx';
 import GameMap from '../gamemap/GameMap.jsx';
-import { useGameState, REPAIR_BUILDING_COST } from '../state/GameStateContext.jsx';
-import { GATE_SPAWN_TILE, MAP_COLS, MAP_ROWS, WALK_TILE_SECONDS } from '../gamemap/mapConfig.js';
-import { collectSolidTiles, canEnterTile } from '../gamemap/occupancy.js';
+import { useGameState, REPAIR_BUILDING_COST, GUIDE_STEPS } from '../state/GameStateContext.jsx';
+import { GATE_SPAWN_TILE, WALK_TILE_SECONDS } from '../gamemap/mapConfig.js';
+import { collectSolidTiles } from '../gamemap/occupancy.js';
+import { stepDirection, attemptStep, TURN_RATE } from '../character/gridMover.js';
+import { soundEngine } from '../soundEngine.js';
 import { listDecorOccupiedTiles } from '../gamemap/MapDecor.js';
-import { findRuinNear } from '../gamemap/starterRuins.js';
+import { findRuinNear, findRepairedNear } from '../gamemap/starterRuins.js';
+import { canPlaceOnGameMap } from '../gamemap/placeUtils.js';
 import { createSprintMeter, SPRINT_SPEED_MULT } from '../character/sprint.js';
 import StaminaBar from '../components/hud/StaminaBar.jsx';
+import BuildQuestHud from '../components/hud/BuildQuestHud.jsx';
+import { GAME_COLORS, GAME_COLOR_KEYS } from '../colors.js';
 
 const BASE_DECOR_SEED = 7;
+
+/** Tiles covered by the walk-brush around the character. */
+function brushFootprint(column, row, size) {
+  if (size <= 1) return [{ x: column, y: row }];
+  const half = Math.floor(size / 2);
+  const out = [];
+  for (let dy = -half; dy <= half; dy++) {
+    for (let dx = -half; dx <= half; dx++) out.push({ x: column + dx, y: row + dy });
+  }
+  return out;
+}
 
 export default function BaseBuilderView() {
   const {
@@ -25,13 +41,37 @@ export default function BaseBuilderView() {
     defenses,
     paintedTiles,
     selectedBuildingId,
+    movingBuildingId,
     handlePlaceAt,
     handleBuildingSelect,
+    beginMoveBuilding,
+    cancelMoveBuilding,
+    moveBuildingTo,
     setSelectedTool,
+    setSelectedColor,
+    selectedColor,
     characterModel,
     camoColor,
-    repairRuinNear,
+    repairBuilding,
     showToast,
+    brush,
+    setBrush,
+    toggleBrush,
+    cycleBrushSize,
+    toggleEraser,
+    paintTiles,
+    eraseTiles,
+    searchlightLevel,
+    guideStep,
+    guideActive,
+    activeRuinId,
+    activeRuin,
+    repairedCount,
+    rebuildProgress,
+    rebuildingId,
+    dismissWelcome,
+    dismissMoveTip,
+    tickRebuildHold,
   } = useGameState();
   const sceneApi = useRef(null);
   const [selectedTile, setSelectedTile] = useState(null);
@@ -46,12 +86,43 @@ export default function BaseBuilderView() {
   const walkerRef = useRef(walker);
   walkerRef.current = walker;
   const keys = useRef(new Set());
-  const actionRef = useRef(null);
-  const paintRef = useRef(null);
-  const placeRef = useRef(handlePlaceAt);
-  placeRef.current = handlePlaceAt;
+  const brushKeysRef = useRef({ toggleBrush, cycleBrushSize, toggleEraser, setSelectedColor, setSelectedTool });
+  brushKeysRef.current = { toggleBrush, cycleBrushSize, toggleEraser, setSelectedColor, setSelectedTool };
+  const moveKeysRef = useRef({
+    beginMoveBuilding,
+    cancelMoveBuilding,
+    moveBuildingTo,
+    movingBuildingId,
+    selectedBuildingId,
+    buildings,
+  });
+  moveKeysRef.current = {
+    beginMoveBuilding,
+    cancelMoveBuilding,
+    moveBuildingTo,
+    movingBuildingId,
+    selectedBuildingId,
+    buildings,
+  };
+  const rebuildKeysRef = useRef({
+    tickRebuildHold,
+    repairBuilding,
+    guideStep,
+    activeRuinId,
+    dismissWelcome,
+    buildings,
+  });
+  rebuildKeysRef.current = {
+    tickRebuildHold,
+    repairBuilding,
+    guideStep,
+    activeRuinId,
+    dismissWelcome,
+    buildings,
+  };
   const sprintMeter = useRef(createSprintMeter());
   const [stamina, setStamina] = useState({ stamina: 1, sprinting: false, exhausted: false });
+  const [compass, setCompass] = useState(null);
 
   const solidTiles = useMemo(
     () =>
@@ -65,7 +136,75 @@ export default function BaseBuilderView() {
   solidRef.current = solidTiles;
 
   const nearRuin = findRuinNear(buildings, walker.column, walker.row);
+  const nearRepaired = findRepairedNear(buildings, walker.column, walker.row);
+  const nearActive = !!(activeRuin && nearRuin && nearRuin.id === activeRuin.id);
+  const movingBuilding = buildings.find((b) => b.id === movingBuildingId) || null;
   const isPov = cameraMode === 'chase';
+
+  const dropOrigin = () => {
+    const yaw = sceneApi.current?.getFacingYaw?.() ?? Math.PI;
+    const dir = stepDirection(yaw, 1, 0) || { dCol: 0, dRow: -1 };
+    return {
+      x: walkerRef.current.column + dir.dCol,
+      y: walkerRef.current.row + dir.dRow,
+    };
+  };
+
+  // Walk-brush: paints/erases the footprint whenever you step, flip ON, change
+  // size/color, or switch to eraser. Stops itself on ink/quota so toasts don't spam.
+  const brushFnRef = useRef({ paintTiles, eraseTiles, setBrush });
+  brushFnRef.current = { paintTiles, eraseTiles, setBrush };
+  useEffect(() => {
+    if (!brush.on) return;
+    const tiles = brushFootprint(walker.column, walker.row, brush.size);
+    if (brush.erase) {
+      brushFnRef.current.eraseTiles(tiles);
+      return;
+    }
+    const res = brushFnRef.current.paintTiles(tiles);
+    if (res.stop) {
+      brushFnRef.current.setBrush((b) => ({ ...b, on: false }));
+      showToast('Brush off — out of ink or color quota', 'error');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [walker.column, walker.row, brush.on, brush.size, brush.erase, selectedColor]);
+
+  // Move ghost: tile hover in map view, tile in front while in POV
+  useEffect(() => {
+    const api = sceneApi.current;
+    if (!api?.setMoveGhost) return;
+    if (!movingBuilding) {
+      api.setMoveGhost(null);
+      return;
+    }
+    const w = movingBuilding.footprintWidth || 2;
+    const h = movingBuilding.footprintHeight || 2;
+    if (!isPov) return;
+    const { x, y } = dropOrigin();
+    const ok = canPlaceOnGameMap(buildings, x, y, w, h, movingBuilding.id);
+    api.setMoveGhost({
+      x,
+      y,
+      w,
+      h,
+      ok,
+      type: movingBuilding.buildingType,
+      hex: movingBuilding.hexColor,
+      level: movingBuilding.level,
+    });
+  }, [movingBuilding, walker.column, walker.row, buildings, isPov, cameraMode]);
+
+  // 3D preview rings under the brush footprint
+  useEffect(() => {
+    const api = sceneApi.current;
+    if (!api?.setBrushPreview) return;
+    if (!brush.on) {
+      api.setBrushPreview(null);
+      return;
+    }
+    const tiles = brushFootprint(walker.column, walker.row, brush.size);
+    api.setBrushPreview(tiles, brush.erase ? '#FFFFFF' : GAME_COLORS[selectedColor] || '#FFFFFF');
+  }, [walker.column, walker.row, brush.on, brush.size, brush.erase, selectedColor, cameraMode]);
 
   useEffect(() => {
     setWalker((prev) => ({
@@ -81,6 +220,7 @@ export default function BaseBuilderView() {
     let moveCooldown = 0;
     let lastSprintMul = 1;
     let lastHud = { stamina: 1, sprinting: false, exhausted: false };
+    let lastCompass = null;
 
     const loop = (now) => {
       const dt = Math.min(0.05, (now - last) / 1000);
@@ -110,55 +250,76 @@ export default function BaseBuilderView() {
         setStamina(lastHud);
       }
 
-      if (moveCooldown <= 0) {
-        if (turn !== 0) sceneApi.current?.addLookYaw?.(turn * 0.12);
+      // Mouse locked → A/D strafe (mouse steers); otherwise A/D turns smoothly every frame
+      const mouseLocked = sceneApi.current?.isMouseLocked?.() ?? false;
+      const strafe = mouseLocked ? -turn : 0;
+      if (!mouseLocked && turn !== 0) sceneApi.current?.addLookYaw?.(turn * TURN_RATE * dt);
 
-        if (forward !== 0) {
-          const yaw = sceneApi.current?.getFacingYaw?.() ?? Math.PI;
-          let dCol = Math.round(Math.sin(yaw) * forward);
-          let dRow = Math.round(Math.cos(yaw) * forward);
-          if (Math.abs(dCol) >= Math.abs(dRow)) {
-            dCol = Math.sign(dCol);
-            dRow = 0;
-          } else {
-            dRow = Math.sign(dRow);
-            dCol = 0;
-          }
-          if (dCol !== 0 || dRow !== 0) {
-            const column = Math.max(0, Math.min(MAP_COLS - 1, walkerRef.current.column + dCol));
-            const row = Math.max(0, Math.min(MAP_ROWS - 1, walkerRef.current.row + dRow));
-            if (column !== walkerRef.current.column || row !== walkerRef.current.row) {
-              if (!canEnterTile(column, row, solidRef.current)) {
-                moveCooldown = 0.1;
-                sceneApi.current?.playBump?.();
-              } else {
-                moveCooldown = (WALK_TILE_SECONDS / sprintMul) * 0.92;
-                setWalker((prev) => ({ ...prev, column, row }));
-              }
-            }
-          }
+      if (moveCooldown <= 0 && (forward !== 0 || strafe !== 0)) {
+        const yaw = sceneApi.current?.getFacingYaw?.() ?? Math.PI;
+        const dir = stepDirection(yaw, forward, strafe);
+        const step = attemptStep(walkerRef.current, dir, solidRef.current);
+        if (step.ok) {
+          moveCooldown = (WALK_TILE_SECONDS * (step.diagonal ? Math.SQRT2 : 1) / sprintMul) * 0.92;
+          soundEngine.playFootstepSound(sp.sprinting);
+          setWalker((prev) => ({ ...prev, column: step.column, row: step.row }));
+        } else if (step.blocked) {
+          moveCooldown = 0.1;
+          sceneApi.current?.playBump?.();
         }
+      }
+
+      const rk = rebuildKeysRef.current;
+      if (rk.guideStep === GUIDE_STEPS.WELCOME && (forward !== 0 || strafe !== 0)) {
+        rk.dismissWelcome();
+      }
+      const holdingF = keys.current.has('f') || keys.current.has('F');
+      const pos = walkerRef.current;
+      const ruin = findRuinNear(rk.buildings, pos.column, pos.row);
+      const target =
+        rk.guideStep === GUIDE_STEPS.DONE || rk.guideStep === GUIDE_STEPS.MOVE_TIP
+          ? ruin
+          : ruin && ruin.id === rk.activeRuinId
+            ? ruin
+            : null;
+      const canHold =
+        holdingF &&
+        !!target &&
+        rk.guideStep !== GUIDE_STEPS.WELCOME &&
+        rk.guideStep !== GUIDE_STEPS.MOVE_TIP;
+      const doneId = rk.tickRebuildHold(dt, canHold, target?.id || null);
+      if (doneId) {
+        soundEngine.stopRebuildHum();
+        rk.repairBuilding(doneId);
+      } else if (canHold) soundEngine.startRebuildHum();
+      else soundEngine.stopRebuildHum();
+
+      const screen = sceneApi.current?.getGuideScreen?.();
+      if (screen) {
+        const same =
+          lastCompass &&
+          Math.abs(lastCompass.nx - screen.nx) < 0.04 &&
+          Math.abs(lastCompass.ny - screen.ny) < 0.04 &&
+          lastCompass.onScreen === screen.onScreen;
+        if (!same) {
+          lastCompass = screen;
+          setCompass(screen);
+        }
+      } else if (lastCompass) {
+        lastCompass = null;
+        setCompass(null);
       }
 
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(raf);
+    return () => {
+      cancelAnimationFrame(raf);
+      soundEngine.stopRebuildHum();
+    };
   }, []);
 
   useEffect(() => {
-    const tryRepair = () => {
-      const { column, row } = walkerRef.current;
-      repairRuinNear(column, row);
-    };
-    const tryPaintHere = () => {
-      const { column, row } = walkerRef.current;
-      setSelectedTile({ column, row });
-      placeRef.current(column, row);
-    };
-    actionRef.current = tryRepair;
-    paintRef.current = tryPaintHere;
-
     const down = (e) => {
       keys.current.add(e.key);
       if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'w', 'a', 's', 'd', 'W', 'A', 'S', 'D', 'Shift'].includes(e.key)) {
@@ -166,15 +327,54 @@ export default function BaseBuilderView() {
       }
       if ((e.key === 'f' || e.key === 'F') && !e.repeat) {
         e.preventDefault();
-        actionRef.current?.();
+        if (rebuildKeysRef.current.guideStep === GUIDE_STEPS.WELCOME) {
+          rebuildKeysRef.current.dismissWelcome();
+        }
       }
       if ((e.key === 'e' || e.key === 'E') && !e.repeat) {
         e.preventDefault();
-        paintRef.current?.();
+        brushKeysRef.current.setSelectedTool('PAINT');
+        brushKeysRef.current.toggleBrush();
+      }
+      if ((e.key === 'q' || e.key === 'Q') && !e.repeat) {
+        e.preventDefault();
+        brushKeysRef.current.cycleBrushSize();
+      }
+      if ((e.key === 'r' || e.key === 'R') && !e.repeat) {
+        e.preventDefault();
+        brushKeysRef.current.toggleEraser();
+      }
+      if (e.key >= '1' && e.key <= '5' && !e.repeat) {
+        const key = GAME_COLOR_KEYS[Number(e.key) - 1];
+        if (key) {
+          brushKeysRef.current.setSelectedColor(key);
+          brushKeysRef.current.setSelectedTool('PAINT');
+          soundEngine.playClickSound();
+        }
       }
       if ((e.key === 'v' || e.key === 'V') && !e.repeat) {
         e.preventDefault();
         setCameraMode((m) => (m === 'chase' ? 'iso' : 'chase'));
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        moveKeysRef.current.cancelMoveBuilding();
+      }
+      if ((e.key === 'm' || e.key === 'M') && !e.repeat) {
+        e.preventDefault();
+        const mv = moveKeysRef.current;
+        if (mv.movingBuildingId) {
+          const yaw = sceneApi.current?.getFacingYaw?.() ?? Math.PI;
+          const dir = stepDirection(yaw, 1, 0) || { dCol: 0, dRow: -1 };
+          const pos = walkerRef.current;
+          mv.moveBuildingTo(pos.column + dir.dCol, pos.row + dir.dRow, { occupant: pos });
+          return;
+        }
+        const here = walkerRef.current;
+        const nearby = findRepairedNear(mv.buildings, here.column, here.row);
+        const targetId = nearby?.id || mv.selectedBuildingId;
+        if (targetId) mv.beginMoveBuilding(targetId);
+        else showToast('Walk next to a repaired house · press M to move', 'info');
       }
     };
     const up = (e) => keys.current.delete(e.key);
@@ -187,28 +387,64 @@ export default function BaseBuilderView() {
       window.removeEventListener('keyup', up);
       window.removeEventListener('blur', blur);
     };
-  }, [repairRuinNear]);
+  }, []);
 
   const handleTileClick = (data) => {
     setSelectedTile(data);
-    handlePlaceAt(data.column, data.row);
+    handlePlaceAt(data.column, data.row, { occupant: walkerRef.current });
+  };
+
+  const handleTileHover = (data) => {
+    const api = sceneApi.current;
+    if (!api?.setMoveGhost || !movingBuilding || isPov) return;
+    if (!data) {
+      api.setMoveGhost(null);
+      return;
+    }
+    const w = movingBuilding.footprintWidth || 2;
+    const h = movingBuilding.footprintHeight || 2;
+    const ok = canPlaceOnGameMap(buildings, data.column, data.row, w, h, movingBuilding.id);
+    api.setMoveGhost({
+      x: data.column,
+      y: data.row,
+      w,
+      h,
+      ok,
+      type: movingBuilding.buildingType,
+      hex: movingBuilding.hexColor,
+      level: movingBuilding.level,
+    });
   };
 
   const handleBuildingClick = (buildingId) => {
     const building = buildings.find((b) => b.id === buildingId);
     if (building?.ruined) {
-      showToast('Walk to this ruin and press F to repair', 'info');
+      if (guideActive && activeRuinId && building.id !== activeRuinId) {
+        showToast('Follow the marker — rebuild that house first', 'info');
+      } else {
+        showToast('Walk to this ruin and hold F to rebuild', 'info');
+      }
       handleBuildingSelect(buildingId);
       return;
     }
     handleBuildingSelect(buildingId);
   };
 
-  const hint = nearRuin
-    ? `Ruin: ${nearRuin.buildingType.replace(/_/g, ' ')} · F repair (${REPAIR_BUILDING_COST.coins}c / ${REPAIR_BUILDING_COST.ink} ink)`
-    : isPov
-      ? 'Click lock mouse · WASD · Shift sprint · E paint · F repair · V map'
-      : 'WASD walk · Shift sprint · click tiles to paint · V for character POV';
+  const hint = movingBuilding
+    ? `Moving ${movingBuilding.buildingType.replace(/_/g, ' ')} · click a tile or M to drop · Esc cancel`
+    : nearActive
+      ? `Hold F to rebuild (${REPAIR_BUILDING_COST.coins}c / ${REPAIR_BUILDING_COST.ink} ink)`
+      : nearRuin && guideActive
+        ? 'Follow the marker to the highlighted ruin'
+        : nearRuin
+          ? `Ruin: ${nearRuin.buildingType.replace(/_/g, ' ')} · hold F (${REPAIR_BUILDING_COST.coins}c / ${REPAIR_BUILDING_COST.ink} ink)`
+          : nearRepaired
+            ? `${nearRepaired.buildingType.replace(/_/g, ' ')} · M to move · click to paint`
+            : brush.on
+              ? `Brush ON · ${brush.erase ? 'erasing' : 'painting'} ${brush.size}×${brush.size} under your feet · E off · Q size · R ${brush.erase ? 'paint' : 'eraser'} · 1–5 color`
+              : isPov
+                ? 'WASD · Mouse look · E walk-brush · 1–5 color · hold F rebuild · M move · V map'
+                : 'WASD walk · hold F to rebuild · M move a house · V for character POV';
 
   return (
     <div className="relative w-full h-full overflow-hidden bg-clay-bg">
@@ -218,7 +454,13 @@ export default function BaseBuilderView() {
         buildings={buildings}
         defenses={defenses}
         selectedBuildingId={selectedBuildingId}
+        movingBuildingId={movingBuildingId}
+        activeRuinId={guideStep === GUIDE_STEPS.REBUILD ? activeRuinId : null}
+        rebuildingId={rebuildingId}
+        rebuildProgress={rebuildProgress}
+        onTileHover={handleTileHover}
         showSearchlight
+        searchlightLevel={searchlightLevel}
         showMakeupHouse
         attacker={walker}
         cameraMode={cameraMode}
@@ -231,17 +473,40 @@ export default function BaseBuilderView() {
         <HudBanner
           icon="🏠"
           title="Your Base"
-          subtitle={isPov ? 'Character POV · Walk · Repair · Paint' : 'Map view · Click paint · V for POV'}
+          subtitle={
+            movingBuilding
+              ? `Moving ${movingBuilding.buildingType.replace(/_/g, ' ')} · drop on a tile`
+              : guideActive
+                ? `Rebuild ${repairedCount}/6 · hold F`
+                : brush.on
+                ? `Walk-brush ${brush.size}×${brush.size} · ${brush.erase ? 'eraser' : selectedColor}`
+                : isPov
+                  ? 'Character POV · E to paint as you walk'
+                  : 'Map view · Click paint · E walk-brush'
+          }
         />
         <NavigationTabs />
         <TopResourceBar />
       </header>
 
-      <div className="absolute top-20 left-1/2 -translate-x-1/2 z-40 pointer-events-none">
-        <ClayPanel className="px-4 py-1.5 rounded-full text-[11px] font-bold text-clay-text">
-          {hint}
-        </ClayPanel>
-      </div>
+      <BuildQuestHud
+        guideStep={guideStep}
+        activeRuin={activeRuin}
+        repairedCount={repairedCount}
+        rebuildProgress={rebuildProgress}
+        nearActive={nearActive}
+        compass={compass}
+        onDismissWelcome={dismissWelcome}
+        onDismissMoveTip={dismissMoveTip}
+      />
+
+      {guideStep !== GUIDE_STEPS.REBUILD && guideStep !== GUIDE_STEPS.WELCOME && (
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-40 pointer-events-none">
+          <ClayPanel className="px-4 py-1.5 rounded-full text-[11px] font-bold text-clay-text">
+            {hint}
+          </ClayPanel>
+        </div>
+      )}
 
       <aside className="absolute right-4 top-28 z-40 hidden md:flex flex-col items-end gap-3">
         <BaseStatusPanel

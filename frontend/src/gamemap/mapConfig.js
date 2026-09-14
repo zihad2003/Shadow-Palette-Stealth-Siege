@@ -77,7 +77,13 @@ export const CHASE_CAM = {
   lookAtHeight: 0.55,
   shoulder: 0.38,
   fov: 58,
-  lookPitch: 0.2,
+  /** Positive = looking up. */
+  lookPitch: 0.0,
+  /** Mouse-down limit (camera climbs, looks at the ground). */
+  pitchMin: -0.55,
+  /** Mouse-up limit (camera drops to shoulder height, looks at the sky). */
+  pitchMax: 0.95,
+  minCamHeight: 0.5,
   minDist: 3.6,
   maxDist: 7.5,
 };

@@ -8,8 +8,11 @@ import {
   LARGE_MAP,
   MAP_COLORS,
   tileWorldPos,
+  SEARCHLIGHT_TILE,
+  GATE_SPAWN_TILE,
 } from './mapConfig.js';
 import { isDecorBannedTile } from './occupancy.js';
+import { GAME_COLORS, GAME_COLOR_KEYS } from '../colors.js';
 
 function hash(n, salt = 0) {
   const s = Math.sin(n * 127.1 + salt * 311.7) * 43758.5453;
@@ -33,49 +36,164 @@ function noRaycast(root) {
   return root;
 }
 
-function barrel(i) {
+function colorAt(i, salt = 0) {
+  return GAME_COLORS[GAME_COLOR_KEYS[Math.floor(hash(i, salt) * GAME_COLOR_KEYS.length)]];
+}
+
+function shadow(mesh) {
+  mesh.castShadow = !LARGE_MAP;
+  mesh.receiveShadow = true;
+  return mesh;
+}
+
+/** Sealed ink vat — the fortress's main resource. */
+function inkVat(i) {
   const g = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.24, 0.42, 10), clay('#8B5A3C'));
-  body.position.y = 0.22;
-  body.castShadow = !LARGE_MAP;
+  const body = shadow(new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.26, 0.48, 12), clay('#1A2428')));
+  body.position.y = 0.24;
   g.add(body);
-  const rim = new THREE.Mesh(new THREE.TorusGeometry(0.23, 0.025, 6, 12), clay('#5C4030'));
-  rim.rotation.x = Math.PI / 2;
-  rim.position.y = 0.38;
-  g.add(rim);
-  return g;
-}
-
-function crate(i) {
-  const g = new THREE.Group();
-  const box = new THREE.Mesh(new RoundedBoxGeometry(0.42, 0.36, 0.42, 1, 0.04), clay('#C4A574'));
-  box.position.y = 0.18;
-  box.castShadow = !LARGE_MAP;
-  g.add(box);
-  const lid = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.04, 0.44), clay('#8B7355'));
-  lid.position.y = 0.38;
+  const band = new THREE.Mesh(new THREE.TorusGeometry(0.235, 0.028, 6, 16), clay('#2A9D8F'));
+  band.rotation.x = Math.PI / 2;
+  band.position.y = 0.32;
+  g.add(band);
+  const lid = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.05, 12), clay('#0D1B1E'));
+  lid.position.y = 0.5;
   g.add(lid);
-  return g;
-}
-
-function pot(i) {
-  const g = new THREE.Group();
-  const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.16, 0.22, 10), clay('#B85C38'));
-  pot.position.y = 0.12;
-  g.add(pot);
-  const leaf = new THREE.Mesh(
-    new THREE.SphereGeometry(0.14, 8, 8),
-    clay(['#4E9C5C', '#6FA84F', '#C97BB6'][Math.floor(hash(i, 2) * 3)])
+  const drip = new THREE.Mesh(
+    new THREE.SphereGeometry(0.06, 8, 8),
+    clay('#2A9D8F', { emissive: '#1A6B62', emissiveIntensity: 0.35 })
   );
-  leaf.position.y = 0.3;
-  leaf.scale.y = 0.7;
-  g.add(leaf);
+  drip.position.set(0.18, 0.28, 0.08);
+  drip.userData.keepColor = true;
+  g.add(drip);
   return g;
 }
 
+/** Open pigment pot of one of the five camo colors. */
+function pigmentPot(i) {
+  const hex = colorAt(i, 2);
+  const g = new THREE.Group();
+  const pot = shadow(new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.16, 0.2, 10), clay('#3A3630')));
+  pot.position.y = 0.1;
+  g.add(pot);
+  const fill = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.11, 0.11, 0.04, 10),
+    clay(hex, { emissive: hex, emissiveIntensity: 0.22 })
+  );
+  fill.position.y = 0.2;
+  fill.userData.keepColor = true;
+  g.add(fill);
+  const drip = new THREE.Mesh(new THREE.SphereGeometry(0.035, 8, 6), clay(hex));
+  drip.position.set(0.12, 0.08, 0.04);
+  drip.userData.keepColor = true;
+  g.add(drip);
+  return g;
+}
+
+/** Cluster of 3 pigment pots — a paint cache. */
+function pigmentCache(i) {
+  const g = new THREE.Group();
+  [-0.16, 0.14, 0].forEach((x, k) => {
+    const pot = pigmentPot(i + k * 11);
+    pot.position.set(x, 0, k === 2 ? -0.12 : 0.08);
+    pot.scale.setScalar(0.85 + k * 0.08);
+    g.add(pot);
+  });
+  const tray = new THREE.Mesh(new RoundedBoxGeometry(0.52, 0.05, 0.4, 1, 0.02), clay('#5C4030'));
+  tray.position.y = 0.02;
+  g.add(tray);
+  return g;
+}
+
+/** Palette easel with a painted board — why the fortress exists. */
+function paletteEasel(i) {
+  const hex = colorAt(i, 3);
+  const g = new THREE.Group();
+  const board = shadow(new THREE.Mesh(new RoundedBoxGeometry(0.42, 0.5, 0.04, 1, 0.02), clay('#E8DCC8')));
+  board.position.set(0, 0.42, 0);
+  board.rotation.x = -0.18;
+  g.add(board);
+  [-0.1, 0, 0.1].forEach((x, k) => {
+    const swatch = new THREE.Mesh(
+      new THREE.CircleGeometry(0.06, 10),
+      clay(GAME_COLORS[GAME_COLOR_KEYS[(Math.floor(hash(i, 4) * 5) + k) % 5]])
+    );
+    swatch.position.set(x, 0.44 + k * 0.02, 0.03);
+    swatch.rotation.x = -0.18;
+    swatch.userData.keepColor = true;
+    g.add(swatch);
+  });
+  const splash = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 6), clay(hex, { emissive: hex, emissiveIntensity: 0.15 }));
+  splash.scale.set(1.4, 0.35, 1);
+  splash.position.set(0.08, 0.32, 0.04);
+  splash.userData.keepColor = true;
+  g.add(splash);
+  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.55, 0.04), clay('#6B4A32'));
+  legL.position.set(-0.14, 0.22, -0.08);
+  legL.rotation.z = 0.18;
+  g.add(legL);
+  const legR = legL.clone();
+  legR.position.x = 0.14;
+  legR.rotation.z = -0.18;
+  g.add(legR);
+  return g;
+}
+
+/** Camo cloth on a drying rack — raid stealth gear. */
+function camoRack(i) {
+  const hex = colorAt(i, 5);
+  const g = new THREE.Group();
+  [-0.22, 0.22].forEach((x) => {
+    const post = shadow(new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.035, 0.72, 6), clay('#4A4540')));
+    post.position.set(x, 0.36, 0);
+    g.add(post);
+  });
+  const rail = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.5, 6), clay('#3A3630'));
+  rail.rotation.z = Math.PI / 2;
+  rail.position.y = 0.68;
+  g.add(rail);
+  const cloth = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.42, 0.48),
+    clay(hex, { side: THREE.DoubleSide, roughness: 0.85 })
+  );
+  cloth.position.set(0, 0.42, 0.02);
+  cloth.rotation.x = 0.08;
+  cloth.userData.keepColor = true;
+  cloth.userData.motion = 'sway';
+  cloth.userData.motionAmp = 0.8;
+  g.add(cloth);
+  const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.06, 0.01), clay('#0D1B1E'));
+  stripe.position.set(0, 0.55, 0.03);
+  g.add(stripe);
+  return g;
+}
+
+/** Spare searchlight lamp on a crate. */
+function lampCrate(i) {
+  const g = new THREE.Group();
+  const box = shadow(new THREE.Mesh(new RoundedBoxGeometry(0.4, 0.22, 0.4, 1, 0.03), clay('#4A4540')));
+  box.position.y = 0.12;
+  g.add(box);
+  const stencil = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.04, 0.02), clay('#F4C245'));
+  stencil.position.set(0, 0.18, 0.2);
+  g.add(stencil);
+  const lamp = new THREE.Mesh(
+    new THREE.SphereGeometry(0.12, 10, 8),
+    clay(MAP_COLORS.lamp, { emissive: MAP_COLORS.lamp, emissiveIntensity: 0.7 })
+  );
+  lamp.position.y = 0.36;
+  lamp.userData.keepColor = true;
+  lamp.userData.motion = 'pulse';
+  lamp.userData.motionAmp = 0.6;
+  lamp.userData.baseY = 0.36;
+  g.add(lamp);
+  return g;
+}
+
+/** Wall lantern — courtyard lighting. */
 function lantern(i) {
   const g = new THREE.Group();
-  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, 0.9, 6), clay('#4A4540'));
+  const pole = shadow(new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, 0.9, 6), clay('#4A4540')));
   pole.position.y = 0.45;
   g.add(pole);
   const lamp = new THREE.Mesh(
@@ -85,196 +203,217 @@ function lantern(i) {
   lamp.position.y = 0.95;
   lamp.userData.keepColor = true;
   g.add(lamp);
+  const hood = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.1, 8), clay('#3A3630'));
+  hood.position.y = 1.08;
+  g.add(hood);
   return g;
 }
 
-function bench(i) {
+/** Coin chest — raid loot / economy. */
+function coinChest(i) {
   const g = new THREE.Group();
-  const seat = new THREE.Mesh(new RoundedBoxGeometry(0.7, 0.08, 0.28, 1, 0.03), clay('#6B4A32'));
+  const box = shadow(new THREE.Mesh(new RoundedBoxGeometry(0.48, 0.28, 0.34, 1, 0.04), clay('#8B6914')));
+  box.position.y = 0.16;
+  g.add(box);
+  const lid = new THREE.Mesh(new RoundedBoxGeometry(0.5, 0.08, 0.36, 1, 0.03), clay('#C4A574'));
+  lid.position.set(0, 0.34, -0.02);
+  lid.rotation.x = -0.35;
+  g.add(lid);
+  const coin = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.07, 0.07, 0.02, 12),
+    clay('#F4C245', { metalness: 0.45, roughness: 0.35, emissive: '#8A6A10', emissiveIntensity: 0.2 })
+  );
+  coin.rotation.x = Math.PI / 2;
+  coin.position.set(0.06, 0.3, 0.04);
+  coin.userData.keepColor = true;
+  g.add(coin);
+  const coin2 = coin.clone();
+  coin2.position.set(-0.08, 0.28, 0.02);
+  coin2.rotation.z = 0.4;
+  g.add(coin2);
+  return g;
+}
+
+/** Chip crate stamped with the raid token. */
+function chipCrate(i) {
+  const g = new THREE.Group();
+  const box = shadow(new THREE.Mesh(new RoundedBoxGeometry(0.4, 0.32, 0.4, 1, 0.04), clay('#3A4A52')));
+  box.position.y = 0.16;
+  g.add(box);
+  const gem = new THREE.Mesh(
+    new THREE.OctahedronGeometry(0.1),
+    clay('#8D5CC7', { emissive: '#5A2E88', emissiveIntensity: 0.4 })
+  );
+  gem.position.y = 0.4;
+  gem.userData.keepColor = true;
+  gem.userData.motion = 'bob';
+  gem.userData.motionAmp = 0.8;
+  gem.userData.baseY = 0.4;
+  g.add(gem);
+  return g;
+}
+
+/** Repair kit left by a ruin — hammer + plank crate. */
+function repairKit(i) {
+  const g = new THREE.Group();
+  const crate = shadow(new THREE.Mesh(new RoundedBoxGeometry(0.42, 0.18, 0.32, 1, 0.03), clay('#6B4A32')));
+  crate.position.y = 0.1;
+  g.add(crate);
+  const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.028, 0.32, 6), clay('#5C4030'));
+  handle.rotation.z = 0.7;
+  handle.position.set(-0.04, 0.26, 0);
+  g.add(handle);
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.08, 0.08), clay('#8A8680'));
+  head.position.set(0.1, 0.36, 0);
+  g.add(head);
+  const brick = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.06, 0.1), clay('#9A958C'));
+  brick.position.set(0.08, 0.22, 0.08);
+  brick.rotation.y = 0.3;
+  g.add(brick);
+  return g;
+}
+
+/** Patrol charging post — socket for the robot. */
+function patrolPost(i) {
+  const g = new THREE.Group();
+  const base = shadow(new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.24, 0.12, 10), clay('#2A2420')));
+  base.position.y = 0.06;
+  g.add(base);
+  const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.07, 0.55, 8), clay('#4A4540'));
+  stem.position.y = 0.38;
+  g.add(stem);
+  const orb = new THREE.Mesh(
+    new THREE.SphereGeometry(0.1, 10, 8),
+    clay('#E74C3C', { emissive: '#E74C3C', emissiveIntensity: 0.55 })
+  );
+  orb.position.y = 0.72;
+  orb.userData.keepColor = true;
+  orb.userData.motion = 'pulse';
+  orb.userData.motionAmp = 1;
+  orb.userData.baseY = 0.72;
+  g.add(orb);
+  return g;
+}
+
+/** Fortress banner — house / color identity. */
+function colorBanner(i) {
+  const hex = colorAt(i, 8);
+  const g = new THREE.Group();
+  const pole = shadow(new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.04, 1.05, 6), clay('#5C4030')));
+  pole.position.y = 0.52;
+  g.add(pole);
+  const flag = new THREE.Mesh(new THREE.PlaneGeometry(0.38, 0.26), clay(hex, { side: THREE.DoubleSide }));
+  flag.position.set(0.2, 0.88, 0);
+  flag.userData.keepColor = true;
+  flag.userData.motion = 'sway';
+  flag.userData.motionAmp = 1.1;
+  g.add(flag);
+  const finial = new THREE.Mesh(new THREE.SphereGeometry(0.045, 8, 6), clay('#F4C245'));
+  finial.position.y = 1.06;
+  g.add(finial);
+  return g;
+}
+
+/** Ink fountain — courtyard landmark. */
+function inkFountain(i) {
+  const g = new THREE.Group();
+  const bowl = shadow(new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.48, 0.18, 14), clay('#9C9994')));
+  bowl.position.y = 0.1;
+  g.add(bowl);
+  const pool = new THREE.Mesh(
+    new THREE.CircleGeometry(0.32, 16),
+    clay('#2A9D8F', { emissive: '#1A6B62', emissiveIntensity: 0.28 })
+  );
+  pool.rotation.x = -Math.PI / 2;
+  pool.position.y = 0.2;
+  pool.userData.keepColor = true;
+  g.add(pool);
+  const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 0.4, 8), clay('#ABA8A3'));
+  pillar.position.y = 0.38;
+  g.add(pillar);
+  const spray = new THREE.Mesh(
+    new THREE.SphereGeometry(0.09, 8, 8),
+    clay('#2A9D8F', { emissive: '#1A6B62', emissiveIntensity: 0.4, transparent: true, opacity: 0.8 })
+  );
+  spray.position.y = 0.64;
+  spray.userData.keepColor = true;
+  spray.userData.motion = 'bob';
+  spray.userData.motionAmp = 1;
+  spray.userData.baseY = 0.64;
+  g.add(spray);
+  return g;
+}
+
+/** Paint-supply cart. */
+function inkCart(i) {
+  const g = new THREE.Group();
+  const bed = shadow(new THREE.Mesh(new RoundedBoxGeometry(0.62, 0.12, 0.4, 1, 0.03), clay('#6B4A32')));
+  bed.position.y = 0.26;
+  g.add(bed);
+  [-0.22, 0.22].forEach((x) => {
+    const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.06, 10), clay('#2A2420'));
+    wheel.rotation.z = Math.PI / 2;
+    wheel.position.set(x, 0.12, 0.2);
+    g.add(wheel);
+  });
+  const vat = pigmentPot(i + 3);
+  vat.position.set(0, 0.28, 0);
+  vat.scale.setScalar(0.75);
+  g.add(vat);
+  return g;
+}
+
+/** Gate / wall bench for idle patrols. */
+function watchBench(i) {
+  const g = new THREE.Group();
+  const seat = shadow(new THREE.Mesh(new RoundedBoxGeometry(0.7, 0.08, 0.26, 1, 0.03), clay('#4A4540')));
   seat.position.y = 0.28;
   g.add(seat);
   [-0.28, 0.28].forEach((x) => {
-    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.26, 0.08), clay('#5C4030'));
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.26, 0.07), clay('#3A3630'));
     leg.position.set(x, 0.13, 0);
     g.add(leg);
   });
   return g;
 }
 
-function cart(i) {
+/** Direction sign toward the gate / plaza. */
+function waySign(i) {
   const g = new THREE.Group();
-  const bed = new THREE.Mesh(new RoundedBoxGeometry(0.7, 0.14, 0.45, 1, 0.04), clay('#8B6914'));
-  bed.position.y = 0.28;
-  bed.castShadow = !LARGE_MAP;
-  g.add(bed);
-  [-0.28, 0.28].forEach((x) => {
-    const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.06, 10), clay('#3A3630'));
-    wheel.rotation.z = Math.PI / 2;
-    wheel.position.set(x, 0.14, 0.22);
-    g.add(wheel);
-  });
-  return g;
-}
-
-function well(i) {
-  const g = new THREE.Group();
-  const base = new THREE.Mesh(new THREE.CylinderGeometry(0.38, 0.42, 0.35, 12), clay('#8A8680'));
-  base.position.y = 0.18;
-  base.castShadow = !LARGE_MAP;
-  g.add(base);
-  const water = new THREE.Mesh(
-    new THREE.CircleGeometry(0.28, 16),
-    clay('#5BA3C9', { emissive: '#2a6a88', emissiveIntensity: 0.2 })
-  );
-  water.rotation.x = -Math.PI / 2;
-  water.position.y = 0.34;
-  g.add(water);
-  return g;
-}
-
-function sack(i) {
-  const g = new THREE.Group();
-  const bag = new THREE.Mesh(new THREE.SphereGeometry(0.2, 10, 8), clay('#C9B896'));
-  bag.scale.set(1, 1.15, 0.9);
-  bag.position.y = 0.2;
-  g.add(bag);
-  return g;
-}
-
-function fence(i) {
-  const g = new THREE.Group();
-  for (let k = 0; k < 3; k++) {
-    const post = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.4, 0.06), clay('#6B4A32'));
-    post.position.set(-0.25 + k * 0.25, 0.2, 0);
-    g.add(post);
-  }
-  const rail = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.05, 0.04), clay('#8B6914'));
-  rail.position.y = 0.28;
-  g.add(rail);
-  return g;
-}
-
-function signpost(i) {
-  const g = new THREE.Group();
-  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.04, 0.7, 6), clay('#5C4030'));
+  const pole = shadow(new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.04, 0.7, 6), clay('#5C4030')));
   pole.position.y = 0.35;
   g.add(pole);
-  const board = new THREE.Mesh(new RoundedBoxGeometry(0.45, 0.22, 0.04, 1, 0.02), clay('#D5453C'));
-  board.position.set(0.12, 0.62, 0);
+  const board = new THREE.Mesh(new RoundedBoxGeometry(0.48, 0.18, 0.04, 1, 0.02), clay('#D5453C'));
+  board.position.set(0.14, 0.62, 0);
   g.add(board);
+  const tip = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.12, 3), clay('#D5453C'));
+  tip.rotation.z = -Math.PI / 2;
+  tip.position.set(0.42, 0.62, 0);
+  g.add(tip);
   return g;
 }
 
-function campfire(i) {
-  const g = new THREE.Group();
-  for (let k = 0; k < 4; k++) {
-    const log = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 0.35, 6), clay('#5C4030'));
-    log.rotation.z = Math.PI / 2;
-    log.rotation.y = (k / 4) * Math.PI;
-    log.position.y = 0.06;
-    g.add(log);
-  }
-  const flame = new THREE.Mesh(
-    new THREE.ConeGeometry(0.12, 0.28, 8),
-    clay('#FF8A3D', { emissive: '#FF6B2C', emissiveIntensity: 0.7, transparent: true, opacity: 0.9 })
-  );
-  flame.position.y = 0.28;
-  flame.userData.keepColor = true;
-  flame.userData.motion = 'pulse';
-  flame.userData.motionAmp = 1.2;
-  flame.userData.baseY = 0.28;
-  g.add(flame);
-  return g;
-}
+const COURTYARD = [inkVat, pigmentCache, paletteEasel, camoRack, coinChest, chipCrate, inkFountain, inkCart];
+const RUIN_YARD = [repairKit, pigmentPot, inkVat, watchBench];
+const GATE_YARD = [waySign, colorBanner, lampCrate, watchBench, inkCart];
+const PLAZA = [lampCrate, patrolPost, colorBanner, inkFountain];
 
-function fountain(i) {
-  const g = new THREE.Group();
-  const bowl = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.5, 0.2, 14), clay('#9C9994'));
-  bowl.position.y = 0.12;
-  g.add(bowl);
-  const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 0.45, 8), clay('#ABA8A3'));
-  pillar.position.y = 0.4;
-  g.add(pillar);
-  const spray = new THREE.Mesh(
-    new THREE.SphereGeometry(0.1, 8, 8),
-    clay('#7EC8E3', { emissive: '#3a8ab0', emissiveIntensity: 0.25, transparent: true, opacity: 0.75 })
-  );
-  spray.position.y = 0.7;
-  spray.userData.motion = 'bob';
-  spray.userData.motionAmp = 1;
-  spray.userData.baseY = 0.7;
-  g.add(spray);
-  return g;
+function pickMaker(n, column, row) {
+  const nearGate =
+    Math.abs(column - GATE_SPAWN_TILE.column) <= 8 && row >= MAP_ROWS - 10;
+  const nearPlaza =
+    Math.abs(column - SEARCHLIGHT_TILE.column) <= 7 && Math.abs(row - SEARCHLIGHT_TILE.row) <= 7;
+  const nearEdge = column <= 4 || row <= 4 || column >= MAP_COLS - 5 || row >= MAP_ROWS - 5;
+  const pool = nearGate ? GATE_YARD : nearPlaza ? PLAZA : nearEdge ? RUIN_YARD : COURTYARD;
+  return pool[Math.floor(hash(n, 3) * pool.length)];
 }
-
-function marketStall(i) {
-  const g = new THREE.Group();
-  const table = new THREE.Mesh(new RoundedBoxGeometry(0.7, 0.08, 0.45, 1, 0.03), clay('#8B6914'));
-  table.position.y = 0.35;
-  g.add(table);
-  [-0.28, 0.28].forEach((x) => {
-    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.32, 0.06), clay('#5C4030'));
-    leg.position.set(x, 0.16, 0.15);
-    g.add(leg);
-    const leg2 = leg.clone();
-    leg2.position.z = -0.15;
-    g.add(leg2);
-  });
-  const canopy = new THREE.Mesh(
-    new THREE.BoxGeometry(0.78, 0.04, 0.55),
-    clay(['#D5453C', '#F4C245', '#4E9C8D'][Math.floor(hash(i, 4) * 3)])
-  );
-  canopy.position.y = 0.72;
-  g.add(canopy);
-  return g;
-}
-
-function hayBale(i) {
-  const mesh = new THREE.Mesh(new RoundedBoxGeometry(0.5, 0.32, 0.35, 1, 0.06), clay('#D4C07A'));
-  mesh.position.y = 0.16;
-  mesh.castShadow = !LARGE_MAP;
-  return mesh;
-}
-
-function mushroom(i) {
-  const g = new THREE.Group();
-  const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 0.16, 8), clay('#E8DCC8'));
-  stem.position.y = 0.08;
-  g.add(stem);
-  const cap = new THREE.Mesh(
-    new THREE.SphereGeometry(0.14, 10, 8),
-    clay(['#D5453C', '#F4A261', '#8B6BC7'][Math.floor(hash(i, 5) * 3)])
-  );
-  cap.scale.y = 0.45;
-  cap.position.y = 0.18;
-  g.add(cap);
-  return g;
-}
-
-const MAKERS = [
-  barrel,
-  crate,
-  pot,
-  lantern,
-  bench,
-  cart,
-  sack,
-  fence,
-  signpost,
-  campfire,
-  hayBale,
-  mushroom,
-  marketStall,
-  well,
-  fountain,
-];
 
 /**
  * Deterministic list of tiles occupied by courtyard props (same as visuals).
  */
 export function listDecorOccupiedTiles(seed = 7, buildings = []) {
   const used = new Set();
-  const target = LARGE_MAP ? 110 : 36;
+  const target = LARGE_MAP ? 72 : 28;
   let placed = 0;
   let attempts = 0;
 
@@ -289,7 +428,7 @@ export function listDecorOccupiedTiles(seed = 7, buildings = []) {
     placed += 1;
   }
 
-  const edgeStep = LARGE_MAP ? 4 : 3;
+  const edgeStep = LARGE_MAP ? 5 : 3;
   for (let c = 2; c < MAP_COLS - 2; c += edgeStep) {
     [1, MAP_ROWS - 2].forEach((r) => {
       if (isDecorBannedTile(c, r, buildings)) return;
@@ -307,14 +446,14 @@ export function listDecorOccupiedTiles(seed = 7, buildings = []) {
 }
 
 /**
- * Scatter clay world props across the fortress courtyard — barrels, stalls,
- * lanterns, wells, flora accents. Deterministic per seed; ignores raycasts.
+ * Scatter fortress-themed props: ink vats, pigment caches, camo racks,
+ * repair kits near ruins, banners at the gate. Deterministic per seed.
  */
 export function createInteriorDecor({ seed = 7, buildings = [] } = {}) {
   const group = new THREE.Group();
   group.name = 'InteriorDecor';
 
-  const target = LARGE_MAP ? 110 : 36;
+  const target = LARGE_MAP ? 72 : 28;
   const used = new Set();
   let placed = 0;
   let attempts = 0;
@@ -328,22 +467,21 @@ export function createInteriorDecor({ seed = 7, buildings = [] } = {}) {
     if (used.has(key) || isDecorBannedTile(column, row, buildings)) continue;
     used.add(key);
 
-    const maker = MAKERS[Math.floor(hash(n, 3) * MAKERS.length)];
+    const maker = pickMaker(n, column, row);
     const prop = noRaycast(maker(n));
     const p = tileWorldPos(column, row);
-    const jitterX = (hash(n, 4) - 0.5) * TILE_PITCH * 0.28;
-    const jitterZ = (hash(n, 5) - 0.5) * TILE_PITCH * 0.28;
+    const jitterX = (hash(n, 4) - 0.5) * TILE_PITCH * 0.22;
+    const jitterZ = (hash(n, 5) - 0.5) * TILE_PITCH * 0.22;
     prop.position.set(p.x + jitterX, TILE_HEIGHT, p.z + jitterZ);
     prop.rotation.y = hash(n, 6) * Math.PI * 2;
-    const sc = 0.85 + hash(n, 7) * 0.35;
-    prop.scale.setScalar(sc);
+    prop.scale.setScalar(0.92 + hash(n, 7) * 0.22);
     prop.userData.decorTile = key;
     prop.userData.solid = true;
     group.add(prop);
     placed += 1;
   }
 
-  const edgeStep = LARGE_MAP ? 4 : 3;
+  const edgeStep = LARGE_MAP ? 5 : 3;
   for (let c = 2; c < MAP_COLS - 2; c += edgeStep) {
     [1, MAP_ROWS - 2].forEach((r, idx) => {
       if (isDecorBannedTile(c, r, buildings)) return;
@@ -381,6 +519,8 @@ export function tickDecorMotion(group, elapsed) {
     else if (kind === 'pulse') {
       const s = 1 + Math.sin(elapsed * 3.2) * 0.08 * amp;
       child.scale.set(s, s * (1 + Math.sin(elapsed * 4) * 0.05), s);
+    } else if (kind === 'sway') {
+      child.rotation.y = Math.sin(elapsed * 1.4 * amp) * 0.12;
     }
   });
 }

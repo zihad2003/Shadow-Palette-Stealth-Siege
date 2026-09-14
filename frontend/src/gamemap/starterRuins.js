@@ -1,7 +1,13 @@
-import { MAP_COLS, MAP_ROWS } from './mapConfig.js';
+import { MAP_COLS, MAP_ROWS, GATE_SPAWN_TILE } from './mapConfig.js';
 
 /** Pre-placed broken houses on a fresh 48×40 fortress — walk up and repair. */
 export const REPAIR_BUILDING_COST = { coins: 80, ink: 12 };
+export const STARTER_HOUSE_COUNT = 6;
+export const REBUILD_SECONDS = 2;
+
+export function houseLabel(type) {
+  return String(type || 'HOUSE').replace(/_/g, ' ');
+}
 
 export function createStarterRuins() {
   const slots = [
@@ -42,6 +48,33 @@ export function findRuinAt(buildings, column, row) {
   return buildings.find((b) => b.ruined && buildingCoversTile(b, column, row)) || null;
 }
 
+export function findRepairedAt(buildings, column, row) {
+  return (
+    buildings.find(
+      (b) => !b.ruined && b.buildingType !== 'MAKEUP_HOUSE' && buildingCoversTile(b, column, row)
+    ) || null
+  );
+}
+
+/** Stand beside a repaired house to pick it up (footprint is solid). */
+export function findRepairedNear(buildings, column, row) {
+  const neighbors = [
+    [1, 0],
+    [-1, 0],
+    [0, 1],
+    [0, -1],
+    [1, 1],
+    [1, -1],
+    [-1, 1],
+    [-1, -1],
+  ];
+  for (const [dx, dy] of neighbors) {
+    const hit = findRepairedAt(buildings, column + dx, row + dy);
+    if (hit) return hit;
+  }
+  return null;
+}
+
 /** Stand on the ruin footprint or any adjacent tile to repair. */
 export function findRuinNear(buildings, column, row) {
   const direct = findRuinAt(buildings, column, row);
@@ -58,4 +91,25 @@ export function findRuinNear(buildings, column, row) {
     if (hit) return hit;
   }
   return null;
+}
+
+export function isHouseBuilding(building) {
+  return (
+    !!building &&
+    !building.ruined &&
+    ['SLEEP_HOUSE', 'INK_HOUSE', 'CRAFT_HOUSE', 'COIN_GENERATOR'].includes(building.buildingType)
+  );
+}
+
+/** Nearest unfinished ruin to the gate (then the next nearest as houses complete). */
+export function nextGuideRuin(buildings, fromTile = GATE_SPAWN_TILE) {
+  const ruins = (buildings || []).filter((b) => b.ruined && b.buildingType !== 'MAKEUP_HOUSE');
+  if (!ruins.length) return null;
+  const fx = fromTile.column ?? fromTile.x ?? GATE_SPAWN_TILE.column;
+  const fy = fromTile.row ?? fromTile.y ?? GATE_SPAWN_TILE.row;
+  return [...ruins].sort((a, b) => {
+    const da = Math.hypot(a.xPos + (a.footprintWidth || 2) / 2 - fx, a.yPos + (a.footprintHeight || 2) / 2 - fy);
+    const db = Math.hypot(b.xPos + (b.footprintWidth || 2) / 2 - fx, b.yPos + (b.footprintHeight || 2) / 2 - fy);
+    return da - db;
+  })[0];
 }

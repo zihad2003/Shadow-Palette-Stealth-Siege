@@ -32,9 +32,8 @@ function easePaint(t) {
   return t * t * (3 - 2 * t);
 }
 
-/**
- * Paintable clay tile. `realColor` is the gameplay key (RED / null).
- * Raid visuals stay neutral gray and never read this key.
+/** Paintable clay tile. `realColor` is the gameplay key (RED / null).
+ * Raid tiles stay gray until the searchlight cone hits them, then the paint shows.
  */
 export function createTile(row, column, grayscale = false) {
   const palette = grayscale ? RAID_COLORS : MAP_COLORS;
@@ -90,25 +89,54 @@ export function paintTile(tile, colorKey) {
   tile.userData.paintBurst = 1;
 }
 
+function applyRevealLook(tile, hex, strength) {
+  const mat = tile.material;
+  if (!mat) return;
+  const lit = new THREE.Color(hex);
+  mat.color.copy(lit);
+  if (mat.emissive) {
+    mat.emissive.copy(lit);
+    mat.emissiveIntensity = 0.35 + strength * 0.7;
+  }
+  tile.userData.keepColor = true;
+}
+
 export function revealTileColor(tile, reveal) {
   const ud = tile.userData;
   if (!ud.grayscale) return;
-  if (reveal && ud.realColor) {
-    const hex = hexForColor(ud.realColor);
-    if (!hex) return;
-    if (!ud.revealed) {
-      ud.revealed = true;
-      ud.paintFrom = tile.material.color.clone();
-      ud.paintTo = new THREE.Color(hex);
-      ud.paintT = 0;
-    } else if (ud.paintT >= 1) {
-      tile.material.color.set(hex);
+  const hex = ud.realColor ? hexForColor(ud.realColor) : null;
+
+  if (reveal) {
+    ud.inBeam = true;
+    if (hex) {
+      if (!ud.revealed) {
+        ud.revealed = true;
+        ud.paintT = 1;
+        ud.revealPulse = 1;
+      }
+      applyRevealLook(tile, hex, 1);
+    } else if (!ud.beamKiss) {
+      ud.beamKiss = true;
+      if (tile.material.emissive) {
+        tile.material.emissive.set('#FFE08A');
+        tile.material.emissiveIntensity = 0.22;
+      }
     }
-  } else if (ud.revealed) {
+    return;
+  }
+
+  if (ud.revealed || ud.beamKiss || ud.inBeam) {
     ud.revealed = false;
+    ud.beamKiss = false;
+    ud.inBeam = false;
+    ud.keepColor = false;
     ud.paintFrom = tile.material.color.clone();
     ud.paintTo = new THREE.Color(paletteFor(tile).tileNeutral);
     ud.paintT = 0;
+    if (tile.material.emissive) {
+      tile.material.emissive.set('#000000');
+      tile.material.emissiveIntensity = 0;
+    }
   }
 }
 
@@ -120,7 +148,13 @@ export function clearTile(tile) {
   tile.userData.paintFrom = tile.material.color.clone();
   tile.userData.paintTo = new THREE.Color(paletteFor(tile).tileNeutral);
   tile.userData.paintT = tile.userData.grayscale ? 1 : 0;
-  if (tile.userData.grayscale) tile.material.color.set(paletteFor(tile).tileNeutral);
+  if (tile.userData.grayscale) {
+    tile.material.color.set(paletteFor(tile).tileNeutral);
+    if (tile.material.emissive) {
+      tile.material.emissive.set('#000000');
+      tile.material.emissiveIntensity = 0;
+    }
+  }
 }
 
 export function setTileHover(tile, hovered) {
@@ -138,22 +172,31 @@ export function pulseTile(tile) {
 
 export function tickTile(tile) {
   const ud = tile.userData;
-  const animating = (ud.paintTo && ud.paintT < 1) || ud.hoverLift || ud.press || ud.paintBurst;
-  if (!animating && ud.paintT >= 1 && !ud.hoverTarget && !ud.press) {
+  const animating =
+    (ud.paintTo && ud.paintT < 1) || ud.hoverLift || ud.press || ud.paintBurst || ud.revealPulse || ud.revealed;
+  if (!animating && ud.paintT >= 1 && !ud.hoverTarget && !ud.press && !ud.inBeam) {
     // Skip math when idle — critical on large grids
     if (Math.abs(ud.hoverLift) < 0.0001 && Math.abs(ud.hoverScale - 1) < 0.0001) return;
   }
   if (ud.paintTo && ud.paintT < 1) {
-    ud.paintT = Math.min(1, ud.paintT + 0.11);
+    ud.paintT = Math.min(1, ud.paintT + (ud.revealed ? 0.28 : 0.11));
     if (ud.paintFrom) {
       tile.material.color.copy(ud.paintFrom).lerp(ud.paintTo, easePaint(ud.paintT));
     }
+    if (ud.revealed && ud.realColor) {
+      const hex = hexForColor(ud.realColor);
+      if (hex && tile.material.emissive) {
+        tile.material.emissive.set(hex);
+        tile.material.emissiveIntensity = 0.35 + ud.paintT * 0.7;
+      }
+    }
   }
+  if (ud.revealPulse) ud.revealPulse *= 0.82;
   ud.hoverLift += (ud.hoverTarget - ud.hoverLift) * 0.22;
   ud.hoverScale += (ud.scaleTarget - ud.hoverScale) * 0.22;
   ud.press *= 0.78;
   if (ud.paintBurst) ud.paintBurst *= 0.88;
-  const burst = ud.paintBurst || 0;
+  const burst = (ud.paintBurst || 0) + (ud.revealPulse || 0) * 0.55;
   const squash = 1 - ud.press * 0.14 + burst * 0.12;
   tile.position.y = ud.baseY + ud.hoverLift + burst * 0.08;
   tile.scale.set(ud.hoverScale * (1 + burst * 0.08), squash, ud.hoverScale * (1 + burst * 0.08));

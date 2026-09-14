@@ -16,7 +16,8 @@ import { generateDefenderBase, tileColorAt } from '../raid/defenderLayouts.js';
 import { RAID_DURATION_SECONDS, DETECTION_STATES } from '../raid/stealthConstants.js';
 import { chipsForOutcome, resolveRaidOutcome } from '../raid/RaidSession.js';
 import { GATE_SPAWN_TILE, MAP_COLS, MAP_ROWS, SEARCHLIGHT_TILE, WALK_TILE_SECONDS } from '../gamemap/mapConfig.js';
-import { collectSolidTiles, canEnterTile } from '../gamemap/occupancy.js';
+import { collectSolidTiles } from '../gamemap/occupancy.js';
+import { stepDirection, attemptStep, TURN_RATE } from '../character/gridMover.js';
 import { listDecorOccupiedTiles } from '../gamemap/MapDecor.js';
 import { GAME_COLORS } from '../colors.js';
 import { RAID_TARGETS } from '../data/raidTargets.js';
@@ -118,6 +119,7 @@ export default function StealthRaidView() {
     alarmSystem.current = createAlarmSystem({
       onAlarmTriggered() {
         gateLockedRef.current = true;
+        sceneApi.current?.lockGate?.();
         sceneApi.current?.setPatrolChase?.(true, {
           column: attackerRef.current.column,
           row: attackerRef.current.row,
@@ -171,36 +173,22 @@ export default function StealthRaidView() {
         setStamina(lastHud);
       }
 
-      if (canMove && moveCooldown <= 0) {
-        if (turn !== 0) {
-          sceneApi.current?.addLookYaw?.(turn * 0.12);
-        }
+      // Mouse locked → A/D strafe (mouse steers); otherwise A/D turns smoothly every frame
+      const mouseLocked = sceneApi.current?.isMouseLocked?.() ?? false;
+      const strafe = mouseLocked ? -turn : 0;
+      if (canMove && !mouseLocked && turn !== 0) sceneApi.current?.addLookYaw?.(turn * TURN_RATE * dt);
 
-        if (forward !== 0) {
-          const yaw = sceneApi.current?.getFacingYaw?.() ?? Math.PI;
-          let dCol = Math.round(Math.sin(yaw) * forward);
-          let dRow = Math.round(Math.cos(yaw) * forward);
-          if (Math.abs(dCol) >= Math.abs(dRow)) {
-            dCol = Math.sign(dCol);
-            dRow = 0;
-          } else {
-            dRow = Math.sign(dRow);
-            dCol = 0;
-          }
-
-          if (dCol !== 0 || dRow !== 0) {
-            const column = Math.max(0, Math.min(MAP_COLS - 1, attackerRef.current.column + dCol));
-            const row = Math.max(0, Math.min(MAP_ROWS - 1, attackerRef.current.row + dRow));
-            if (column !== attackerRef.current.column || row !== attackerRef.current.row) {
-              if (!canEnterTile(column, row, solidRef.current)) {
-                moveCooldown = 0.1;
-                sceneApi.current?.playBump?.();
-              } else {
-                moveCooldown = (WALK_TILE_SECONDS / sprintMul) * 0.92;
-                setAttacker((prev) => ({ ...prev, column, row }));
-              }
-            }
-          }
+      if (canMove && moveCooldown <= 0 && (forward !== 0 || strafe !== 0)) {
+        const yaw = sceneApi.current?.getFacingYaw?.() ?? Math.PI;
+        const dir = stepDirection(yaw, forward, strafe);
+        const step = attemptStep(attackerRef.current, dir, solidRef.current);
+        if (step.ok) {
+          moveCooldown = (WALK_TILE_SECONDS * (step.diagonal ? Math.SQRT2 : 1) / sprintMul) * 0.92;
+          soundEngine.playFootstepSound(sp.sprinting);
+          setAttacker((prev) => ({ ...prev, column: step.column, row: step.row }));
+        } else if (step.blocked) {
+          moveCooldown = 0.1;
+          sceneApi.current?.playBump?.();
         }
       }
 
@@ -230,7 +218,9 @@ export default function StealthRaidView() {
           tileColor,
         });
         soundEngine.playAlarmSound();
+        soundEngine.playGateSlamSound();
         sceneApi.current?.setAlarm?.(true);
+        sceneApi.current?.lockGate?.();
         sceneApi.current?.setPatrolChase?.(true, { column: pos.column, row: pos.row });
         showToast(
           raidDefenses.length
@@ -389,8 +379,8 @@ export default function StealthRaidView() {
       breakFlash: true,
     }));
 
-    sceneApi.current?.playWallBreak?.(column, row, { hits, final });
-    soundEngine.playHitSound();
+    sceneApi.current?.playWallBreak?.(column, row, { hits, final, gate: isAtGate(column, row) });
+    soundEngine.playWallBreakSound(final);
     if (final) soundEngine.playSuccessSound();
 
     window.setTimeout(() => {
@@ -407,7 +397,7 @@ export default function StealthRaidView() {
         showToast(`Wall hit ${hits}/${WALL_BREAK_HITS} · keep pressing F`, 'info');
         setHud((prev) => ({ ...prev, breaking: false, breakFlash: false }));
       }
-    }, final ? 700 : 380);
+    }, final ? 900 : 420);
   };
 
   const tryAction = () => {
@@ -458,6 +448,7 @@ export default function StealthRaidView() {
         buildings={raidBuildings}
         defenses={raidDefenses}
         showSearchlight
+        searchlightLevel={targetMeta?.level || 1}
         showMakeupHouse
         attacker={attacker}
       />

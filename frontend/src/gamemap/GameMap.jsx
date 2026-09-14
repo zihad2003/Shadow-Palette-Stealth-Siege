@@ -2,15 +2,16 @@ import React, { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { createMapGround } from './MapGround.js';
 import { createTileGrid } from './TileGrid.js';
-import { createFortressBorder } from './FortressBorder.js';
+import { createFortressBorder, lockFortressGate, tickFortressBorder } from './FortressBorder.js';
 import { createOuterTerrain, applyMapAtmosphere } from './OuterTerrain.js';
+import { createAuroraSky } from './AuroraSky.js';
 import { createInteriorDecor, tickDecorMotion } from './MapDecor.js';
 import { paintTile, clearTile, setTileHover, pulseTile, tickTile, revealTileColor } from './Tile.js';
 import { applyGrayscaleWorld, desaturateObject } from './applyGrayscale.js';
 import { createSearchlight } from './Searchlight.js';
 import { createMakeupHouse } from './MakeupHouse.js';
 import { createWallBreakFX } from './WallBreakFX.js';
-import { buildGameHouse, buildRuinedHouse, placeHouseOnTile, createGamePatrolRobot, tickBuildingMotion } from './buildStructure.js';
+import { buildGameHouse, buildRuinedHouse, placeHouseOnTile, createGamePatrolRobot, tickBuildingMotion, buildHouseBlueprint, tintBlueprint, createGuideMarker, createRebuildFX, tickRebuildFX } from './buildStructure.js';
 import { createAttacker, tickCharacter } from '../character/buildCharacter.js';
 import {
   CAMERA,
@@ -49,6 +50,10 @@ export default function GameMap({
   searchlightLevel = DEFAULT_SEARCHLIGHT_LEVEL,
   attacker = null,
   cameraMode = 'iso',
+  activeRuinId = null,
+  rebuildProgress = 0,
+  rebuildingId = null,
+  movingBuildingId = null,
 }) {
   const mountRef = useRef(null);
   const callbacksRef = useRef({});
@@ -65,6 +70,12 @@ export default function GameMap({
   selectedBuildingRef.current = selectedBuildingId;
   const cameraModeRef = useRef(cameraMode);
   cameraModeRef.current = cameraMode;
+  const activeRuinRef = useRef(activeRuinId);
+  activeRuinRef.current = activeRuinId;
+  const rebuildRef = useRef({ id: rebuildingId, progress: rebuildProgress });
+  rebuildRef.current = { id: rebuildingId, progress: rebuildProgress };
+  const movingRef = useRef(movingBuildingId);
+  movingRef.current = movingBuildingId;
   const worldRef = useRef(null);
 
   useEffect(() => {
@@ -145,11 +156,16 @@ export default function GameMap({
     fill.position.set(-GRID_WIDTH * 0.2, 24, -GRID_DEPTH * 0.15);
     scene.add(fill);
 
+    // Sky dome sits just inside the camera's far plane; rendered first, ignores fog
+    const aurora = createAuroraSky({ radius: camFar * 0.9, grayscale });
+    scene.add(aurora.object);
+
     scene.add(createOuterTerrain());
     scene.add(createMapGround());
     const grid = createTileGrid(grayscale);
     scene.add(grid.group);
-    scene.add(createFortressBorder());
+    const fortressBorder = createFortressBorder();
+    scene.add(fortressBorder);
 
     let interiorDecor = createInteriorDecor({ seed: grayscale ? 41 : 7, buildings: buildingsRef.current });
     scene.add(interiorDecor);
@@ -159,7 +175,7 @@ export default function GameMap({
     const searchlight = showSearchlight ? createSearchlight({ level: searchlightLevel }) : null;
     if (searchlight) scene.add(searchlight.object);
 
-    const wallBreakFX = createWallBreakFX(scene);
+    const wallBreakFX = createWallBreakFX(scene, fortressBorder);
     let bumpShake = 0;
 
     const makeupHouse = showMakeupHouse ? createMakeupHouse() : null;
@@ -181,50 +197,135 @@ export default function GameMap({
     selectRing.visible = false;
     scene.add(selectRing);
 
-    const syncBuildings = () => {
-      while (buildingsGroup.children.length) {
-        const child = buildingsGroup.children[0];
-        buildingsGroup.remove(child);
-        child.traverse((n) => {
-          if (n.geometry) n.geometry.dispose();
-          if (n.material) {
-            if (Array.isArray(n.material)) n.material.forEach((m) => m.dispose());
-            else n.material.dispose();
+    const guideMarker = createGuideMarker();
+    scene.add(guideMarker.root);
+    const guideScr = new THREE.Vector3();
+    const rebuildFX = createRebuildFX();
+    scene.add(rebuildFX.group);
+
+    const dimHouse = (house, dim) => {
+      if (!!house.userData.dimmedMove === dim) return;
+      house.userData.dimmedMove = dim;
+      house.traverse((n) => {
+        if (!n.material) return;
+        const mats = Array.isArray(n.material) ? n.material : [n.material];
+        mats.forEach((mat) => {
+          mat.userData = mat.userData || {};
+          if (mat.userData._baseOp == null) mat.userData._baseOp = mat.opacity ?? 1;
+          if (dim) {
+            mat.transparent = true;
+            mat.opacity = Math.min(0.48, mat.userData._baseOp);
+          } else {
+            mat.opacity = mat.userData._baseOp;
+            mat.transparent = mat.userData._baseOp < 0.99;
           }
         });
-      }
-      (buildingsRef.current || []).forEach((b) => {
-        if (b.buildingType === 'MAKEUP_HOUSE') return;
-        const w = b.footprintWidth || 2;
-        const h = b.footprintHeight || 2;
-        const house = b.ruined
-          ? buildRuinedHouse(b.buildingType, w, h)
-          : buildGameHouse(b.buildingType, b.hexColor, b.level || 1, w, h);
-        placeHouseOnTile(house, b.xPos, b.yPos, w, h);
-        house.userData.buildingId = b.id;
-        house.userData.ruined = !!b.ruined;
-        house.traverse((n) => {
-          n.userData.buildingId = b.id;
-          n.userData.ruined = !!b.ruined;
-        });
-        if (grayscale) desaturateObject(house);
-        buildingsGroup.add(house);
+      });
+    };
+
+    let scaffold = null;
+    const clearScaffold = () => {
+      if (!scaffold) return;
+      scene.remove(scaffold);
+      scaffold.traverse((n) => {
+        if (n.geometry) n.geometry.dispose();
+        if (n.material) {
+          if (Array.isArray(n.material)) n.material.forEach((m) => m.dispose());
+          else n.material.dispose();
+        }
+      });
+      scaffold = null;
+    };
+
+    const disposeObject = (obj) => {
+      if (!obj) return;
+      obj.traverse((n) => {
+        if (n.geometry) n.geometry.dispose();
+        if (n.material) {
+          if (Array.isArray(n.material)) n.material.forEach((m) => m.dispose());
+          else n.material.dispose();
+        }
+      });
+    };
+
+    const makeHouseMesh = (b) => {
+      const w = b.footprintWidth || 2;
+      const h = b.footprintHeight || 2;
+      const house = b.ruined
+        ? buildRuinedHouse(b.buildingType, w, h)
+        : buildGameHouse(b.buildingType, b.hexColor, b.level || 1, w, h);
+      placeHouseOnTile(house, b.xPos, b.yPos, w, h);
+      house.userData.buildingId = b.id;
+      house.userData.ruined = !!b.ruined;
+      house.userData.xPos = b.xPos;
+      house.userData.yPos = b.yPos;
+      house.userData.hexColor = b.hexColor;
+      house.userData.level = b.level || 1;
+      house.traverse((n) => {
+        n.userData.buildingId = b.id;
+        n.userData.ruined = !!b.ruined;
+      });
+      if (grayscale) desaturateObject(house);
+      return house;
+    };
+
+    let lastDecorSig = '';
+    const syncBuildings = () => {
+      const list = (buildingsRef.current || []).filter((b) => b.buildingType !== 'MAKEUP_HOUSE');
+      const wanted = new Set(list.map((b) => b.id));
+      const byId = new Map();
+      [...buildingsGroup.children].forEach((child) => {
+        const id = child.userData.buildingId;
+        if (id == null || !wanted.has(id)) {
+          buildingsGroup.remove(child);
+          disposeObject(child);
+          return;
+        }
+        byId.set(id, child);
       });
 
-      // Rebuild courtyard props so they never sit under houses
-      if (interiorDecor) {
-        scene.remove(interiorDecor);
-        interiorDecor.traverse((n) => {
-          if (n.geometry) n.geometry.dispose();
-          if (n.material) {
-            if (Array.isArray(n.material)) n.material.forEach((m) => m.dispose());
-            else n.material.dispose();
+      list.forEach((b) => {
+        const w = b.footprintWidth || 2;
+        const hgt = b.footprintHeight || 2;
+        const existing = byId.get(b.id);
+        const ruined = !!b.ruined;
+        if (
+          existing &&
+          existing.userData.ruined === ruined &&
+          existing.userData.hexColor === b.hexColor &&
+          existing.userData.level === (b.level || 1)
+        ) {
+          const dest = tileWorldPos(b.xPos + (w - 1) / 2, b.yPos + (hgt - 1) / 2);
+          const dist = Math.hypot(dest.x - existing.position.x, dest.z - existing.position.z);
+          if (dist > 0.12) {
+            existing.userData.slideFrom = existing.position.clone();
+            existing.userData.slideTo = new THREE.Vector3(dest.x, TILE_HEIGHT, dest.z);
+            existing.userData.slideT = 0;
+          } else if (!existing.userData.slideTo) {
+            placeHouseOnTile(existing, b.xPos, b.yPos, w, hgt);
           }
-        });
+          existing.userData.xPos = b.xPos;
+          existing.userData.yPos = b.yPos;
+          return;
+        }
+        if (existing) {
+          buildingsGroup.remove(existing);
+          disposeObject(existing);
+        }
+        buildingsGroup.add(makeHouseMesh(b));
+      });
+
+      const decorSig = list.map((b) => `${b.id}:${b.ruined ? 1 : 0}:${b.hexColor}:${b.level || 1}`).join('|');
+      if (decorSig !== lastDecorSig) {
+        lastDecorSig = decorSig;
+        if (interiorDecor) {
+          scene.remove(interiorDecor);
+          disposeObject(interiorDecor);
+        }
+        interiorDecor = createInteriorDecor({ seed: grayscale ? 41 : 7, buildings: buildingsRef.current });
+        if (grayscale) desaturateObject(interiorDecor);
+        scene.add(interiorDecor);
       }
-      interiorDecor = createInteriorDecor({ seed: grayscale ? 41 : 7, buildings: buildingsRef.current });
-      if (grayscale) desaturateObject(interiorDecor);
-      scene.add(interiorDecor);
     };
     syncBuildings();
 
@@ -318,11 +419,12 @@ export default function GameMap({
       // Gait speed in walk units (1 = walking, ~1.9 = sprint) — smoothed for the animator
       const instSpeed = moved / safeDt / walkSpeed;
       attackerSmooth.speed += (instSpeed - attackerSmooth.speed) * (1 - Math.exp(-14 * dt));
-      // Body faces mouse look (second-person feel)
-      let yawDiff = chase.lookYaw - attackerSmooth.yaw;
+      // Body faces the direction of travel while moving, the camera look when idle (GTA feel)
+      const targetYaw = dist > 0.05 ? Math.atan2(dx, dz) : chase.lookYaw;
+      let yawDiff = targetYaw - attackerSmooth.yaw;
       while (yawDiff > Math.PI) yawDiff -= Math.PI * 2;
       while (yawDiff < -Math.PI) yawDiff += Math.PI * 2;
-      attackerSmooth.yaw += yawDiff * (1 - Math.exp(-10 * dt));
+      attackerSmooth.yaw += yawDiff * (1 - Math.exp(-(dist > 0.05 ? 14 : 8) * dt));
       attackerMesh.position.set(attackerSmooth.x, TILE_HEIGHT, attackerSmooth.z);
       attackerMesh.rotation.y = attackerSmooth.yaw;
     };
@@ -335,6 +437,106 @@ export default function GameMap({
     );
     tileRim.visible = false;
     scene.add(tileRim);
+
+    // Walk-brush preview: tinted rings on the tiles about to be painted
+    const brushGroup = new THREE.Group();
+    brushGroup.name = 'BrushPreview';
+    brushGroup.userData.keepColor = true;
+    const brushMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.55,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    const brushGeo = new THREE.RingGeometry(TILE_SIZE * 0.26, TILE_SIZE * 0.4, 28);
+    const brushRings = [];
+    for (let i = 0; i < 25; i++) {
+      const ring = new THREE.Mesh(brushGeo, brushMat);
+      ring.rotation.x = -Math.PI / 2;
+      ring.visible = false;
+      ring.userData.keepColor = true;
+      brushGroup.add(ring);
+      brushRings.push(ring);
+    }
+    scene.add(brushGroup);
+    let brushActive = false;
+    const setBrushPreview = (tiles, hex) => {
+      brushActive = Array.isArray(tiles) && tiles.length > 0;
+      if (brushActive) brushMat.color.set(hex || '#FFFFFF');
+      brushRings.forEach((ring, i) => {
+        const t = brushActive ? tiles[i] : null;
+        if (!t) {
+          ring.visible = false;
+          return;
+        }
+        const p = tileWorldPos(t.x, t.y);
+        ring.position.set(p.x, TILE_HEIGHT + 0.035, p.z);
+        ring.visible = true;
+      });
+    };
+
+    const ghostMat = new THREE.MeshBasicMaterial({
+      color: 0x7dce82,
+      transparent: true,
+      opacity: 0.3,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    const padGeo = new THREE.PlaneGeometry(TILE_SIZE * 0.9, TILE_SIZE * 0.9);
+    const movePads = [];
+    for (let i = 0; i < 9; i++) {
+      const pad = new THREE.Mesh(padGeo, ghostMat);
+      pad.rotation.x = -Math.PI / 2;
+      pad.visible = false;
+      pad.userData.keepColor = true;
+      scene.add(pad);
+      movePads.push(pad);
+    }
+    let blueprint = null;
+    const setMoveGhost = (spec) => {
+      if (!spec) {
+        if (blueprint) blueprint.visible = false;
+        movePads.forEach((p) => {
+          p.visible = false;
+        });
+        return;
+      }
+      const w = spec.w || 2;
+      const h = spec.h || 2;
+      const key = `${spec.type || 'SLEEP_HOUSE'}|${w}|${h}|${spec.level || 1}`;
+      if (!blueprint || blueprint.userData.bpKey !== key) {
+        if (blueprint) {
+          scene.remove(blueprint);
+          blueprint.traverse((n) => {
+            if (n.material) {
+              if (Array.isArray(n.material)) n.material.forEach((m) => m.dispose());
+              else n.material.dispose();
+            }
+          });
+        }
+        blueprint = buildHouseBlueprint(spec.type || 'SLEEP_HOUSE', spec.hex || '#7dce82', spec.level || 1, w, h);
+        blueprint.userData.bpKey = key;
+        scene.add(blueprint);
+      }
+      blueprint.visible = true;
+      placeHouseOnTile(blueprint, spec.x, spec.y, w, h);
+      blueprint.position.y = TILE_HEIGHT + 0.14;
+      tintBlueprint(blueprint, !!spec.ok);
+      ghostMat.color.setHex(spec.ok ? 0x7dce82 : 0xe63946);
+      ghostMat.opacity = spec.ok ? 0.28 : 0.4;
+      let i = 0;
+      for (let dy = 0; dy < h; dy++) {
+        for (let dx = 0; dx < w; dx++) {
+          if (!movePads[i]) break;
+          const p = tileWorldPos(spec.x + dx, spec.y + dy);
+          movePads[i].position.set(p.x, TILE_HEIGHT + 0.04, p.z);
+          movePads[i].visible = true;
+          i += 1;
+        }
+      }
+      for (; i < movePads.length; i++) movePads[i].visible = false;
+    };
 
     const applyPainted = () => {
       const tiles = paintedRef.current || {};
@@ -387,10 +589,11 @@ export default function GameMap({
       if (cameraModeRef.current === 'chase') {
         if (document.pointerLockElement === canvas) {
           chase.lookYaw -= e.movementX * 0.0022;
+          // Mouse up → look up (positive pitch)
           chase.lookPitch = THREE.MathUtils.clamp(
-            chase.lookPitch - e.movementY * 0.0016,
-            -0.35,
-            0.55
+            chase.lookPitch - e.movementY * 0.0018,
+            CHASE_CAM.pitchMin,
+            CHASE_CAM.pitchMax
           );
         }
         return;
@@ -526,6 +729,17 @@ export default function GameMap({
         addLookYaw: (delta) => {
           chase.lookYaw += delta;
         },
+        isMouseLocked: () => document.pointerLockElement === canvas,
+        setBrushPreview,
+        setMoveGhost,
+        getGuideScreen: () => {
+          if (!guideMarker.root.visible) return null;
+          guideScr.copy(guideMarker.root.position);
+          guideScr.y += 1.1;
+          guideScr.project(camera);
+          const onScreen = guideScr.z < 1 && Math.abs(guideScr.x) < 0.9 && Math.abs(guideScr.y) < 0.78;
+          return { nx: guideScr.x, ny: guideScr.y, onScreen };
+        },
         setSprint: (multiplier) => {
           attackerSmooth.sprintMul = Math.max(0.5, Number(multiplier) || 1);
         },
@@ -535,6 +749,7 @@ export default function GameMap({
         playWallBreak: (column, row, opts = {}) => {
           wallBreakFX.play(column, row, opts);
         },
+        lockGate: () => lockFortressGate(fortressBorder),
         paintTile: (row, column, colorKey) => {
           const tile = grid.getTile(row, column);
           if (tile) {
@@ -668,12 +883,129 @@ export default function GameMap({
 
       grid.tiles.forEach((tile) => {
         const ud = tile.userData;
-        if (LARGE_MAP && ud.paintT >= 1 && !ud.hoverLift && !ud.press && !ud.paintBurst) return;
+        if (
+          LARGE_MAP &&
+          ud.paintT >= 1 &&
+          !ud.hoverLift &&
+          !ud.press &&
+          !ud.paintBurst &&
+          !ud.revealed &&
+          !ud.revealPulse &&
+          !ud.inBeam
+        ) {
+          return;
+        }
         tickTile(tile);
       });
-      buildingsGroup.children.forEach((house) => tickBuildingMotion(house, elapsed));
+      buildingsGroup.children.forEach((house) => {
+        tickBuildingMotion(house, elapsed);
+        if (house.userData.slideTo && house.userData.slideFrom) {
+          house.userData.slideT = Math.min(1, (house.userData.slideT || 0) + dt / 0.42);
+          const t = 1 - (1 - house.userData.slideT) ** 3;
+          house.position.lerpVectors(house.userData.slideFrom, house.userData.slideTo, t);
+          house.position.y = TILE_HEIGHT + Math.sin(t * Math.PI) * 0.38;
+          if (house.userData.slideT >= 1) {
+            house.position.copy(house.userData.slideTo);
+            house.userData.slideTo = null;
+            house.userData.slideFrom = null;
+          }
+        } else if (movingRef.current && house.userData.buildingId === movingRef.current) {
+          house.position.y = TILE_HEIGHT + 0.36;
+          house.userData.lifted = true;
+          dimHouse(house, true);
+        } else if (house.userData.lifted) {
+          house.position.y = TILE_HEIGHT;
+          house.userData.lifted = false;
+          dimHouse(house, false);
+        }
+      });
       tickDecorMotion(interiorDecor, elapsed);
+      aurora.update(elapsed);
       if (tileRim.visible && selectedTile) tileRim.position.copy(selectedTile.position);
+      if (brushActive) {
+        brushMat.opacity = 0.4 + 0.25 * Math.sin(elapsed * 5.5);
+        const s = 1 + 0.06 * Math.sin(elapsed * 5.5);
+        brushRings.forEach((r) => r.visible && r.scale.setScalar(s));
+      }
+      if (blueprint && blueprint.visible) {
+        ghostMat.opacity = (ghostMat.color.getHex() === 0xe63946 ? 0.34 : 0.26) + 0.1 * Math.sin(elapsed * 4.5);
+        blueprint.position.y = TILE_HEIGHT + 0.12 + Math.sin(elapsed * 3.2) * 0.04;
+      }
+
+      const rb = rebuildRef.current;
+      const rebuildId = rb?.id;
+      const rebuildP = rb?.progress || 0;
+      buildingsGroup.children.forEach((house) => {
+        if (!house.userData.ruined) return;
+        if (house.userData.buildingId === rebuildId && rebuildP > 0.01) {
+          const s = Math.max(0.18, 1 - rebuildP * 0.82);
+          house.scale.setScalar(s);
+          if (!house.userData.slideTo) house.position.y = TILE_HEIGHT - rebuildP * 0.22;
+        } else {
+          house.scale.setScalar(1);
+        }
+      });
+      if (!grayscale && rebuildId && rebuildP > 0.02) {
+        const b = (buildingsRef.current || []).find((x) => x.id === rebuildId);
+        if (b) {
+          const w = b.footprintWidth || 2;
+          const hgt = b.footprintHeight || 2;
+          if (!scaffold || scaffold.userData.buildingId !== rebuildId) {
+            clearScaffold();
+            scaffold = buildGameHouse(b.buildingType, b.hexColor || '#C9B79A', 1, w, hgt);
+            scaffold.userData.buildingId = rebuildId;
+            scaffold.userData.isScaffold = true;
+            scaffold.traverse((n) => {
+              n.castShadow = false;
+              if (n.material) {
+                n.material = n.material.clone();
+                n.material.transparent = true;
+                n.material.opacity = 0.55;
+                n.material.depthWrite = false;
+              }
+            });
+            scene.add(scaffold);
+          }
+          placeHouseOnTile(scaffold, b.xPos, b.yPos, w, hgt);
+          const grow = 0.22 + rebuildP * 0.78;
+          scaffold.scale.setScalar(grow);
+          scaffold.position.y = TILE_HEIGHT + (1 - rebuildP) * 0.2;
+          scaffold.traverse((n) => {
+            if (n.material && n.material.opacity != null) n.material.opacity = 0.35 + rebuildP * 0.55;
+          });
+          const center = tileWorldPos(b.xPos + (w - 1) / 2, b.yPos + (hgt - 1) / 2);
+          rebuildFX.group.position.set(center.x, TILE_HEIGHT, center.z);
+          tickRebuildFX(rebuildFX, dt, true, rebuildP);
+        } else {
+          clearScaffold();
+          tickRebuildFX(rebuildFX, dt, false, 0);
+        }
+      } else {
+        clearScaffold();
+        tickRebuildFX(rebuildFX, dt, false, 0);
+      }
+
+      const guideId = grayscale ? null : activeRuinRef.current;
+      const guideB = guideId ? (buildingsRef.current || []).find((x) => x.id === guideId) : null;
+      if (guideB) {
+        const w = guideB.footprintWidth || 2;
+        const hgt = guideB.footprintHeight || 2;
+        const p = tileWorldPos(guideB.xPos + (w - 1) / 2, guideB.yPos + (hgt - 1) / 2);
+        guideMarker.root.visible = true;
+        guideMarker.root.position.set(p.x, TILE_HEIGHT, p.z);
+        guideMarker.chevron.position.y = 1.28 + Math.sin(elapsed * 3.1) * 0.16;
+        const pulse = 1 + Math.sin(elapsed * 3.1) * 0.08;
+        guideMarker.ring.scale.set(pulse, pulse, 1);
+        buildingsGroup.children.forEach((house) => {
+          if (!house.userData.ruined) return;
+          const on = house.userData.buildingId === guideId;
+          house.traverse((n) => {
+            if (n.material?.emissive) n.material.emissiveIntensity = on ? 0.28 + Math.sin(elapsed * 4) * 0.14 : 0;
+          });
+        });
+      } else {
+        guideMarker.root.visible = false;
+      }
       if (searchlight) {
         searchlight.update(dt, { alarm });
         if (grayscale) {
@@ -722,18 +1054,22 @@ export default function GameMap({
         const pitch = chase.lookPitch;
         const sin = Math.sin(yaw);
         const cos = Math.cos(yaw);
-        const distFlat = chase.distance * Math.cos(pitch);
-        const heightOff = chase.height + chase.distance * Math.sin(pitch);
+        // Looking up drops the camera toward shoulder height; looking down lifts it
+        const lift = -Math.sin(pitch) * chase.distance * 0.8;
+        const camHeight = Math.max(CHASE_CAM.minCamHeight, chase.height + lift);
+        const distFlat = chase.distance * (0.78 + 0.22 * Math.cos(pitch));
         chaseDesired.set(
           attackerSmooth.x - sin * distFlat + cos * chase.shoulder,
-          TILE_HEIGHT + heightOff,
+          TILE_HEIGHT + camHeight,
           attackerSmooth.z - cos * distFlat - sin * chase.shoulder
         );
-        // Look near lower torso so the full body sits above the bottom HUD (GTA framing)
+        // Aim point rises with pitch so the sky comes into frame when looking up
+        const up = pitch > 0 ? pitch * 3.6 : pitch * 1.1;
+        const ahead = chase.lookAhead + Math.max(0, pitch) * 1.5;
         chaseLook.set(
-          attackerSmooth.x + sin * chase.lookAhead,
-          TILE_HEIGHT + CHASE_CAM.lookAtHeight,
-          attackerSmooth.z + cos * chase.lookAhead
+          attackerSmooth.x + sin * ahead,
+          TILE_HEIGHT + CHASE_CAM.lookAtHeight + up,
+          attackerSmooth.z + cos * ahead
         );
 
         if (!chase.primed) {
@@ -751,6 +1087,7 @@ export default function GameMap({
       }
 
       wallBreakFX.tick(dt, camera);
+      tickFortressBorder(fortressBorder, dt, elapsed);
       if (bumpShake > 0.001) {
         const mag = bumpShake * 0.08;
         camera.position.x += (Math.random() - 0.5) * mag;

@@ -61,7 +61,7 @@ function playerOnBeam(dist = 2) {
   assert.equal(tick.meter, 0);
 }
 
-// Test 4 — brief mismatch hit follows stealth thresholds (not instant alarm)
+// Test 4 — mismatch under the beam is an instant siren
 {
   const tick = evaluateDetectionTick({
     light,
@@ -71,8 +71,9 @@ function playerOnBeam(dist = 2) {
     dt: 0.2,
   });
   assert.equal(tick.exposed, true);
-  assert.notEqual(tick.state, 'ALARM');
-  assert.ok(tick.meter < STEALTH_CONSTANTS.alarmAt);
+  assert.equal(tick.state, 'ALARM');
+  assert.equal(tick.justAlarmed, true);
+  assert.equal(tick.meter, STEALTH_CONSTANTS.alarmAt);
 }
 
 // Test 5 — camo lock rejects mid-raid color change

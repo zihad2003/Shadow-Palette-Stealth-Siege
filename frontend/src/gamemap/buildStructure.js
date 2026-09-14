@@ -245,6 +245,117 @@ export function placeHouseOnTile(house, xPos, yPos, footprintW, footprintH) {
   return house;
 }
 
+export function tintBlueprint(root, ok) {
+  if (!root) return;
+  const hex = ok ? 0x7dce82 : 0xe63946;
+  root.traverse((n) => {
+    if (!n.material) return;
+    const mats = Array.isArray(n.material) ? n.material : [n.material];
+    mats.forEach((mat) => {
+      if (mat.color) mat.color.setHex(hex);
+      if (mat.emissive) {
+        mat.emissive.setHex(hex);
+        mat.emissiveIntensity = 0.4;
+      }
+      mat.transparent = true;
+      mat.opacity = ok ? 0.38 : 0.5;
+      mat.depthWrite = false;
+    });
+  });
+}
+
+/** Translucent house silhouette for relocate targeting. */
+export function buildHouseBlueprint(type, hexColor = '#7dce82', level = 1, footprintW = 2, footprintH = 2) {
+  const house = buildGameHouse(type, hexColor, level, footprintW, footprintH);
+  house.userData.isBlueprint = true;
+  house.traverse((n) => {
+    n.castShadow = false;
+    n.receiveShadow = false;
+    n.userData.keepColor = true;
+    n.userData.isBlueprint = true;
+    if (n.material) {
+      n.material = n.material.clone();
+      n.material.transparent = true;
+      n.material.opacity = 0.38;
+      n.material.depthWrite = false;
+    }
+  });
+  tintBlueprint(house, true);
+  return house;
+}
+
+/** Dust puffs around a ruin while hold-F rebuild is in progress. */
+export function createRebuildFX() {
+  const group = new THREE.Group();
+  group.name = 'RebuildFX';
+  const geo = new THREE.SphereGeometry(0.07, 6, 6);
+  const puffs = [];
+  for (let i = 0; i < 12; i++) {
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xcbb89a,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.userData.keepColor = true;
+    group.add(mesh);
+    puffs.push({
+      mesh,
+      t: Math.random(),
+      speed: 0.55 + Math.random() * 0.7,
+      ox: (Math.random() - 0.5) * 1.15,
+      oz: (Math.random() - 0.5) * 1.15,
+    });
+  }
+  group.visible = false;
+  return { group, puffs };
+}
+
+export function tickRebuildFX(fx, dt, active, progress) {
+  if (!fx) return;
+  if (!active || progress < 0.02) {
+    fx.group.visible = false;
+    return;
+  }
+  fx.group.visible = true;
+  fx.puffs.forEach((p) => {
+    p.t += dt * p.speed;
+    if (p.t > 1) p.t -= 1;
+    p.mesh.position.set(p.ox, 0.08 + p.t * 1.05, p.oz);
+    p.mesh.material.opacity = (1 - p.t) * 0.5 * Math.min(1, progress * 1.8);
+    p.mesh.scale.setScalar(0.45 + p.t * 1.35);
+  });
+}
+
+export function createGuideMarker() {
+  const root = new THREE.Group();
+  root.name = 'GuideMarker';
+  const ring = new THREE.Mesh(
+    new THREE.TorusGeometry(TILE_PITCH * 0.85, 0.055, 10, 36),
+    new THREE.MeshBasicMaterial({ color: 0xf4a261, transparent: true, opacity: 0.92, depthWrite: false })
+  );
+  ring.rotation.x = Math.PI / 2;
+  ring.position.y = 0.05;
+  root.add(ring);
+  const chevron = new THREE.Mesh(
+    new THREE.ConeGeometry(0.22, 0.4, 4),
+    new THREE.MeshBasicMaterial({ color: 0xf4a261, transparent: true, opacity: 0.95 })
+  );
+  chevron.rotation.x = Math.PI;
+  chevron.position.y = 1.4;
+  root.add(chevron);
+  const beam = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.035, 0.035, 1.15, 8),
+    new THREE.MeshBasicMaterial({ color: 0xf4c245, transparent: true, opacity: 0.42, depthWrite: false })
+  );
+  beam.position.y = 0.72;
+  root.add(beam);
+  root.visible = false;
+  root.userData.keepColor = true;
+  return { root, ring, chevron, beam };
+}
+
 /** Detailed patrol robot with chase + patrol modes. */
 export function createGamePatrolRobot() {
   const bot = new THREE.Group();

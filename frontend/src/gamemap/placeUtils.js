@@ -28,8 +28,9 @@ export function inSearchlightPlaza(x, y, w = 1, h = 1) {
   return x + w - 1 >= minC && x <= maxC && y + h - 1 >= minR && y <= maxR;
 }
 
-function overlapsBuilding(buildings, x, y, w, h) {
+function overlapsBuilding(buildings, x, y, w, h, excludeId) {
   return buildings.some((b) => {
+    if (excludeId != null && b.id === excludeId) return false;
     if (b.buildingType === 'MAKEUP_HOUSE') return false;
     const bw = b.footprintWidth || 2;
     const bh = b.footprintHeight || 2;
@@ -37,8 +38,8 @@ function overlapsBuilding(buildings, x, y, w, h) {
   });
 }
 
-export function canPlaceOnGameMap(buildings, x, y, w, h) {
+export function canPlaceOnGameMap(buildings, x, y, w, h, excludeId) {
   if (!inGrid(x, y) || !inGrid(x + w - 1, y + h - 1)) return false;
   if (inSearchlightPlaza(x, y, w, h)) return false;
-  return !overlapsBuilding(buildings, x, y, w, h);
+  return !overlapsBuilding(buildings, x, y, w, h, excludeId);
 }
