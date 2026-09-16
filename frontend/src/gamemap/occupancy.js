@@ -10,6 +10,9 @@ export function isDecorBannedTile(column, row, buildings = []) {
   if (column <= 0 || row <= 0 || column >= MAP_COLS - 1 || row >= MAP_ROWS - 1) return true;
   if (inSearchlightPlaza(column, row, 1, 1)) return true;
   if (Math.abs(column - GATE_SPAWN_TILE.column) <= 2 && row >= MAP_ROWS - 3) return true;
+  const garageCol = Math.floor(SEARCHLIGHT_TILE.column) - 1;
+  const garageRow = Math.floor(SEARCHLIGHT_TILE.row) + 5;
+  if (column >= garageCol && column < garageCol + 4 && row >= garageRow && row < garageRow + 4) return true;
   return buildings.some((b) => {
     if (!b || b.buildingType === 'MAKEUP_HOUSE') return false;
     // Decor can sit around ruins; keep clear of repaired houses only

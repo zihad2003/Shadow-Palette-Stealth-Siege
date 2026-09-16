@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Settings, Volume2, Maximize2, User, X } from 'lucide-react';
+import { Settings, Volume2, Maximize2, User, X, LayoutDashboard } from 'lucide-react';
 import { useGameState } from '../../state/GameStateContext.jsx';
 import { soundEngine } from '../../soundEngine.js';
 import ClayPanel from '../ui/ClayPanel.jsx';
@@ -94,6 +94,17 @@ export default function OptionsModal() {
                 </ClayButton>
               </div>
             </div>
+
+            <ClayButton
+              variant="ghost"
+              onClick={() => {
+                setIsOptionsOpen(false);
+                transitionTo('ADMIN');
+              }}
+              className="w-full py-2.5 rounded-2xl text-xs flex items-center justify-center gap-2"
+            >
+              <LayoutDashboard size={14} /> User dashboard
+            </ClayButton>
 
             <ClayButton
               variant="primary"

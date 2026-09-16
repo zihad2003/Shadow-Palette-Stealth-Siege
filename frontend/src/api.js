@@ -83,3 +83,94 @@ export async function completeRaid(payload) {
     body: JSON.stringify(payload),
   });
 }
+
+export async function fetchAdminOverview() {
+  return request('/api/admin/overview');
+}
+
+export async function fetchAdminUsers(query = '') {
+  const q = query ? `?q=${encodeURIComponent(query)}` : '';
+  return request(`/api/admin/users${q}`);
+}
+
+export async function fetchAdminUser(id) {
+  return request(`/api/admin/users/${id}`);
+}
+
+export async function createAdminUser(payload) {
+  return request('/api/admin/users', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateAdminUser(id, payload) {
+  return request(`/api/admin/users/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteAdminUser(id) {
+  return request(`/api/admin/users/${id}`, { method: 'DELETE' });
+}
+
+export async function seedAdminUsers() {
+  return request('/api/admin/seed', { method: 'POST' });
+}
+
+export async function postPresenceHeartbeat(payload) {
+  return request('/api/presence', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function fetchOnlinePlayers(userId) {
+  const q = userId != null ? `?userId=${encodeURIComponent(userId)}` : '';
+  return request(`/api/presence/online${q}`);
+}
+
+export async function sendVisitInvite(hostId, guestId) {
+  return request('/api/visit/invite', {
+    method: 'POST',
+    body: JSON.stringify({ hostId, guestId }),
+  });
+}
+
+export async function fetchVisitInbox(userId) {
+  return request(`/api/visit/inbox/${userId}`);
+}
+
+export async function acceptVisitInvite(inviteId, userId) {
+  return request('/api/visit/accept', {
+    method: 'POST',
+    body: JSON.stringify({ inviteId, userId }),
+  });
+}
+
+export async function declineVisitInvite(inviteId, userId) {
+  return request('/api/visit/decline', {
+    method: 'POST',
+    body: JSON.stringify({ inviteId, userId }),
+  });
+}
+
+export async function fetchVisitSession(visitId) {
+  return request(`/api/visit/session/${visitId}`);
+}
+
+export async function postVisitState(payload) {
+  return request('/api/visit/state', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function endVisitSession(payload) {
+  return request('/api/visit/end', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+

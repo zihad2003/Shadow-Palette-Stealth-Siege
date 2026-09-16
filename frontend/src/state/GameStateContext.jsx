@@ -1,7 +1,31 @@
-import React, { createContext, useContext, useRef, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { UPGRADE_COSTS, MAKEUP_RECOLOR_INK } from '../data/raidTargets.js';
 import { GAME_COLORS, COLOR_NAMES, hexForColor, isGameColor } from '../colors.js';
-import { placeBuilding, placeDefense, fetchRaidTarget, upgradeBuilding } from '../api.js';
+import {
+  placeBuilding,
+  placeDefense,
+  fetchRaidTarget,
+  upgradeBuilding,
+  postPresenceHeartbeat,
+  fetchOnlinePlayers,
+  sendVisitInvite,
+  fetchVisitInbox,
+  acceptVisitInvite,
+  declineVisitInvite,
+  fetchVisitSession,
+  postVisitState,
+  endVisitSession,
+} from '../api.js';
+import {
+  CART_PARTS,
+  CART_PART_IDS,
+  scatterCartParts,
+  cartPartById,
+  BUGGY_GEAR_SPEED,
+  findPartNear,
+  WHEEL_PART_IDS,
+  BODY_PART_IDS,
+} from '../gamemap/paletteBuggy.js';
 import { soundEngine } from '../soundEngine.js';
 import { createRaidSession, rejectColorChange } from '../raid/RaidSession.js';
 import { MAP_COLS, MAP_ROWS } from '../gamemap/mapConfig.js';
@@ -24,6 +48,46 @@ export const PAINT_TILE_INK = 5;
 export const PLACE_BUILDING_COST = { coins: 100, ink: 15 };
 export { REPAIR_BUILDING_COST, SEARCHLIGHT_UPGRADE_COSTS, STARTER_HOUSE_COUNT };
 export const GUIDE_STEPS = { WELCOME: 'WELCOME', REBUILD: 'REBUILD', MOVE_TIP: 'MOVE_TIP', DONE: 'DONE' };
+export const BUGGY_STORAGE_KEY = 'sp_palette_buggy_v1';
+export const BUGGY_SCATTER_VERSION = 2;
+export { CART_PARTS, CART_PART_IDS, BUGGY_GEAR_SPEED, WHEEL_PART_IDS, BODY_PART_IDS };
+
+function readBuggySave() {
+  try {
+    const raw = JSON.parse(window.localStorage.getItem(BUGGY_STORAGE_KEY) || 'null');
+    if (!raw || typeof raw !== 'object') {
+      return { mountedParts: [], carriedPart: null, remaining: [], scattered: false };
+    }
+    const mountedParts = Array.isArray(raw.mountedParts)
+      ? raw.mountedParts.filter((id) => CART_PART_IDS.includes(id))
+      : [];
+    const staleLayout = raw.scatterVersion !== BUGGY_SCATTER_VERSION;
+    const remaining = staleLayout
+      ? []
+      : Array.isArray(raw.remaining)
+        ? raw.remaining.filter((p) => p && CART_PART_IDS.includes(p.id))
+        : [];
+    return {
+      mountedParts,
+      carriedPart: CART_PART_IDS.includes(raw.carriedPart) ? raw.carriedPart : null,
+      remaining,
+      scattered: staleLayout ? false : !!raw.scattered,
+    };
+  } catch {
+    return { mountedParts: [], carriedPart: null, remaining: [], scattered: false };
+  }
+}
+
+function writeBuggySave(data) {
+  try {
+    window.localStorage.setItem(
+      BUGGY_STORAGE_KEY,
+      JSON.stringify({ ...data, scatterVersion: BUGGY_SCATTER_VERSION })
+    );
+  } catch {
+    /* private mode */
+  }
+}
 export const PATROL_UNLOCK_RAIDS = 3;
 export const PATROL_UNLOCK_COINS = 200;
 export const DAILY_LOGIN_COINS = 100;
@@ -44,6 +108,7 @@ export function GameStateProvider({ children }) {
     'BASE_BUILDER',
     'RAID_FINDER',
     'STEALTH_RAID',
+    'ADMIN',
   ];
   const introDone = (() => {
     try {
@@ -117,6 +182,34 @@ export function GameStateProvider({ children }) {
   const [isOptionsOpen, setIsOptionsOpen] = useState(false);
   const [loadingScreen, setLoadingScreen] = useState({ active: false, title: '', subtitle: '', progress: 0 });
   const [toasts, setToasts] = useState([]);
+  const buggySave = useRef(readBuggySave()).current;
+  const [mountedParts, setMountedParts] = useState(() => buggySave.mountedParts);
+  const [carriedPart, setCarriedPart] = useState(() => buggySave.carriedPart);
+  const [partSpawns, setPartSpawns] = useState(() => buggySave.remaining);
+  const [cartScattered, setCartScattered] = useState(() => buggySave.scattered);
+  const [garageComplete, setGarageComplete] = useState(() => buggySave.mountedParts.length >= CART_PART_IDS.length);
+  const [mountProgress, setMountProgress] = useState(0);
+  const mountHoldRef = useRef({ progress: 0 });
+  const [pickupAnim, setPickupAnim] = useState(null);
+  const pickupAnimRef = useRef(null);
+  const [buggySeated, setBuggySeated] = useState(false);
+  const [buggyGear, setBuggyGear] = useState(0);
+  const [buggyTrackT, setBuggyTrackT] = useState(0);
+  const [onlinePlayers, setOnlinePlayers] = useState([]);
+  const [pendingInvite, setPendingInvite] = useState(null);
+  const [visitSession, setVisitSession] = useState(null);
+  const [visitRole, setVisitRole] = useState(null);
+  const [visitSpawnToken, setVisitSpawnToken] = useState(0);
+  const homeBackupRef = useRef(null);
+  const visitSessionRef = useRef(null);
+  const visitRoleRef = useRef(null);
+  const endVisitRef = useRef(async () => {});
+  const snapshotRef = useRef({});
+  const username = `Player${userId}`;
+  const isVisitGuest = visitRole === 'guest';
+  visitSessionRef.current = visitSession;
+  visitRoleRef.current = visitRole;
+  snapshotRef.current = { buildings, paintedTiles, mountedParts, garageComplete };
 
   const showToast = (message, type = 'info') => {
     const id = Date.now() + Math.random();
@@ -144,13 +237,21 @@ export function GameStateProvider({ children }) {
 
   const transitionTo = (nextState, params = {}) => {
     soundEngine.playTabSound();
+    if (visitSessionRef.current && nextState !== 'BASE_BUILDER') {
+      void endVisitRef.current({ silent: true });
+    }
     if (nextState === 'BASE_BUILDER') {
       const targetPlotId = params.plotId || activePlotId;
       setActivePlotId(targetPlotId);
       setRaidSession(null);
-      triggerLoading('ENTERING YOUR BASE...', 'Paint & fortify your fortress', 400, () => {
-        setGameState('BASE_BUILDER');
-      });
+      triggerLoading(
+        params.loadingTitle || (isVisitGuest ? 'ARRIVING...' : 'ENTERING YOUR BASE...'),
+        params.loadingSubtitle || (isVisitGuest ? 'Friendly visit — color world' : 'Paint & fortify your fortress'),
+        params.loadingMs || 400,
+        () => {
+          setGameState('BASE_BUILDER');
+        }
+      );
     } else if (nextState === 'RAID_FINDER') {
       setRaidSession(null);
       triggerLoading('SCANNING RAID TARGETS...', 'Matching nearby fortress snapshots', 400, () => {
@@ -244,6 +345,10 @@ export function GameStateProvider({ children }) {
   const quotaFor = (colorKey) => (colorUsage[colorKey] || 0) / TOTAL_SURFACE;
 
   const paintTile = (x, y) => {
+    if (isVisitGuest) {
+      showToast('Visiting — you cannot paint the host fortress', 'info');
+      return false;
+    }
     const key = `${x},${y}`;
     if (!isGameColor(selectedColor)) {
       showToast('Pick a paint color from the five-color palette', 'error');
@@ -275,6 +380,7 @@ export function GameStateProvider({ children }) {
    * brush should switch off (out of ink / quota hit) so toasts do not spam every step.
    */
   const paintTiles = (coords) => {
+    if (isVisitGuest) return { painted: 0, stop: true };
     if (!isGameColor(selectedColor)) {
       showToast('Pick a paint color from the five-color palette', 'error');
       return { painted: 0, stop: true };
@@ -310,6 +416,7 @@ export function GameStateProvider({ children }) {
 
   /** Walk-eraser: strip paint from a footprint (no ink refund). */
   const eraseTiles = (coords) => {
+    if (isVisitGuest) return 0;
     const keys = coords.map(({ x, y }) => `${x},${y}`).filter((k) => paintedTiles[k]);
     if (!keys.length) return 0;
     const nextTiles = { ...paintedTiles };
@@ -318,26 +425,36 @@ export function GameStateProvider({ children }) {
     return keys.length;
   };
 
-  const toggleBrush = () =>
+  const toggleBrush = () => {
+    if (isVisitGuest) return;
     setBrush((b) => {
       const on = !b.on;
       showToast(on ? `Brush ON — walk to ${b.erase ? 'erase' : 'paint'}` : 'Brush off', 'info');
       return { ...b, on };
     });
-  const cycleBrushSize = () =>
+  };
+  const cycleBrushSize = () => {
+    if (isVisitGuest) return;
     setBrush((b) => {
       const next = b.size === 1 ? 3 : b.size === 3 ? 5 : 1;
       showToast(`Brush ${next}×${next}`, 'info');
       return { ...b, size: next };
     });
-  const toggleEraser = () =>
+  };
+  const toggleEraser = () => {
+    if (isVisitGuest) return;
     setBrush((b) => {
       const erase = !b.erase;
       showToast(erase ? 'Eraser mode' : 'Paint mode', 'info');
       return { ...b, erase };
     });
+  };
 
   const paintBuilding = (buildingId) => {
+    if (isVisitGuest) {
+      showToast('Visiting — you cannot paint', 'info');
+      return false;
+    }
     const building = buildings.find((b) => b.id === buildingId);
     if (!building) return false;
     if (building.ruined) {
@@ -402,6 +519,10 @@ export function GameStateProvider({ children }) {
   };
 
   const repairBuilding = (buildingId) => {
+    if (isVisitGuest) {
+      showToast('Visiting — you cannot repair the host fortress', 'info');
+      return false;
+    }
     const building = buildings.find((b) => b.id === buildingId);
     if (!building) {
       showToast('No ruin here', 'info');
@@ -486,6 +607,10 @@ export function GameStateProvider({ children }) {
   };
 
   const beginMoveBuilding = (buildingId) => {
+    if (isVisitGuest) {
+      showToast('Visiting — you cannot move houses', 'info');
+      return false;
+    }
     const building = buildings.find((b) => b.id === buildingId);
     if (!building) {
       showToast('Select a repaired house to move', 'info');
@@ -568,6 +693,10 @@ export function GameStateProvider({ children }) {
   };
 
   const handlePlaceAt = async (x, y, extras = {}) => {
+    if (isVisitGuest) {
+      showToast('Visiting — you cannot paint or build here', 'info');
+      return false;
+    }
     if (movingBuildingId || selectedTool === 'MOVE') {
       return moveBuildingTo(x, y, extras);
     }
@@ -773,8 +902,304 @@ export function GameStateProvider({ children }) {
     setHasRecamoed(false);
     setSearchlightLevel(DEFAULT_SEARCHLIGHT_LEVEL);
     clearGuideDone();
+    setMountedParts([]);
+    setCarriedPart(null);
+    setPartSpawns([]);
+    setCartScattered(false);
+    setGarageComplete(false);
+    setBuggySeated(false);
+    setBuggyGear(0);
+    setBuggyTrackT(0);
+    writeBuggySave({ mountedParts: [], carriedPart: null, remaining: [], scattered: false });
     soundEngine.playSuccessSound();
     showToast(`Prestige ${next} — ruins reset · +${next * 5}% stealth bonus`, 'success');
+    return true;
+  };
+
+  const persistBuggy = (next = {}) => {
+    if (visitRole === 'guest') return;
+    const data = {
+      mountedParts: next.mountedParts ?? mountedParts,
+      carriedPart: next.carriedPart === undefined ? carriedPart : next.carriedPart,
+      remaining: next.remaining ?? partSpawns,
+      scattered: next.scattered ?? cartScattered,
+    };
+    writeBuggySave(data);
+  };
+
+  const missingPartLabel = () => {
+    const missing = CART_PARTS.find((p) => !mountedParts.includes(p.id));
+    return missing ? missing.label : null;
+  };
+
+  const pickUpPartAt = (column, row) => {
+    if (isVisitGuest) return false;
+    if (pickupAnimRef.current && pickupAnimRef.current.t < 1) return false;
+    if (carriedPart) return false;
+    const part = findPartNear(partSpawns, column, row);
+    if (!part) return false;
+    const next = partSpawns.filter((p) => p.id !== part.id);
+    setPartSpawns(next);
+    setCarriedPart(part.id);
+    const anim = { partId: part.id, column: part.column, row: part.row, t: 0 };
+    setPickupAnim(anim);
+    pickupAnimRef.current = anim;
+    persistBuggy({ remaining: next, carriedPart: part.id, scattered: true });
+    soundEngine.playClickSound();
+    const spec = cartPartById(part.id);
+    showToast(
+      `Picked up ${spec?.label || 'part'} · carry it to the garage and Hold F`,
+      'success'
+    );
+    return true;
+  };
+
+  const tickPickupAnim = (dt) => {
+    const a = pickupAnimRef.current;
+    if (!a) return false;
+    a.t = Math.min(1, (a.t || 0) + dt / 0.48);
+    if (a.t >= 1) {
+      pickupAnimRef.current = null;
+      setPickupAnim(null);
+      return false;
+    }
+    return true;
+  };
+
+  const tickMountHold = (dt, holding) => {
+    const r = mountHoldRef.current;
+    if (holding && carriedPart && !isVisitGuest) {
+      r.progress = Math.min(1, r.progress + dt / REBUILD_SECONDS);
+    } else {
+      r.progress = Math.max(0, r.progress - dt * 1.7);
+    }
+    if (Math.abs(r.progress - mountProgress) > 0.02) setMountProgress(r.progress);
+    if (holding && r.progress >= 1 && carriedPart) {
+      r.progress = 0;
+      setMountProgress(0);
+      return carriedPart;
+    }
+    return null;
+  };
+
+  const mountCarriedPart = () => {
+    if (isVisitGuest || !carriedPart) return false;
+    if (mountedParts.includes(carriedPart)) {
+      setCarriedPart(null);
+      persistBuggy({ carriedPart: null });
+      return false;
+    }
+    const nextMounted = [...mountedParts, carriedPart];
+    const done = nextMounted.length >= CART_PART_IDS.length;
+    setMountedParts(nextMounted);
+    setCarriedPart(null);
+    setGarageComplete(done);
+    persistBuggy({ mountedParts: nextMounted, carriedPart: null, scattered: true });
+    mountHoldRef.current.progress = 0;
+    setMountProgress(0);
+    soundEngine.playBuildSound();
+    const wheelsOn = nextMounted.filter((id) => WHEEL_PART_IDS.includes(id)).length;
+    const bodyOn = nextMounted.filter((id) => BODY_PART_IDS.includes(id)).length;
+    if (done) {
+      showToast('Palette buggy ready — press E to sit', 'success');
+    } else {
+      const miss = CART_PARTS.find((p) => !nextMounted.includes(p.id));
+      showToast(
+        `Snapped on · wheels ${wheelsOn}/4 · body ${bodyOn}/5${miss ? ` · next ${miss.label}` : ''}`,
+        'success'
+      );
+    }
+    return true;
+  };
+
+  const sitInBuggy = (role = 'driver') => {
+    if (!garageComplete) {
+      showToast('Find all 4 wheels and 5 color skins, then snap them on at the garage', 'info');
+      return false;
+    }
+    setBuggySeated(true);
+    setBrush((b) => ({ ...b, on: false }));
+    if (visitSession) {
+      const host = visitRole === 'host' || (!visitRole && userId === visitSession.hostId);
+      void postVisitState({
+        visitId: visitSession.visitId,
+        userId,
+        seated: true,
+        gear: host ? buggyGear : undefined,
+        trackT: host ? buggyTrackT : undefined,
+      }).catch(() => {});
+    }
+    showToast(role === 'passenger' ? 'Passenger seat · Leave anytime' : 'Driver seat · W/S gears', 'success');
+    return true;
+  };
+
+  const standFromBuggy = () => {
+    if (buggyGear !== 0 && visitRole !== 'guest') {
+      showToast('Park first — gear down to 0', 'info');
+      return false;
+    }
+    setBuggySeated(false);
+    if (visitSession) {
+      void postVisitState({
+        visitId: visitSession.visitId,
+        userId,
+        seated: false,
+        gear: visitRole === 'guest' ? undefined : 0,
+        trackT: visitRole === 'guest' ? undefined : buggyTrackT,
+      }).catch(() => {});
+    }
+    return true;
+  };
+
+  const setBuggyGearClamped = (next) => {
+    if (visitRole === 'guest') return;
+    const gear = Math.max(0, Math.min(3, next));
+    setBuggyGear(gear);
+    if (visitSession && (visitRole === 'host' || !visitRole)) {
+      void postVisitState({
+        visitId: visitSession.visitId,
+        userId,
+        seated: buggySeated,
+        gear,
+        trackT: buggyTrackT,
+      }).catch(() => {});
+    }
+  };
+
+  const bumpBuggyGear = (delta) => {
+    if (!buggySeated || visitRole === 'guest') return;
+    setBuggyGearClamped(buggyGear + delta);
+  };
+
+  const advanceBuggyTrack = (dt) => {
+    if (visitRole === 'guest') return;
+    const speed = BUGGY_GEAR_SPEED[buggyGear] || 0;
+    if (speed <= 0) return;
+    setBuggyTrackT((t) => {
+      let n = t + speed * dt;
+      n %= 1;
+      if (n < 0) n += 1;
+      return n;
+    });
+  };
+
+  const applyHostSnapshot = (snap) => {
+    if (!snap || typeof snap !== 'object') return;
+    if (Array.isArray(snap.buildings)) setBuildings(snap.buildings);
+    if (snap.paintedTiles && typeof snap.paintedTiles === 'object') setPaintedTiles(snap.paintedTiles);
+    const parts = Array.isArray(snap.mountedParts) ? snap.mountedParts.filter((id) => CART_PART_IDS.includes(id)) : [];
+    setMountedParts(parts);
+    setGarageComplete(parts.length >= CART_PART_IDS.length || snap.garageComplete === true);
+    setPartSpawns([]);
+    setCarriedPart(null);
+  };
+
+  const restoreHomeBackup = () => {
+    const home = homeBackupRef.current;
+    if (!home) return;
+    setBuildings(home.buildings);
+    setPaintedTiles(home.paintedTiles);
+    setMountedParts(home.mountedParts);
+    setPartSpawns(home.partSpawns);
+    setCarriedPart(home.carriedPart);
+    setCartScattered(home.cartScattered);
+    setGarageComplete(home.garageComplete);
+    homeBackupRef.current = null;
+  };
+
+  const enterVisit = (session, role) => {
+    if (!session) return;
+    visitSessionRef.current = session;
+    visitRoleRef.current = role;
+    setVisitSession(session);
+    setVisitRole(role);
+    setBuggySeated(false);
+    setBuggyGear(0);
+    setBuggyTrackT(0);
+    setBrush((b) => ({ ...b, on: false }));
+    setPendingInvite(null);
+    setVisitSpawnToken((n) => n + 1);
+    if (role === 'guest') applyHostSnapshot(session.snapshot);
+    showToast(role === 'guest' ? `Arrived at ${session.hostName}'s fortress` : `${session.guestName} is arriving`, 'success');
+  };
+
+  const endVisit = async ({ silent = false, kicked = false } = {}) => {
+    const session = visitSessionRef.current;
+    const role = visitRoleRef.current;
+    if (!session && !role) return;
+    visitSessionRef.current = null;
+    visitRoleRef.current = null;
+    if (session) {
+      try {
+        await endVisitSession({ visitId: session.visitId, userId });
+      } catch {
+        /* offline */
+      }
+    }
+    if (role === 'guest') restoreHomeBackup();
+    setVisitSession(null);
+    setVisitRole(null);
+    setBuggySeated(false);
+    setBuggyGear(0);
+    if (!silent) {
+      showToast(kicked ? 'The host ended the visit' : 'Visit ended', 'info');
+    }
+  };
+  endVisitRef.current = endVisit;
+
+  const invitePlayer = async (guestId) => {
+    if (!garageComplete || !buggySeated) {
+      showToast('Sit in the finished buggy to invite', 'info');
+      return false;
+    }
+    try {
+      const res = await sendVisitInvite(userId, guestId);
+      showToast(`Invite sent to ${res.guestName || 'player'}`, 'success');
+      return true;
+    } catch (e) {
+      showToast(e?.data?.error || e.message || 'Could not send invite', 'error');
+      return false;
+    }
+  };
+
+  const acceptPendingInvite = async (invite = pendingInvite) => {
+    if (!invite) return false;
+    try {
+      homeBackupRef.current = {
+        buildings,
+        paintedTiles,
+        mountedParts,
+        partSpawns,
+        carriedPart,
+        cartScattered,
+        garageComplete,
+      };
+      const session = await acceptVisitInvite(invite.id, userId);
+      enterVisit(session, 'guest');
+      triggerLoading(
+        `ARRIVING AT ${String(session.hostName || 'HOST').toUpperCase()} FORTRESS`,
+        'Friendly visit — color world, no stealing',
+        700,
+        () => setGameState('BASE_BUILDER')
+      );
+      return true;
+    } catch (e) {
+      homeBackupRef.current = null;
+      showToast(e?.data?.error || e.message || 'Invite expired', 'error');
+      setPendingInvite(null);
+      return false;
+    }
+  };
+
+  const declinePendingInvite = async (invite = pendingInvite) => {
+    if (!invite) return false;
+    try {
+      await declineVisitInvite(invite.id, userId);
+    } catch {
+      /* ignore */
+    }
+    setPendingInvite(null);
+    showToast('Invite declined', 'info');
     return true;
   };
 
@@ -878,7 +1303,185 @@ export function GameStateProvider({ children }) {
     triggerLoading,
     toasts,
     showToast,
+    username,
+    mountedParts,
+    carriedPart,
+    partSpawns,
+    garageComplete,
+    mountProgress,
+    buggySeated,
+    buggyGear,
+    buggyTrackT,
+    onlinePlayers,
+    pendingInvite,
+    visitSession,
+    visitRole,
+    isVisitGuest,
+    visitSpawnToken,
+    pickupAnim,
+    tickPickupAnim,
+    pickUpPartAt,
+    tickMountHold,
+    mountCarriedPart,
+    sitInBuggy,
+    standFromBuggy,
+    setBuggyGearClamped,
+    bumpBuggyGear,
+    advanceBuggyTrack,
+    invitePlayer,
+    acceptPendingInvite,
+    declinePendingInvite,
+    endVisit,
+    missingPartLabel: missingPartLabel(),
   };
+
+  useEffect(() => {
+    if (visitRole === 'guest') return;
+    writeBuggySave({
+      mountedParts,
+      carriedPart,
+      remaining: partSpawns,
+      scattered: cartScattered,
+    });
+  }, [mountedParts, carriedPart, partSpawns, cartScattered, visitRole]);
+
+  useEffect(() => {
+    setGarageComplete(mountedParts.length >= CART_PART_IDS.length);
+  }, [mountedParts]);
+
+  useEffect(() => {
+    if (visitRole === 'guest') return;
+    if (mountedParts.length >= CART_PART_IDS.length) return;
+    const missing = CART_PART_IDS.filter((id) => !mountedParts.includes(id) && id !== carriedPart);
+    if (missing.length === 0) return;
+    const spawned = partSpawns.filter((p) => missing.includes(p.id));
+    if (spawned.length >= missing.length) return;
+    const remaining = scatterCartParts(buildings).filter((p) => missing.includes(p.id));
+    if (
+      remaining.length === partSpawns.length &&
+      remaining.every((p, i) => partSpawns[i]?.id === p.id && partSpawns[i]?.column === p.column && partSpawns[i]?.row === p.row)
+    ) {
+      return;
+    }
+    setPartSpawns(remaining);
+    setCartScattered(true);
+    writeBuggySave({ mountedParts, carriedPart, remaining, scattered: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visitRole, mountedParts, carriedPart, partSpawns]);
+
+  useEffect(() => {
+    if (gameState === 'STEALTH_RAID' || gameState === 'SPLASH' || gameState === 'STORY') return undefined;
+    const beat = () => {
+      postPresenceHeartbeat({
+        userId,
+        username,
+        characterModel,
+        camoColor,
+        snapshot: snapshotRef.current,
+      }).catch(() => {});
+    };
+    beat();
+    const id = window.setInterval(beat, 8000);
+    return () => window.clearInterval(id);
+  }, [gameState, userId, username, characterModel, camoColor]);
+
+  useEffect(() => {
+    if (gameState === 'STEALTH_RAID' || gameState === 'SPLASH' || gameState === 'STORY') return undefined;
+    const poll = async () => {
+      try {
+        const box = await fetchVisitInbox(userId);
+        const pending = (box.pending && box.pending[0]) || null;
+        setPendingInvite(pending);
+        const active = box.active;
+        if (active && active.success !== false && active.status !== 'ENDED') {
+          const role = Number(active.hostId) === Number(userId) ? 'host' : 'guest';
+          if (!visitSessionRef.current) {
+            if (role === 'host') enterVisit(active, 'host');
+          } else if (Number(visitSessionRef.current.visitId) === Number(active.visitId)) {
+            setVisitSession(active);
+          }
+        } else if (visitSessionRef.current) {
+          void endVisitRef.current({ kicked: visitRoleRef.current === 'guest' });
+        }
+      } catch {
+        /* backend optional */
+      }
+    };
+    poll();
+    const id = window.setInterval(poll, 4000);
+    return () => window.clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gameState, userId]);
+
+  useEffect(() => {
+    if (!buggySeated) return undefined;
+    const poll = async () => {
+      try {
+        const res = await fetchOnlinePlayers(userId);
+        setOnlinePlayers(res.players || []);
+      } catch {
+        setOnlinePlayers([]);
+      }
+    };
+    poll();
+    const id = window.setInterval(poll, 5000);
+    return () => window.clearInterval(id);
+  }, [buggySeated, userId]);
+
+  useEffect(() => {
+    if (!visitSession?.visitId) return undefined;
+    const visitId = visitSession.visitId;
+    const poll = async () => {
+      try {
+        const s = await fetchVisitSession(visitId);
+        if (!s || s.status === 'ENDED' || s.success === false) {
+          void endVisitRef.current({ kicked: visitRoleRef.current === 'guest' });
+          return;
+        }
+        setVisitSession(s);
+        if (visitRoleRef.current === 'guest') {
+          setBuggyGear(Number(s.gear) || 0);
+          setBuggyTrackT(Number(s.trackT) || 0);
+          if (s.guestSeated !== undefined && s.guestSeated !== buggySeated) {
+            /* guest seated is local authority; ignore */
+          }
+        } else if (s.guestSeated !== visitSession.guestSeated) {
+          setVisitSession(s);
+        }
+      } catch {
+        /* ignore */
+      }
+    };
+    const id = window.setInterval(poll, 800);
+    return () => window.clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visitSession?.visitId]);
+
+  useEffect(() => {
+    if (!visitSession?.visitId || visitRole === 'guest') return undefined;
+    const id = window.setInterval(() => {
+      postVisitState({
+        visitId: visitSession.visitId,
+        userId,
+        seated: buggySeated,
+        gear: buggyGear,
+        trackT: buggyTrackT,
+      }).catch(() => {});
+    }, 450);
+    return () => window.clearInterval(id);
+  }, [visitSession?.visitId, visitRole, buggySeated, buggyGear, buggyTrackT, userId]);
+
+  useEffect(() => {
+    if (!visitSession?.visitId || visitRole !== 'guest') return undefined;
+    const id = window.setInterval(() => {
+      postVisitState({
+        visitId: visitSession.visitId,
+        userId,
+        seated: buggySeated,
+      }).catch(() => {});
+    }, 800);
+    return () => window.clearInterval(id);
+  }, [visitSession?.visitId, visitRole, buggySeated, userId]);
 
   return <GameStateContext.Provider value={value}>{children}</GameStateContext.Provider>;
 }

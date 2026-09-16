@@ -140,6 +140,16 @@ export default function MainMenuView() {
           >
             {isFirstRun ? 'Continue to Training' : 'Enter Your Base'} <ArrowRight size={16} />
           </ClayButton>
+          <button
+            type="button"
+            onClick={() => {
+              soundEngine.playClickSound();
+              transitionTo('ADMIN');
+            }}
+            className="text-[10px] text-clay-muted hover:text-clay-accent underline-offset-2 hover:underline"
+          >
+            User dashboard
+          </button>
         </ClayPanel>
       </div>
     </div>

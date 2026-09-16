@@ -8,10 +8,12 @@ import PaintTutorialView from './views/PaintTutorialView.jsx';
 import BaseBuilderView from './views/BaseBuilderView.jsx';
 import RaidFinderView from './views/RaidFinderView.jsx';
 import StealthRaidView from './views/StealthRaidView.jsx';
+import AdminDashboardView from './views/AdminDashboardView.jsx';
 import OptionsModal from './components/hud/OptionsModal.jsx';
 import MetaEconomyPanel from './components/hud/MetaEconomyPanel.jsx';
 import LoadingOverlay from './components/hud/LoadingOverlay.jsx';
 import ToastContainer from './components/hud/ToastContainer.jsx';
+import VisitHud from './components/hud/VisitHud.jsx';
 
 function GameViewRouter() {
   const { gameState } = useGameState();
@@ -29,6 +31,8 @@ function GameViewRouter() {
       <RaidFinderView />
     ) : gameState === 'STEALTH_RAID' ? (
       <StealthRaidView />
+    ) : gameState === 'ADMIN' ? (
+      <AdminDashboardView />
     ) : (
       <BaseBuilderView />
     );
@@ -57,6 +61,7 @@ export default function App() {
         <OptionsModal />
         <MetaEconomyPanel />
         <LoadingOverlay />
+        <VisitHud />
         <ToastContainer />
       </div>
     </GameStateProvider>

@@ -14,6 +14,13 @@ import { createWallBreakFX } from './WallBreakFX.js';
 import { buildGameHouse, buildRuinedHouse, placeHouseOnTile, createGamePatrolRobot, tickBuildingMotion, buildHouseBlueprint, tintBlueprint, createGuideMarker, createRebuildFX, tickRebuildFX } from './buildStructure.js';
 import { createAttacker, tickCharacter } from '../character/buildCharacter.js';
 import {
+  buildPaletteBuggy,
+  buildPartPickup,
+  buildGaragePad,
+  buggyTrackPose,
+  garageCenterWorld,
+} from './paletteBuggy.js';
+import {
   CAMERA,
   MAP_COLORS,
   RAID_COLORS,
@@ -54,6 +61,12 @@ export default function GameMap({
   rebuildProgress = 0,
   rebuildingId = null,
   movingBuildingId = null,
+  garageUnlocked = false,
+  mountedParts = [],
+  partSpawns = [],
+  buggyRide = null,
+  carriedPart = null,
+  pickupAnim = null,
 }) {
   const mountRef = useRef(null);
   const callbacksRef = useRef({});
@@ -76,6 +89,22 @@ export default function GameMap({
   rebuildRef.current = { id: rebuildingId, progress: rebuildProgress };
   const movingRef = useRef(movingBuildingId);
   movingRef.current = movingBuildingId;
+  const vehicleRef = useRef({
+    unlocked: garageUnlocked,
+    mountedParts,
+    partSpawns,
+    ride: buggyRide,
+    carriedPart,
+    pickupAnim,
+  });
+  vehicleRef.current = {
+    unlocked: garageUnlocked,
+    mountedParts,
+    partSpawns,
+    ride: buggyRide,
+    carriedPart,
+    pickupAnim,
+  };
   const worldRef = useRef(null);
 
   useEffect(() => {
@@ -369,6 +398,125 @@ export default function GameMap({
     const chaseCurrent = new THREE.Vector3();
     const patrolCmd = { chasing: false, column: SEARCHLIGHT_TILE.column, row: SEARCHLIGHT_TILE.row };
     let lastPatrolHit = { caught: false, hitting: false };
+    let garagePad = null;
+    let buggyMesh = null;
+    let cartPartsGroup = null;
+    let rideOtherMesh = null;
+    let lastPartSig = '';
+    let lastOtherSig = '';
+    let carryMesh = null;
+    let flyMesh = null;
+    const holdLocal = new THREE.Vector3(0.22, 0.92, 0.48);
+    const holdWorld = new THREE.Vector3();
+
+    const syncVehicle = (dt = 0.016, elapsed = 0) => {
+      if (grayscale) return;
+      const veh = vehicleRef.current || {};
+      const unlocked = !!veh.unlocked;
+      const parts = Array.isArray(veh.mountedParts) ? veh.mountedParts : [];
+      const spawns = Array.isArray(veh.partSpawns) ? veh.partSpawns : [];
+      const ride = veh.ride || {};
+      if (!unlocked) {
+        if (garagePad) garagePad.visible = false;
+        if (buggyMesh) buggyMesh.visible = false;
+        if (cartPartsGroup) cartPartsGroup.visible = false;
+        if (rideOtherMesh) rideOtherMesh.visible = false;
+        return;
+      }
+      if (!garagePad) {
+        garagePad = buildGaragePad();
+        scene.add(garagePad);
+      }
+      garagePad.visible = true;
+      const sig = parts.slice().sort().join(',');
+      if (!buggyMesh || lastPartSig !== sig) {
+        if (buggyMesh) {
+          scene.remove(buggyMesh);
+          disposeObject(buggyMesh);
+        }
+        buggyMesh = buildPaletteBuggy(parts);
+        lastPartSig = sig;
+        buggyMesh.scale.setScalar(1.35);
+        scene.add(buggyMesh);
+      }
+      buggyMesh.visible = true;
+      const anyoneSeated = !!(ride.seated || ride.otherSeated);
+      const pose = anyoneSeated || (ride.gear || 0) > 0
+        ? buggyTrackPose(ride.trackT || 0)
+        : (() => {
+            const c = garageCenterWorld();
+            return { x: c.x, z: c.z, y: TILE_HEIGHT, yaw: 0 };
+          })();
+      buggyMesh.position.set(pose.x, pose.y, pose.z);
+      buggyMesh.rotation.y = pose.yaw;
+      if ((ride.gear || 0) > 0) {
+        buggyMesh.traverse((n) => {
+          if (n.userData?.isWheel) n.rotation.x += (ride.gear || 1) * dt * 9;
+        });
+      }
+
+      if (!cartPartsGroup) {
+        cartPartsGroup = new THREE.Group();
+        cartPartsGroup.name = 'CartPartPickups';
+        scene.add(cartPartsGroup);
+      }
+      cartPartsGroup.visible = true;
+      const flyingId = veh.pickupAnim && veh.pickupAnim.t < 1 ? veh.pickupAnim.partId : null;
+      const wanted = new Set(spawns.filter((p) => p.id !== flyingId).map((p) => p.id));
+      [...cartPartsGroup.children].forEach((child) => {
+        if (!wanted.has(child.userData.partId)) {
+          cartPartsGroup.remove(child);
+          disposeObject(child);
+        }
+      });
+      spawns.forEach((spawn) => {
+        if (spawn.id === flyingId) return;
+        let mesh = cartPartsGroup.children.find((c) => c.userData.partId === spawn.id);
+        if (!mesh) {
+          mesh = buildPartPickup(spawn.id);
+          mesh.userData.partId = spawn.id;
+          cartPartsGroup.add(mesh);
+        }
+        const p = tileWorldPos(spawn.column, spawn.row);
+        const bob = Math.sin(elapsed * 2.6 + spawn.column) * 0.12;
+        mesh.position.set(p.x, TILE_HEIGHT + 0.28 + bob, p.z);
+        mesh.rotation.y = elapsed * 0.85;
+        mesh.traverse((n) => {
+          if (n.userData?.isBeacon) n.scale.setScalar(1 + Math.sin(elapsed * 3.2 + spawn.row) * 0.08);
+        });
+      });
+
+      const other = ride.other;
+      const otherOn = !!(other && other.seated);
+      const otherSig = otherOn ? `${other.characterModel}|${other.camoColor}|${other.role}` : '';
+      if (otherOn && (otherSig !== lastOtherSig || !rideOtherMesh)) {
+        if (rideOtherMesh) {
+          scene.remove(rideOtherMesh);
+          disposeObject(rideOtherMesh);
+        }
+        rideOtherMesh = createAttacker({
+          camoColor: other.camoColor || 'BLUE',
+          characterModel: other.characterModel || 1,
+          scale: cameraModeRef.current === 'chase' ? 0.7 : 0.4,
+        });
+        rideOtherMesh.userData.keepColor = true;
+        rideOtherMesh.traverse((n) => {
+          n.userData.keepColor = true;
+        });
+        lastOtherSig = otherSig;
+        scene.add(rideOtherMesh);
+      }
+      if (rideOtherMesh) {
+        rideOtherMesh.visible = otherOn && !!buggyMesh;
+        if (otherOn && buggyMesh) {
+          const seat = (other.role === 'passenger' ? buggyMesh.userData.passengerSeat : buggyMesh.userData.driverSeat).clone();
+          buggyMesh.updateMatrixWorld(true);
+          buggyMesh.localToWorld(seat);
+          rideOtherMesh.position.copy(seat);
+          rideOtherMesh.rotation.y = buggyMesh.rotation.y;
+        }
+      }
+    };
 
     const syncAttacker = (dt = 0.016) => {
       const data = attackerRef.current;
@@ -390,6 +538,23 @@ export default function GameMap({
         scene.add(attackerMesh);
       }
       attackerMesh.visible = true;
+      const ride = vehicleRef.current?.ride;
+      if (ride?.seated && buggyMesh) {
+        const seatLocal = (
+          ride.role === 'passenger' ? buggyMesh.userData.passengerSeat : buggyMesh.userData.driverSeat
+        ).clone();
+        buggyMesh.updateMatrixWorld(true);
+        const world = seatLocal.clone();
+        buggyMesh.localToWorld(world);
+        attackerSmooth.x = world.x;
+        attackerSmooth.z = world.z;
+        attackerSmooth.yaw = buggyMesh.rotation.y;
+        attackerSmooth.speed = 0;
+        attackerSmooth.primed = true;
+        attackerMesh.position.copy(world);
+        attackerMesh.rotation.y = buggyMesh.rotation.y;
+        return;
+      }
       const col = THREE.MathUtils.clamp(data.column, 0, MAP_COLS - 1);
       const row = THREE.MathUtils.clamp(data.row, 0, MAP_ROWS - 1);
       const p = tileWorldPos(col, row);
@@ -428,6 +593,7 @@ export default function GameMap({
       attackerMesh.position.set(attackerSmooth.x, TILE_HEIGHT, attackerSmooth.z);
       attackerMesh.rotation.y = attackerSmooth.yaw;
     };
+    syncVehicle(0.016, 0);
     syncAttacker(0.016);
 
     const rimGeo = new THREE.EdgesGeometry(new THREE.BoxGeometry(TILE_SIZE * 1.02, TILE_HEIGHT * 1.08, TILE_SIZE * 1.02));
@@ -818,6 +984,7 @@ export default function GameMap({
       grid,
       applyPainted,
       syncAttacker,
+      syncVehicle,
       syncBuildings,
       syncPatrol,
       syncSelection,
@@ -1004,7 +1171,34 @@ export default function GameMap({
           });
         });
       } else {
-        guideMarker.root.visible = false;
+        const vehGuide = vehicleRef.current || {};
+        const atk = attackerRef.current;
+        const carryingId = vehGuide.carriedPart;
+        const spawns = Array.isArray(vehGuide.partSpawns) ? vehGuide.partSpawns : [];
+        let mark = null;
+        if (carryingId) {
+          mark = garageCenterWorld();
+        } else if (spawns.length && atk) {
+          let best = spawns[0];
+          let bestD = Infinity;
+          spawns.forEach((p) => {
+            const d = Math.hypot((p.column || 0) - atk.column, (p.row || 0) - atk.row);
+            if (d < bestD) {
+              bestD = d;
+              best = p;
+            }
+          });
+          mark = tileWorldPos(best.column, best.row);
+        }
+        if (mark) {
+          guideMarker.root.visible = true;
+          guideMarker.root.position.set(mark.x, TILE_HEIGHT, mark.z);
+          guideMarker.chevron.position.y = 1.28 + Math.sin(elapsed * 3.1) * 0.16;
+          const pulse = 1 + Math.sin(elapsed * 3.1) * 0.08;
+          guideMarker.ring.scale.set(pulse, pulse, 1);
+        } else {
+          guideMarker.root.visible = false;
+        }
       }
       if (searchlight) {
         searchlight.update(dt, { alarm });
@@ -1036,16 +1230,73 @@ export default function GameMap({
         lastPatrolHit = patrol.update(elapsed, dt) || lastPatrolHit;
       }
       selectRing.rotation.z = elapsed * 0.6;
+      syncVehicle(dt, elapsed);
       syncAttacker(dt);
       if (attackerMesh) {
-        tickCharacter(attackerMesh, elapsed, { dt, speed: attackerSmooth.speed });
-        const baseScale = cameraModeRef.current === 'chase' ? 0.78 : 0.42;
+        const vehNow = vehicleRef.current || {};
+        const picking = !!(vehNow.pickupAnim && vehNow.pickupAnim.t < 1);
+        const carrying = !!vehNow.carriedPart && !vehNow.ride?.seated;
+        tickCharacter(attackerMesh, elapsed, { dt, speed: picking ? 0 : attackerSmooth.speed, carrying, picking });
+        const seated = !!vehNow.ride?.seated;
+        const baseScale = seated ? 0.52 : cameraModeRef.current === 'chase' ? 0.78 : 0.42;
         const punch = wallBreakFX.punch;
-        if (punch > 0.01) {
+        if (punch > 0.01 && !seated) {
           attackerMesh.scale.setScalar(baseScale * (1 + punch * 0.08));
           attackerMesh.position.y = TILE_HEIGHT + punch * 0.12;
         } else {
           attackerMesh.scale.setScalar(baseScale);
+        }
+        if (rideOtherMesh && rideOtherMesh.visible) {
+          tickCharacter(rideOtherMesh, elapsed, { dt, speed: 0 });
+        }
+
+        const anim = vehNow.pickupAnim;
+        const carriedId = vehNow.carriedPart;
+        holdLocal.set(0.22, 0.92, 0.48);
+        attackerMesh.localToWorld(holdWorld.copy(holdLocal));
+        if (picking && anim?.partId) {
+          if (!flyMesh || flyMesh.userData.partId !== anim.partId) {
+            if (flyMesh) {
+              scene.remove(flyMesh);
+              disposeObject(flyMesh);
+            }
+            flyMesh = buildPartPickup(anim.partId, { held: true });
+            flyMesh.userData.partId = anim.partId;
+            scene.add(flyMesh);
+          }
+          const from = tileWorldPos(anim.column, anim.row);
+          const e = 1 - (1 - Math.min(1, anim.t || 0)) ** 3;
+          flyMesh.visible = true;
+          flyMesh.position.set(
+            from.x + (holdWorld.x - from.x) * e,
+            TILE_HEIGHT + 0.25 + (holdWorld.y - (TILE_HEIGHT + 0.25)) * e + Math.sin(e * Math.PI) * 0.85,
+            from.z + (holdWorld.z - from.z) * e
+          );
+          flyMesh.rotation.y = elapsed * 4;
+          flyMesh.scale.setScalar(1 - e * 0.35);
+          if (carryMesh) carryMesh.visible = false;
+        } else if (flyMesh) {
+          scene.remove(flyMesh);
+          disposeObject(flyMesh);
+          flyMesh = null;
+        }
+        if (carrying && carriedId && !picking && !seated) {
+          if (!carryMesh || carryMesh.userData.partId !== carriedId) {
+            if (carryMesh) {
+              attackerMesh.remove(carryMesh);
+              disposeObject(carryMesh);
+            }
+            carryMesh = buildPartPickup(carriedId, { held: true });
+            carryMesh.userData.partId = carriedId;
+            carryMesh.position.copy(holdLocal);
+            carryMesh.scale.setScalar(0.62);
+            attackerMesh.add(carryMesh);
+          }
+          carryMesh.visible = true;
+          carryMesh.position.set(holdLocal.x, holdLocal.y + Math.sin(elapsed * 6) * 0.03, holdLocal.z);
+          carryMesh.rotation.y = Math.sin(elapsed * 5) * 0.18;
+        } else if (carryMesh) {
+          carryMesh.visible = false;
         }
       }
 

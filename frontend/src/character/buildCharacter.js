@@ -820,6 +820,7 @@ export function tickCharacter(figure, elapsed, motion = null) {
   const s = Math.sin(gait.phase);
   const idle = 1 - Math.min(1, gait.amp);
   const breathe = Math.sin(elapsed * 1.7);
+  const bob = Math.abs(s) * (0.05 + gait.run * 0.04) * gait.amp;
 
   // Legs swing opposite each other; run adds more stride + knee lift
   const legSwing = (0.62 + gait.run * 0.3) * gait.amp;
@@ -827,16 +828,27 @@ export function tickCharacter(figure, elapsed, motion = null) {
   rig.rightLeg.rotation.x = -s * legSwing;
 
   // Arms counter-swing, tuck in while running
-  const armSwing = (0.55 + gait.run * 0.35) * gait.amp;
-  rig.leftArm.rotation.x = 0.08 - s * armSwing;
-  rig.rightArm.rotation.x = 0.08 + s * armSwing;
-  const tuck = 0.55 - gait.amp * 0.16 - gait.run * 0.12;
-  rig.leftArm.rotation.z = -tuck + breathe * 0.03 * idle;
-  rig.rightArm.rotation.z = tuck - breathe * 0.03 * idle;
-
-  // Body bob (twice per stride) + idle breathing
-  const bob = Math.abs(s) * (0.05 + gait.run * 0.04) * gait.amp;
-  rig.root.position.y = bob + breathe * 0.012 * idle;
+  if (motion?.picking) {
+    rig.leftArm.rotation.x = -0.7;
+    rig.rightArm.rotation.x = -1.25;
+    rig.leftArm.rotation.z = -0.15;
+    rig.rightArm.rotation.z = 0.35;
+    rig.root.position.y = -0.12 + bob;
+  } else if (motion?.carrying) {
+    rig.leftArm.rotation.x = -1.05 + s * 0.06 * gait.amp;
+    rig.rightArm.rotation.x = -1.18 - s * 0.04 * gait.amp;
+    rig.leftArm.rotation.z = -0.28;
+    rig.rightArm.rotation.z = 0.32;
+    rig.root.position.y = bob + breathe * 0.012 * idle;
+  } else {
+    const armSwing = (0.55 + gait.run * 0.35) * gait.amp;
+    rig.leftArm.rotation.x = 0.08 - s * armSwing;
+    rig.rightArm.rotation.x = 0.08 + s * armSwing;
+    const tuck = 0.55 - gait.amp * 0.16 - gait.run * 0.12;
+    rig.leftArm.rotation.z = -tuck + breathe * 0.03 * idle;
+    rig.rightArm.rotation.z = tuck - breathe * 0.03 * idle;
+    rig.root.position.y = bob + breathe * 0.012 * idle;
+  }
 
   // Forward lean when running, hint of sway while walking
   const targetLean = speed > 0.04 ? 0.05 + gait.run * 0.16 : 0;

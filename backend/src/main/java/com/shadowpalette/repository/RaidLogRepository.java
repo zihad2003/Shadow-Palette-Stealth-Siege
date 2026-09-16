@@ -11,4 +11,8 @@ public interface RaidLogRepository extends JpaRepository<RaidLog, Long> {
     List<RaidLog> findByAttackerId(Long attackerId);
     List<RaidLog> findByDefenderId(Long defenderId);
     long countByAttackerIdAndOutcomeNot(Long attackerId, String outcome);
+    long countByAttackerId(Long attackerId);
+    long countByAttackerIdAndOutcome(Long attackerId, String outcome);
+    void deleteByAttackerId(Long attackerId);
+    void deleteByDefenderId(Long defenderId);
 }
