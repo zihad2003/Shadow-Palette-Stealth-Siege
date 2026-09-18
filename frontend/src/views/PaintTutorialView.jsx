@@ -30,24 +30,24 @@ export default function PaintTutorialView() {
         <motion.div
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.45, ease: 'easeOut' }}
+          transition={{ duration: 0.2, ease: 'easeOut' }}
           className="text-center"
         >
-          <p className="text-[10px] font-heading font-bold uppercase tracking-[0.3em] text-clay-accent mb-1">
-            Field Training
+          <p className="text-[10px] font-heading font-bold uppercase tracking-[0.2em] text-clay-accent mb-1">
+            Training
           </p>
-          <h1 className="font-heading font-extrabold text-2xl text-clay-text">How to paint your base</h1>
+          <h1 className="font-heading font-bold text-xl text-clay-text">Paint your base</h1>
         </motion.div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <motion.div
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.15, duration: 0.45, ease: 'easeOut' }}
+            transition={{ delay: 0.06, duration: 0.2, ease: 'easeOut' }}
           >
             <ClayPanel depth="deep" className="p-5 rounded-[24px] h-full flex flex-col gap-3">
               <h3 className="font-heading font-bold text-sm text-clay-accent flex items-center gap-2">
-                <Paintbrush size={15} /> Try it — pick a color, tap the clay
+                <Paintbrush size={15} /> Paint a tile
               </h3>
               <div className="flex items-center gap-2">
                 {GAME_COLOR_KEYS.map((key) => (
@@ -82,7 +82,7 @@ export default function PaintTutorialView() {
           <motion.div
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.3, duration: 0.45, ease: 'easeOut' }}
+            transition={{ delay: 0.1, duration: 0.2, ease: 'easeOut' }}
             className="flex flex-col gap-3"
           >
             <ClayPanel depth="deep" className="p-4 rounded-[24px]">
@@ -90,22 +90,19 @@ export default function PaintTutorialView() {
                 <Droplets size={14} /> Ink is the cost
               </h3>
               <p className="text-[11px] text-clay-muted leading-relaxed">
-                Every paint stroke on the ground costs <b className="text-clay-text">5 Ink</b>. Repainting a
-                building costs 5 Ink too. The Ink House brews more over time.
+                Paint costs <b className="text-clay-text">5 Ink</b> per tile.
               </p>
             </ClayPanel>
             <ClayPanel depth="deep" className="p-4 rounded-[24px]">
               <h3 className="font-heading font-bold text-xs text-clay-accent mb-1">The 35% rule</h3>
               <p className="text-[11px] text-clay-muted leading-relaxed">
-                No color may cover more than <b className="text-clay-text">35%</b> of your base. Spread your
-                palette — a one-color fortress is an easy fortress to read.
+                No color over <b className="text-clay-text">35%</b> of the base.
               </p>
             </ClayPanel>
             <ClayPanel depth="deep" className="p-4 rounded-[24px]">
               <h3 className="font-heading font-bold text-xs text-clay-accent mb-1">Color is camouflage</h3>
               <p className="text-[11px] text-clay-muted leading-relaxed">
-                Paint with five colors. Before a raid, pick one at the Makeup House. Matching tiles hide you
-                from the Searchlight.
+                Match tiles to stay hidden in raids.
               </p>
             </ClayPanel>
           </motion.div>
@@ -115,14 +112,14 @@ export default function PaintTutorialView() {
           className="flex justify-center mt-1"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          transition={{ delay: 0.55, duration: 0.4 }}
+          transition={{ delay: 0.16, duration: 0.2 }}
         >
           <ClayButton
             variant="success"
             onClick={enterBase}
             className="px-8 py-3 rounded-2xl text-sm flex items-center gap-2"
           >
-            Enter Home Base <ArrowRight size={16} />
+            Enter Base <ArrowRight size={16} />
           </ClayButton>
         </motion.div>
       </div>

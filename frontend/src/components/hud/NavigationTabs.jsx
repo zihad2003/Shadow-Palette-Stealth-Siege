@@ -8,12 +8,12 @@ export default function NavigationTabs() {
   const { gameState, transitionTo, setIsOptionsOpen, setIsMetaOpen } = useGameState();
 
   const tabs = [
-    { key: 'BASE_BUILDER', label: 'Home Base', icon: Home },
-    { key: 'RAID_FINDER', label: 'Find Raid', icon: Search },
+    { key: 'BASE_BUILDER', label: 'Base', icon: Home },
+    { key: 'RAID_FINDER', label: 'Raid', icon: Search },
   ];
 
   return (
-    <ClayPanel className="p-1.5 rounded-[22px] flex items-center gap-1 pointer-events-auto">
+    <ClayPanel className="h-11 p-1 rounded-2xl flex items-center gap-0.5">
       {tabs.map((tab) => {
         const isActive =
           gameState === tab.key || (tab.key === 'RAID_FINDER' && gameState === 'STEALTH_RAID');
@@ -23,30 +23,28 @@ export default function NavigationTabs() {
             key={tab.key}
             variant={isActive ? 'tab-active' : 'tab'}
             onClick={() => transitionTo(tab.key)}
-            className="px-3.5 py-2 rounded-xl text-xs md:text-sm flex items-center gap-1.5"
+            className="h-9 px-3 rounded-xl text-[11px] flex items-center gap-1.5"
           >
-            <Icon size={14} />
+            <Icon size={13} />
             <span className="hidden sm:inline">{tab.label}</span>
           </ClayButton>
         );
       })}
-
       <ClayButton
         variant="ghost"
         onClick={() => setIsMetaOpen(true)}
-        className="px-2.5 py-2 rounded-xl text-clay-accent text-[10px] font-heading font-bold"
-        aria-label="Economy and prestige"
+        className="h-9 px-2.5 rounded-xl text-[10px] font-heading font-bold"
+        aria-label="Economy"
       >
         Meta
       </ClayButton>
-
       <ClayButton
         variant="ghost"
         onClick={() => setIsOptionsOpen(true)}
-        className="px-2.5 py-2 rounded-xl text-clay-accent"
-        aria-label="Game options"
+        className="h-9 w-9 rounded-xl flex items-center justify-center"
+        aria-label="Options"
       >
-        <Settings size={15} />
+        <Settings size={14} />
       </ClayButton>
     </ClayPanel>
   );

@@ -28,9 +28,9 @@ export default function ClayPanel({
   return (
     <motion.div
       className={cls}
-      initial={{ opacity: 0, y: 8 }}
+      initial={{ opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.2, ease: 'easeOut', delay }}
+      transition={{ duration: 0.14, ease: 'easeOut', delay }}
       {...rest}
     >
       {children}

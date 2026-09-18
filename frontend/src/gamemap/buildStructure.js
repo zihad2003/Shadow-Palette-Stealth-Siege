@@ -2,6 +2,11 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { GAME_COLORS } from '../colors.js';
 import { TILE_SIZE, TILE_HEIGHT, TILE_PITCH, tileWorldPos, SEARCHLIGHT_TILE } from './mapConfig.js';
+import * as sleepHouse from './houses/sleepHouse.js';
+import * as craftHouse from './houses/craftHouse.js';
+import * as inkHouse from './houses/inkHouse.js';
+import * as coinGenerator from './houses/coinGenerator.js';
+import { HOUSE_HEIGHT_SCALE } from './houseKit.js';
 
 function clay(color, extras = {}) {
   return new THREE.MeshStandardMaterial({
@@ -20,203 +25,30 @@ function markMotion(mesh, kind, amp = 1) {
   return mesh;
 }
 
-/** Detailed clay houses with idle motion hooks. */
-export function buildGameHouse(type, hexColor = '#C9B79A', level = 1, footprintW = 2, footprintH = 2) {
-  const group = new THREE.Group();
+const HOUSE_BUILDERS = {
+  SLEEP_HOUSE: sleepHouse,
+  CRAFT_HOUSE: craftHouse,
+  INK_HOUSE: inkHouse,
+  COIN_GENERATOR: coinGenerator,
+};
+
+/** Concept-art clay houses. Paint (`hexColor`) tints cloth only. */
+export function buildGameHouse(type, hexColor = '#C9B79A', level = 1, footprintW = 3, footprintH = 3) {
+  const builder = HOUSE_BUILDERS[type] || sleepHouse;
+  const group = builder.buildIntact({ hexColor, level, footprintW, footprintH });
   group.userData.buildingType = type;
   group.userData.level = level;
-
-  const bw = footprintW * TILE_PITCH * 0.78;
-  const bd = footprintH * TILE_PITCH * 0.78;
-  const wallH = 0.62 + level * 0.14;
-  const body = clay(hexColor);
-  const wood = clay('#5C4636');
-  const accent = clay('#F4A261');
-  const ink = clay('#2A3A4A');
-  const cream = clay('#E8DCC8');
-
-  const plinth = new THREE.Mesh(new RoundedBoxGeometry(bw * 1.08, 0.12, bd * 1.08, 2, 0.06), cream);
-  plinth.position.y = 0.06;
-  plinth.receiveShadow = true;
-  group.add(plinth);
-
-  const walls = new THREE.Mesh(new RoundedBoxGeometry(bw, wallH, bd, 2, 0.1), body);
-  walls.position.y = 0.12 + wallH / 2;
-  walls.castShadow = true;
-  walls.receiveShadow = true;
-  walls.userData.isBody = true;
-  group.add(walls);
-
-  const trim = new THREE.Mesh(new RoundedBoxGeometry(bw * 1.02, 0.06, bd * 1.02, 1, 0.03), wood);
-  trim.position.y = 0.12 + wallH;
-  group.add(trim);
-
-  const door = new THREE.Mesh(new RoundedBoxGeometry(0.32, 0.42, 0.07, 1, 0.03), wood);
-  door.position.set(0, 0.12 + 0.22, bd / 2 + 0.02);
-  group.add(door);
-
-  const knob = new THREE.Mesh(new THREE.SphereGeometry(0.03, 8, 8), accent);
-  knob.position.set(0.1, 0.12 + 0.22, bd / 2 + 0.06);
-  group.add(knob);
-
-  [-0.28, 0.28].forEach((x) => {
-    const win = new THREE.Mesh(new RoundedBoxGeometry(0.18, 0.16, 0.04, 1, 0.02), clay('#9BD4DE', { emissive: '#3a6a72', emissiveIntensity: 0.15 }));
-    win.position.set(x, 0.12 + wallH * 0.55, bd / 2 + 0.01);
-    group.add(win);
-  });
-
-  if (type === 'SLEEP_HOUSE') {
-    const roof = new THREE.Mesh(new THREE.ConeGeometry(Math.max(bw, bd) * 0.68, 0.55, 4), ink);
-    roof.rotation.y = Math.PI / 4;
-    roof.position.y = 0.12 + wallH + 0.28;
-    roof.castShadow = true;
-    group.add(roof);
-    const chimney = new THREE.Mesh(new RoundedBoxGeometry(0.16, 0.32, 0.16, 1, 0.03), wood);
-    chimney.position.set(bw * 0.22, 0.12 + wallH + 0.45, -bd * 0.15);
-    chimney.castShadow = true;
-    group.add(chimney);
-    const smoke = new THREE.Mesh(new THREE.SphereGeometry(0.08, 10, 10), clay('#D0D5DA', { transparent: true, opacity: 0.55 }));
-    smoke.position.set(bw * 0.22, 0.12 + wallH + 0.72, -bd * 0.15);
-    markMotion(smoke, 'bob', 1.2);
-    group.add(smoke);
-    const moon = new THREE.Mesh(new THREE.TorusGeometry(0.12, 0.035, 8, 16, Math.PI * 1.4), accent);
-    moon.position.set(0, 0.12 + wallH + 0.62, 0);
-    moon.rotation.z = 0.4;
-    markMotion(moon, 'spin', 0.6);
-    group.add(moon);
-  } else if (type === 'INK_HOUSE') {
-    const vat = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.38, 0.48, 14), ink);
-    vat.position.set(0, 0.12 + wallH + 0.28, 0);
-    vat.castShadow = true;
-    markMotion(vat, 'pulse', 0.8);
-    group.add(vat);
-    const drip = new THREE.Mesh(new THREE.SphereGeometry(0.09, 10, 10), ink);
-    drip.position.set(0.28, 0.12 + wallH + 0.08, 0.22);
-    markMotion(drip, 'bob', 1.4);
-    group.add(drip);
-    const spout = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, 0.22, 8), wood);
-    spout.rotation.z = Math.PI / 2;
-    spout.position.set(0.38, 0.12 + wallH + 0.2, 0);
-    group.add(spout);
-  } else if (type === 'CRAFT_HOUSE') {
-    const roof = new THREE.Mesh(new THREE.ConeGeometry(Math.max(bw, bd) * 0.68, 0.5, 4), wood);
-    roof.rotation.y = Math.PI / 4;
-    roof.position.y = 0.12 + wallH + 0.26;
-    roof.castShadow = true;
-    group.add(roof);
-    const chimney = new THREE.Mesh(new RoundedBoxGeometry(0.18, 0.4, 0.18, 1, 0.03), clay('#6B6560'));
-    chimney.position.set(bw * 0.25, 0.12 + wallH + 0.48, -bd * 0.18);
-    group.add(chimney);
-    const gear = new THREE.Mesh(new THREE.TorusGeometry(0.18, 0.05, 8, 14), accent);
-    gear.position.set(0, 0.12 + wallH * 0.55, bd / 2 + 0.05);
-    markMotion(gear, 'spin', 1.4);
-    group.add(gear);
-    const gear2 = new THREE.Mesh(new THREE.TorusGeometry(0.1, 0.03, 8, 12), clay('#E5B93D'));
-    gear2.position.set(0.22, 0.12 + wallH * 0.45, bd / 2 + 0.05);
-    markMotion(gear2, 'spin', -1.8);
-    group.add(gear2);
-  } else if (type === 'COIN_GENERATOR') {
-    const roof = new THREE.Mesh(new THREE.ConeGeometry(Math.max(bw, bd) * 0.68, 0.5, 4), accent);
-    roof.rotation.y = Math.PI / 4;
-    roof.position.y = 0.12 + wallH + 0.26;
-    roof.castShadow = true;
-    group.add(roof);
-    const coin = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.07, 18), clay(GAME_COLORS.YELLOW, { metalness: 0.35, roughness: 0.35 }));
-    coin.rotation.x = Math.PI / 2;
-    coin.position.set(0, 0.12 + wallH + 0.62, 0);
-    coin.castShadow = true;
-    markMotion(coin, 'spin', 1.6);
-    group.add(coin);
-    const coin2 = coin.clone();
-    coin2.position.set(0.16, 0.12 + wallH + 0.52, 0.08);
-    coin2.scale.setScalar(0.7);
-    markMotion(coin2, 'spin', -1.2);
-    group.add(coin2);
-  } else {
-    const roof = new THREE.Mesh(new THREE.ConeGeometry(Math.max(bw, bd) * 0.68, 0.5, 4), clay('#8D5CC7'));
-    roof.rotation.y = Math.PI / 4;
-    roof.position.y = 0.12 + wallH + 0.26;
-    roof.castShadow = true;
-    group.add(roof);
-  }
-
-  for (let i = 0; i < level; i++) {
-    const pip = new THREE.Mesh(new THREE.SphereGeometry(0.055, 8, 8), accent);
-    pip.position.set(-bw / 2 + 0.14 + i * 0.15, 0.18, bd / 2 + 0.05);
-    markMotion(pip, 'bob', 0.5 + i * 0.15);
-    group.add(pip);
-  }
-
-  const flag = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.1, 0.02), accent);
-  flag.position.set(bw * 0.35, 0.12 + wallH + 0.55, 0);
-  markMotion(flag, 'sway', 1);
-  group.add(flag);
-
+  group.scale.y = HOUSE_HEIGHT_SCALE;
   return group;
 }
 
-/** Collapsed clay shell — same footprint, broken walls + rubble pile. */
-export function buildRuinedHouse(type, footprintW = 2, footprintH = 2) {
-  const group = new THREE.Group();
+/** Type-matched smashed silhouette — not generic rubble. */
+export function buildRuinedHouse(type, footprintW = 3, footprintH = 3, hexColor = '#9A958C') {
+  const builder = HOUSE_BUILDERS[type] || sleepHouse;
+  const group = builder.buildDestroyed({ hexColor, level: 1, footprintW, footprintH });
   group.userData.buildingType = type;
   group.userData.ruined = true;
-
-  const bw = footprintW * TILE_PITCH * 0.78;
-  const bd = footprintH * TILE_PITCH * 0.78;
-  const rubble = clay('#7A756E');
-  const cracked = clay('#9A958C');
-  const dark = clay('#5C574F');
-
-  const plinth = new THREE.Mesh(new RoundedBoxGeometry(bw * 1.05, 0.1, bd * 1.05, 2, 0.05), dark);
-  plinth.position.y = 0.05;
-  plinth.receiveShadow = true;
-  group.add(plinth);
-
-  // Broken low walls — uneven heights
-  const stubs = [
-    { x: 0, z: -bd * 0.35, w: bw * 0.9, d: 0.14, h: 0.38 },
-    { x: -bw * 0.35, z: 0.05, w: 0.14, d: bd * 0.55, h: 0.52 },
-    { x: bw * 0.32, z: 0.1, w: 0.14, d: bd * 0.4, h: 0.28 },
-  ];
-  stubs.forEach((s, i) => {
-    const wall = new THREE.Mesh(new RoundedBoxGeometry(s.w, s.h, s.d, 1, 0.04), i % 2 ? cracked : rubble);
-    wall.position.set(s.x, 0.1 + s.h / 2, s.z);
-    wall.rotation.z = (i - 1) * 0.04;
-    wall.castShadow = true;
-    group.add(wall);
-  });
-
-  // Rubble chunks
-  for (let i = 0; i < 5; i++) {
-    const chunk = new THREE.Mesh(
-      new THREE.DodecahedronGeometry(0.1 + (i % 3) * 0.04, 0),
-      clay(i % 2 ? '#8A8680' : '#6E6B66')
-    );
-    chunk.position.set((i - 2) * 0.18, 0.12, (i % 2 ? 0.2 : -0.15));
-    chunk.rotation.set(i * 0.4, i * 0.7, 0);
-    group.add(chunk);
-  }
-
-  // Fallen roof slab
-  const slab = new THREE.Mesh(new RoundedBoxGeometry(bw * 0.55, 0.08, bd * 0.4, 1, 0.03), clay('#6B6560'));
-  slab.position.set(0.15, 0.18, 0.05);
-  slab.rotation.set(0.35, 0.4, 0.2);
-  group.add(slab);
-
-  // Dust puff marker
-  const dust = new THREE.Mesh(
-    new THREE.SphereGeometry(0.12, 8, 8),
-    clay('#C8C4BC', { transparent: true, opacity: 0.35 })
-  );
-  dust.position.set(-0.1, 0.45, 0);
-  markMotion(dust, 'bob', 0.8);
-  dust.userData.baseY = 0.45;
-  group.add(dust);
-
-  const label = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.08, 0.02), clay('#F4A261'));
-  label.position.set(0, 0.55, bd * 0.4);
-  group.add(label);
-
+  group.scale.y = HOUSE_HEIGHT_SCALE;
   return group;
 }
 
@@ -228,12 +60,12 @@ export function tickBuildingMotion(house, elapsed) {
     const amp = child.userData.motionAmp || 1;
     const baseY = child.userData.baseY ?? child.position.y;
     const baseRotY = child.userData.baseRotY ?? 0;
-    if (kind === 'spin') child.rotation.y = baseRotY + elapsed * amp;
-    else if (kind === 'bob') child.position.y = baseY + Math.sin(elapsed * 2.4 * amp) * 0.04 * amp;
+    if (kind === 'spin') child.rotation.y = baseRotY + elapsed * amp * 0.55;
+    else if (kind === 'bob') child.position.y = baseY + Math.sin(elapsed * 1.45 * amp) * 0.016 * amp;
     else if (kind === 'pulse') {
-      const s = 1 + Math.sin(elapsed * 2.2) * 0.04 * amp;
+      const s = 1 + Math.sin(elapsed * 1.25) * 0.016 * amp;
       child.scale.setScalar(s);
-    } else if (kind === 'sway') child.rotation.z = Math.sin(elapsed * 3 * amp) * 0.25;
+    } else if (kind === 'sway') child.rotation.z = Math.sin(elapsed * 1.35 * amp) * 0.07;
   });
 }
 
@@ -265,7 +97,7 @@ export function tintBlueprint(root, ok) {
 }
 
 /** Translucent house silhouette for relocate targeting. */
-export function buildHouseBlueprint(type, hexColor = '#7dce82', level = 1, footprintW = 2, footprintH = 2) {
+export function buildHouseBlueprint(type, hexColor = '#7dce82', level = 1, footprintW = 3, footprintH = 3) {
   const house = buildGameHouse(type, hexColor, level, footprintW, footprintH);
   house.userData.isBlueprint = true;
   house.traverse((n) => {
@@ -331,29 +163,76 @@ export function tickRebuildFX(fx, dt, active, progress) {
 export function createGuideMarker() {
   const root = new THREE.Group();
   root.name = 'GuideMarker';
+
   const ring = new THREE.Mesh(
-    new THREE.TorusGeometry(TILE_PITCH * 0.85, 0.055, 10, 36),
-    new THREE.MeshBasicMaterial({ color: 0xf4a261, transparent: true, opacity: 0.92, depthWrite: false })
+    new THREE.TorusGeometry(TILE_PITCH * 0.58, 0.016, 8, 48),
+    new THREE.MeshBasicMaterial({ color: 0xf4a261, transparent: true, opacity: 0.72, depthWrite: false })
   );
   ring.rotation.x = Math.PI / 2;
-  ring.position.y = 0.05;
+  ring.position.y = 0.032;
   root.add(ring);
-  const chevron = new THREE.Mesh(
-    new THREE.ConeGeometry(0.22, 0.4, 4),
-    new THREE.MeshBasicMaterial({ color: 0xf4a261, transparent: true, opacity: 0.95 })
+
+  const disc = new THREE.Mesh(
+    new THREE.CircleGeometry(TILE_PITCH * 0.28, 32),
+    new THREE.MeshBasicMaterial({
+      color: 0xf4a261,
+      transparent: true,
+      opacity: 0.1,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    })
   );
-  chevron.rotation.x = Math.PI;
-  chevron.position.y = 1.4;
-  root.add(chevron);
+  disc.rotation.x = -Math.PI / 2;
+  disc.position.y = 0.026;
+  root.add(disc);
+
   const beam = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.035, 0.035, 1.15, 8),
-    new THREE.MeshBasicMaterial({ color: 0xf4c245, transparent: true, opacity: 0.42, depthWrite: false })
+    new THREE.CylinderGeometry(0.01, 0.026, 1.58, 10, 1, true),
+    new THREE.MeshBasicMaterial({
+      color: 0xf4a261,
+      transparent: true,
+      opacity: 0.2,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    })
   );
-  beam.position.y = 0.72;
+  beam.position.y = 0.82;
   root.add(beam);
+
+  const pin = new THREE.Group();
+  pin.position.y = 1.58;
+  const diamond = new THREE.Mesh(
+    new THREE.OctahedronGeometry(0.1, 0),
+    new THREE.MeshBasicMaterial({ color: 0xf4a261, transparent: true, opacity: 0.96 })
+  );
+  diamond.scale.set(0.78, 1.18, 0.78);
+  pin.add(diamond);
+  const halo = new THREE.Mesh(
+    new THREE.RingGeometry(0.13, 0.165, 28),
+    new THREE.MeshBasicMaterial({
+      color: 0xf1faee,
+      transparent: true,
+      opacity: 0.32,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    })
+  );
+  pin.add(halo);
+  root.add(pin);
+
   root.visible = false;
   root.userData.keepColor = true;
-  return { root, ring, chevron, beam };
+  return { root, ring, disc, beam, pin, chevron: pin };
+}
+
+export function tickGuideMarker(marker, elapsed, camera) {
+  if (!marker?.root?.visible) return;
+  const wave = Math.sin(elapsed * 1.28);
+  marker.pin.position.y = 1.58 + wave * 0.04;
+  marker.ring.scale.set(1 + wave * 0.03, 1 + wave * 0.03, 1);
+  if (marker.disc?.material) marker.disc.material.opacity = 0.09 + wave * 0.03;
+  if (marker.beam?.material) marker.beam.material.opacity = 0.16 + wave * 0.05;
+  if (camera) marker.pin.quaternion.copy(camera.quaternion);
 }
 
 /** Detailed patrol robot with chase + patrol modes. */

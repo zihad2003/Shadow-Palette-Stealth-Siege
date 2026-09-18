@@ -104,15 +104,16 @@ export default function CharacterPreview({
     let raf = 0;
     const clock = new THREE.Clock();
     const tick = () => {
-      const elapsed = clock.getElapsedTime();
+      const dt = clock.getDelta();
+      const elapsed = clock.elapsedTime;
       const sig = `${stateRef.current.characterModel}:${stateRef.current.camoColor}`;
       if (sig !== lastSig) {
         lastSig = sig;
         rebuild();
       }
-      figure.rotation.y = elapsed * 0.35;
-      figure.position.y = Math.sin(elapsed * 1.6) * 0.02;
-      tickCharacter(figure, elapsed);
+      figure.rotation.y = elapsed * 0.32;
+      figure.position.y = 0;
+      tickCharacter(figure, elapsed, { dt, speed: 0.85 });
       ring.rotation.z = elapsed * 0.25;
       renderer.render(scene, camera);
       raf = requestAnimationFrame(tick);

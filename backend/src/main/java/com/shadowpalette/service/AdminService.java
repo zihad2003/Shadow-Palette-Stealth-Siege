@@ -124,7 +124,7 @@ public class AdminService {
                 .coins(clamp(request.getCoins(), 0, 999_999, 500))
                 .inkEnergy(clamp(request.getInkEnergy(), 0, 100, 100))
                 .chips(clamp(request.getChips(), 0, 999_999, 200))
-                .characterModel(clamp(request.getCharacterModel(), 1, 3, 1))
+                .characterModel(clamp(request.getCharacterModel(), 1, 2, 1))
                 .camoColor(normalizeCamo(request.getCamoColor()))
                 .prestigeLevel(clamp(request.getPrestigeLevel(), 0, 5, 0))
                 .build();
@@ -196,7 +196,7 @@ public class AdminService {
         List<AdminUserWriteRequest> seeds = Arrays.asList(
                 seed(12L, "ShadowNinja", 500, 100, 200, 1, "BLUE", 0),
                 seed(21L, "ForestScout", 820, 70, 140, 2, "GREEN", 1),
-                seed(34L, "PhantomGhost", 210, 40, 80, 3, "RED", 0),
+                seed(34L, "PhantomGhost", 210, 40, 80, 2, "RED", 0),
                 seed(55L, "InkWarden", 1200, 100, 400, 1, "YELLOW", 2)
         );
         int created = 0;

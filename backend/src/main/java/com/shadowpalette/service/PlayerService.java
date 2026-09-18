@@ -40,12 +40,12 @@ public class PlayerService {
                     .coins(500)
                     .inkEnergy(100)
                     .chips(200)
-                    .characterModel(request.getCharacterModel() > 0 ? request.getCharacterModel() : 1)
+                    .characterModel(clampModel(request.getCharacterModel()))
                     .camoColor(request.getCamoColor() != null ? request.getCamoColor().toUpperCase() : "BLUE")
                     .prestigeLevel(0)
                     .build();
         } else if (!camoAlreadySet) {
-            user.setCharacterModel(request.getCharacterModel() > 0 ? request.getCharacterModel() : 1);
+            user.setCharacterModel(clampModel(request.getCharacterModel()));
             user.setCamoColor(request.getCamoColor() != null ? request.getCamoColor().toUpperCase() : "BLUE");
         }
 
@@ -122,5 +122,11 @@ public class PlayerService {
                 .newPrestigeLevel(newPrestige)
                 .stealthBonusPercent(bonusPercent)
                 .build();
+    }
+
+    /** 1 = male, 2 = female. Legacy 3 maps to female. */
+    private static int clampModel(int model) {
+        if (model <= 1) return 1;
+        return 2;
     }
 }

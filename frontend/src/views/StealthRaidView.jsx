@@ -5,6 +5,7 @@ import TopResourceBar from '../components/hud/TopResourceBar.jsx';
 import NavigationTabs from '../components/hud/NavigationTabs.jsx';
 import SideRaidPanel from '../components/hud/SideRaidPanel.jsx';
 import HudBanner from '../components/ui/HudBanner.jsx';
+import HudHeader from '../components/ui/HudHeader.jsx';
 import ClayPanel from '../components/ui/ClayPanel.jsx';
 import ClayButton from '../components/ui/ClayButton.jsx';
 import GameMap from '../gamemap/GameMap.jsx';
@@ -15,8 +16,8 @@ import { createAlarmSystem } from '../raid/AlarmSystem.js';
 import { generateDefenderBase, tileColorAt } from '../raid/defenderLayouts.js';
 import { RAID_DURATION_SECONDS, DETECTION_STATES } from '../raid/stealthConstants.js';
 import { chipsForOutcome, resolveRaidOutcome } from '../raid/RaidSession.js';
-import { GATE_SPAWN_TILE, MAP_COLS, MAP_ROWS, SEARCHLIGHT_TILE, WALK_TILE_SECONDS } from '../gamemap/mapConfig.js';
-import { collectSolidTiles } from '../gamemap/occupancy.js';
+import { GATE_SPAWN_TILE, SEARCHLIGHT_TILE, WALK_TILE_SECONDS } from '../gamemap/mapConfig.js';
+import { collectSolidTiles, isWallBreakSpot } from '../gamemap/occupancy.js';
 import { stepDirection, attemptStep, TURN_RATE } from '../character/gridMover.js';
 import { listDecorOccupiedTiles } from '../gamemap/MapDecor.js';
 import { GAME_COLORS } from '../colors.js';
@@ -26,10 +27,6 @@ import StaminaBar from '../components/hud/StaminaBar.jsx';
 
 const WALL_BREAK_HITS = 4;
 const RAID_DECOR_SEED = 41;
-
-function isPerimeter(column, row) {
-  return column === 0 || row === 0 || column === MAP_COLS - 1 || row === MAP_ROWS - 1;
-}
 
 function isAtGate(column, row) {
   return column === GATE_SPAWN_TILE.column && row === GATE_SPAWN_TILE.row;
@@ -65,16 +62,6 @@ export default function StealthRaidView() {
   const paintedTiles = defenderBase.tiles;
   const raidBuildings = defenderBase.buildings;
   const raidDefenses = defenderBase.defenses;
-  const solidTiles = useMemo(
-    () =>
-      collectSolidTiles({
-        buildings: raidBuildings,
-        decorTiles: listDecorOccupiedTiles(RAID_DECOR_SEED, raidBuildings),
-      }),
-    [raidBuildings]
-  );
-  const solidRef = useRef(solidTiles);
-  solidRef.current = solidTiles;
   const detection = useRef(new DetectionSystem());
   const sessionLog = useRef([]);
   const wallHitsRef = useRef(0);
@@ -112,7 +99,30 @@ export default function StealthRaidView() {
   });
   const hudRef = useRef(hud);
   hudRef.current = hud;
-  const [entered, setEntered] = useState(false);
+  const openSolids = useMemo(
+    () =>
+      collectSolidTiles({
+        buildings: raidBuildings,
+        decorTiles: listDecorOccupiedTiles(RAID_DECOR_SEED, raidBuildings),
+        includeMakeupHouse: false,
+        gateLocked: false,
+      }),
+    [raidBuildings]
+  );
+  const lockedSolids = useMemo(
+    () =>
+      collectSolidTiles({
+        buildings: raidBuildings,
+        decorTiles: listDecorOccupiedTiles(RAID_DECOR_SEED, raidBuildings),
+        includeMakeupHouse: false,
+        gateLocked: true,
+      }),
+    [raidBuildings]
+  );
+  const solidRef = useRef(openSolids);
+  const solidsPairRef = useRef({ open: openSolids, locked: lockedSolids });
+  solidsPairRef.current = { open: openSolids, locked: lockedSolids };
+  solidRef.current = hud.gateLocked || gateLockedRef.current ? lockedSolids : openSolids;
 
   const alarmSystem = useRef(null);
   if (!alarmSystem.current) {
@@ -127,11 +137,6 @@ export default function StealthRaidView() {
       },
     });
   }
-
-  useEffect(() => {
-    const t = requestAnimationFrame(() => setEntered(true));
-    return () => cancelAnimationFrame(t);
-  }, []);
 
   useEffect(() => {
     const started = Date.now();
@@ -179,11 +184,13 @@ export default function StealthRaidView() {
       if (canMove && !mouseLocked && turn !== 0) sceneApi.current?.addLookYaw?.(turn * TURN_RATE * dt);
 
       if (canMove && moveCooldown <= 0 && (forward !== 0 || strafe !== 0)) {
+        const pair = solidsPairRef.current;
+        solidRef.current = gateLockedRef.current || hudRef.current.gateLocked ? pair.locked : pair.open;
         const yaw = sceneApi.current?.getFacingYaw?.() ?? Math.PI;
         const dir = stepDirection(yaw, forward, strafe);
         const step = attemptStep(attackerRef.current, dir, solidRef.current);
         if (step.ok) {
-          moveCooldown = (WALK_TILE_SECONDS * (step.diagonal ? Math.SQRT2 : 1) / sprintMul) * 0.92;
+          moveCooldown = WALK_TILE_SECONDS * (step.diagonal ? Math.SQRT2 : 1) / sprintMul;
           soundEngine.playFootstepSound(sp.sprinting);
           setAttacker((prev) => ({ ...prev, column: step.column, row: step.row }));
         } else if (step.blocked) {
@@ -222,12 +229,7 @@ export default function StealthRaidView() {
         sceneApi.current?.setAlarm?.(true);
         sceneApi.current?.lockGate?.();
         sceneApi.current?.setPatrolChase?.(true, { column: pos.column, row: pos.row });
-        showToast(
-          raidDefenses.length
-            ? 'SIREN — patrol engaged · break a wall to escape'
-            : 'SIREN — gate locked · break a wall to escape',
-          'error'
-        );
+        showToast('Siren · break wall', 'error');
       }
 
       if (result.alarmLatched) {
@@ -332,11 +334,7 @@ export default function StealthRaidView() {
     setChips((prev) => prev + awarded);
     recordRaidResult(outcome);
     showToast(
-      outcome === 'CAUGHT'
-        ? 'Caught — 0 chips · 5 min cooldown'
-        : outcome === 'ESCAPED'
-          ? `Escaped with 1.5× loot (+${awarded})`
-          : `Silent extraction (+${awarded})`,
+      outcome === 'CAUGHT' ? 'Caught' : outcome === 'ESCAPED' ? `Escaped +${awarded}` : `Silent +${awarded}`,
       outcome === 'CAUGHT' ? 'error' : 'success'
     );
     transitionTo('BASE_BUILDER');
@@ -345,11 +343,11 @@ export default function StealthRaidView() {
   const climbGate = () => {
     if (hudRef.current.outcome) return;
     if (!isAtGate(attackerRef.current.column, attackerRef.current.row)) {
-      showToast('Reach the south gate to climb out', 'info');
+      showToast('South gate', 'info');
       return;
     }
     if (hudRef.current.gateLocked || hudRef.current.alarm) {
-      showToast('Gate locked by alarm — break a perimeter wall (F)', 'error');
+      showToast('Gate locked', 'error');
       return;
     }
     finishRaid('SILENT');
@@ -358,12 +356,12 @@ export default function StealthRaidView() {
   const hitWall = () => {
     if (hudRef.current.outcome) return;
     if (hudRef.current.breaking) return;
-    if (!isPerimeter(attackerRef.current.column, attackerRef.current.row)) {
-      showToast('Stand on a perimeter tile to break the wall', 'info');
+    if (!isWallBreakSpot(attackerRef.current.column, attackerRef.current.row)) {
+      showToast('At a wall', 'info');
       return;
     }
     if (!hudRef.current.alarm && !hudRef.current.gateLocked) {
-      showToast('Wall break is for escape after alarm — or climb the open gate (F)', 'info');
+      showToast('F · gate or wall', 'info');
       return;
     }
 
@@ -385,7 +383,7 @@ export default function StealthRaidView() {
 
     window.setTimeout(() => {
       if (final) {
-        showToast('Wall breached — escaping!', 'success');
+        showToast('Open', 'success');
         setHud((prev) => ({
           ...prev,
           outcome: 'ESCAPED',
@@ -394,7 +392,7 @@ export default function StealthRaidView() {
           breakFlash: false,
         }));
       } else {
-        showToast(`Wall hit ${hits}/${WALL_BREAK_HITS} · keep pressing F`, 'info');
+        showToast(`${hits}/${WALL_BREAK_HITS}`, 'info');
         setHud((prev) => ({ ...prev, breaking: false, breakFlash: false }));
       }
     }, final ? 900 : 420);
@@ -407,20 +405,20 @@ export default function StealthRaidView() {
       climbGate();
       return;
     }
-    if (isPerimeter(column, row) && (hudRef.current.alarm || hudRef.current.gateLocked)) {
+    if (isWallBreakSpot(column, row) && (hudRef.current.alarm || hudRef.current.gateLocked)) {
       hitWall();
       return;
     }
     if (isAtGate(column, row)) {
-      showToast('Gate locked — move to a wall and press F', 'error');
+      showToast('Wall', 'error');
       return;
     }
-    showToast('F: climb gate (open) or break bricks (after alarm)', 'info');
+    showToast('F · gate or wall', 'info');
   };
   actionRef.current = tryAction;
 
   const atGate = isAtGate(attacker.column, attacker.row);
-  const atWall = isPerimeter(attacker.column, attacker.row);
+  const atWall = isWallBreakSpot(attacker.column, attacker.row);
   const canClimb = atGate && !hud.gateLocked && !hud.alarm && !hud.outcome;
   const canBreak = atWall && (hud.alarm || hud.gateLocked) && !hud.outcome;
 
@@ -434,12 +432,7 @@ export default function StealthRaidView() {
           : 'text-clay-accent';
 
   return (
-    <motion.div
-      className="relative w-full h-full overflow-hidden bg-[#141414]"
-      initial={{ opacity: 0, scale: 1.04 }}
-      animate={{ opacity: entered ? 1 : 0, scale: 1 }}
-      transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
-    >
+    <div className="relative w-full h-full overflow-hidden bg-[#141414]">
       <GameMap
         grayscale
         cameraMode="chase"
@@ -453,42 +446,47 @@ export default function StealthRaidView() {
         attacker={attacker}
       />
 
-      <header className="absolute top-4 left-5 right-5 z-50 flex items-center justify-between pointer-events-none gap-3 flex-nowrap">
-        <HudBanner icon="⚔️" title="Stealth Raid" subtitle={`Grayscale fortress · Camo ${lockedCamo}`} />
-        <NavigationTabs />
-        <TopResourceBar />
-      </header>
+      <HudHeader
+        left={<HudBanner title="Raid" subtitle={lockedCamo} />}
+        right={
+          <>
+            <NavigationTabs />
+            <TopResourceBar />
+          </>
+        }
+      />
 
-      <div className="absolute top-20 left-1/2 -translate-x-1/2 z-30 pointer-events-none flex flex-col items-center gap-2">
-        <ClayPanel className={`px-4 py-1.5 rounded-full text-xs font-bold tracking-wide ${stateTone}`}>
-          CAMO: {lockedCamo} · {hud.state} · {Math.ceil(hud.remaining)}s · WASD · Shift · F
+      <div className="absolute top-[4.75rem] left-1/2 -translate-x-1/2 z-30 pointer-events-none">
+        <ClayPanel className={`h-11 px-3.5 rounded-2xl flex items-center gap-2.5 ${stateTone}`}>
+          {raidDefenses.length > 0 && (
+            <Bot size={13} className={hud.robotEngaged ? 'text-clay-danger' : 'text-clay-muted'} />
+          )}
+          <span className="text-[11px] font-semibold whitespace-nowrap">
+            {hud.alarm ? (hud.robotEngaged ? 'Chase' : 'Break wall') : hud.state} · {Math.ceil(hud.remaining)}s
+          </span>
+          <div className="w-16 h-1.5 rounded-full clay-inset overflow-hidden">
+            <div
+              className={`h-full rounded-full ${hud.exposed ? 'bg-clay-danger' : hud.shimmer ? 'bg-clay-success' : 'bg-clay-accent'}`}
+              style={{ width: `${hud.meter}%` }}
+            />
+          </div>
+          {hud.inBeam && (
+            <span className={`text-[10px] ${hud.colorMatch ? 'text-clay-success' : 'text-clay-danger'}`}>
+              {hud.colorMatch ? 'Hidden' : 'Exposed'}
+            </span>
+          )}
         </ClayPanel>
-        <div className="w-56 h-2 rounded-full clay-inset overflow-hidden">
-          <motion.div
-            className={`h-full ${hud.exposed ? 'bg-clay-danger' : hud.shimmer ? 'bg-clay-success' : 'bg-clay-accent'}`}
-            animate={{ width: `${hud.meter}%` }}
-            transition={{ duration: 0.12, ease: 'linear' }}
-          />
-        </div>
-        {hud.inBeam && (
-          <motion.p
-            initial={{ opacity: 0, y: -4 }}
-            animate={{ opacity: 1, y: 0 }}
-            className={`text-[10px] font-bold tracking-wide ${hud.colorMatch ? 'text-clay-success' : 'text-clay-danger'}`}
-          >
-            {hud.colorMatch ? 'Beam on · camo match — invisible' : 'Beam on · color mismatch — ALARM'}
-          </motion.p>
-        )}
       </div>
 
       <AnimatePresence>
         {hud.shimmer && !hud.alarm && (
           <motion.div
             initial={{ opacity: 0 }}
-            animate={{ opacity: 0.35 }}
+            animate={{ opacity: 0.18 }}
             exit={{ opacity: 0 }}
+            transition={{ duration: 0.16 }}
             className="absolute inset-0 z-20 pointer-events-none"
-            style={{ boxShadow: `inset 0 0 80px ${GAME_COLORS[lockedCamo] || '#fff'}` }}
+            style={{ boxShadow: `inset 0 0 56px ${GAME_COLORS[lockedCamo] || '#fff'}` }}
           />
         )}
       </AnimatePresence>
@@ -497,25 +495,11 @@ export default function StealthRaidView() {
         {hud.exposed && !hud.alarm && (
           <motion.div
             initial={{ opacity: 0 }}
-            animate={{ opacity: 0.28 }}
+            animate={{ opacity: 0.14 }}
             exit={{ opacity: 0 }}
-            className="absolute inset-0 z-20 pointer-events-none bg-clay-danger/20"
+            transition={{ duration: 0.16 }}
+            className="absolute inset-0 z-20 pointer-events-none bg-clay-danger/15"
           />
-        )}
-      </AnimatePresence>
-
-      <AnimatePresence>
-        {hud.alarm && (
-          <motion.div
-            initial={{ opacity: 0, y: -16, scale: 0.9 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0 }}
-            className="absolute top-36 left-1/2 -translate-x-1/2 z-40 pointer-events-none"
-          >
-            <ClayPanel depth="deep" className="px-6 py-2 rounded-full clay-alarm text-clay-danger font-heading font-extrabold text-sm tracking-widest">
-              {hud.robotEngaged ? '🚨 SIREN · PATROL CHASING' : '🚨 SIREN — GATE LOCKED · BREAK WALL'}
-            </ClayPanel>
-          </motion.div>
         )}
       </AnimatePresence>
 
@@ -523,16 +507,16 @@ export default function StealthRaidView() {
         {hud.breakFlash && (
           <motion.div
             key={`break-${hud.wallHits}`}
-            initial={{ opacity: 0.55, scale: 1.04 }}
-            animate={{ opacity: 0, scale: 1 }}
+            initial={{ opacity: 0.32 }}
+            animate={{ opacity: 0 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.35 }}
+            transition={{ duration: 0.28 }}
             className="absolute inset-0 z-30 pointer-events-none"
             style={{
               background:
                 hud.wallHits >= WALL_BREAK_HITS
-                  ? 'radial-gradient(circle at center, rgba(244,162,97,0.45), transparent 55%)'
-                  : 'radial-gradient(circle at center, rgba(255,255,255,0.28), transparent 50%)',
+                  ? 'radial-gradient(circle at center, rgba(244,162,97,0.28), transparent 55%)'
+                  : 'radial-gradient(circle at center, rgba(255,255,255,0.16), transparent 50%)',
             }}
           />
         )}
@@ -542,10 +526,9 @@ export default function StealthRaidView() {
         {hud.robotHitting && (
           <motion.div
             initial={{ opacity: 0 }}
-            animate={{ opacity: [0.2, 0.45, 0.2] }}
+            animate={{ opacity: 0.16 }}
             exit={{ opacity: 0 }}
-            transition={{ repeat: Infinity, duration: 0.35 }}
-            className="absolute inset-0 z-25 pointer-events-none bg-clay-danger/30"
+            className="absolute inset-0 z-25 pointer-events-none bg-clay-danger/20"
           />
         )}
       </AnimatePresence>
@@ -555,69 +538,41 @@ export default function StealthRaidView() {
           stamina={stamina.stamina}
           sprinting={stamina.sprinting}
           exhausted={stamina.exhausted}
-          className="absolute left-5 bottom-3 z-40"
+          className="absolute left-4 bottom-4 z-40"
         />
-      )}
-
-      {raidDefenses.length > 0 && (
-        <ClayPanel className="absolute left-5 bottom-28 z-40 px-3 py-2 rounded-2xl pointer-events-none flex items-center gap-2">
-          <Bot size={14} className={hud.robotEngaged ? 'text-clay-danger' : 'text-clay-muted'} />
-          <span className="text-[10px] font-bold text-clay-text">
-            {hud.robotEngaged ? (hud.robotHitting ? 'Patrol hitting!' : 'Patrol engaged') : 'Patrol on standby'}
-          </span>
-        </ClayPanel>
       )}
 
       {!hud.outcome && (
         <ClayPanel
           depth="deep"
-          className="absolute bottom-2 left-1/2 -translate-x-1/2 z-50 px-3 py-2 rounded-2xl flex flex-col gap-1.5 pointer-events-auto min-w-[260px] opacity-95"
+          className="absolute bottom-4 left-1/2 -translate-x-1/2 z-50 h-11 px-2.5 rounded-2xl flex items-center gap-2 pointer-events-auto"
         >
-          <span className="text-[11px] font-heading uppercase font-bold text-clay-accent text-center tracking-wider">
-            Escape · press F
-          </span>
           {(hud.alarm || hud.gateLocked) && (
-            <div className="flex items-center gap-2">
-              <div className="flex-1 h-2.5 rounded-full clay-inset overflow-hidden flex gap-0.5 p-0.5">
-                {Array.from({ length: WALL_BREAK_HITS }).map((_, i) => (
-                  <motion.div
-                    key={i}
-                    className={`flex-1 rounded-sm ${i < hud.wallHits ? 'bg-clay-accent' : 'bg-transparent'}`}
-                    animate={
-                      i === hud.wallHits - 1 && hud.breakFlash
-                        ? { scale: [1, 1.35, 1], opacity: [1, 0.6, 1] }
-                        : { scale: 1 }
-                    }
-                    transition={{ duration: 0.35 }}
-                  />
-                ))}
-              </div>
-              <span className="text-[10px] font-bold text-clay-muted whitespace-nowrap">
-                {hud.wallHits}/{WALL_BREAK_HITS}
-              </span>
+            <div className="w-16 h-1.5 rounded-full clay-inset overflow-hidden flex gap-0.5 p-px">
+              {Array.from({ length: WALL_BREAK_HITS }).map((_, i) => (
+                <div
+                  key={i}
+                  className={`flex-1 rounded-sm ${i < hud.wallHits ? 'bg-clay-accent' : 'bg-transparent'}`}
+                />
+              ))}
             </div>
           )}
-          <div className="flex items-center gap-2">
-            <ClayButton
-              variant={canClimb ? 'success' : 'ghost'}
-              disabled={!canClimb}
-              onClick={climbGate}
-              className="flex-1 py-2 rounded-2xl text-xs flex items-center justify-center gap-1"
-            >
-              <DoorOpen size={13} /> Gate (F)
-            </ClayButton>
-            <ClayButton
-              variant={canBreak ? 'danger' : 'ghost'}
-              disabled={!canBreak}
-              onClick={hitWall}
-              className="flex-1 py-2 rounded-2xl text-xs flex items-center justify-center gap-1"
-            >
-              <Hammer size={13} /> Bricks (F)
-            </ClayButton>
-          </div>
-          <p className="text-[10px] text-clay-muted text-center">
-            Over-shoulder · W/S move · A/D turn · solids block tiles · F action
-          </p>
+          <ClayButton
+            variant={canClimb ? 'success' : 'ghost'}
+            disabled={!canClimb}
+            onClick={climbGate}
+            className="h-8 px-3 rounded-lg text-[11px] flex items-center gap-1"
+          >
+            <DoorOpen size={12} /> Gate
+          </ClayButton>
+          <ClayButton
+            variant={canBreak ? 'danger' : 'ghost'}
+            disabled={!canBreak}
+            onClick={hitWall}
+            className="h-8 px-3 rounded-lg text-[11px] flex items-center gap-1"
+          >
+            <Hammer size={12} /> Wall
+          </ClayButton>
         </ClayPanel>
       )}
 
@@ -626,47 +581,41 @@ export default function StealthRaidView() {
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className="absolute inset-0 z-[70] flex items-center justify-center bg-[#0d1b1e]/75 pointer-events-auto"
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.14 }}
+            className="absolute inset-0 z-[70] flex items-center justify-center bg-[#0d1b1e]/70 pointer-events-auto"
           >
-            <motion.div
-              initial={{ y: 24, scale: 0.94, opacity: 0 }}
-              animate={{ y: 0, scale: 1, opacity: 1 }}
-              transition={{ type: 'spring', stiffness: 280, damping: 22 }}
-            >
-              <ClayPanel depth="deep" className="p-6 rounded-[28px] w-[360px] max-w-[90vw] flex flex-col gap-3 text-center">
-                <p className="text-[10px] font-heading font-bold uppercase tracking-[0.24em] text-clay-accent">Raid complete</p>
-                <h2 className="font-heading font-extrabold text-xl text-clay-text">
-                  {hud.outcome === 'SILENT' ? 'Silent Extraction' : hud.outcome === 'ESCAPED' ? 'Detected — Escaped' : 'Caught'}
-                </h2>
-                <p className="text-xs text-clay-muted">
-                  Camo stayed {lockedCamo}. Loot {hud.outcome === 'CAUGHT' ? '0×' : hud.outcome === 'ESCAPED' ? '1.5×' : '1.0×'}.
-                  {hud.outcome === 'CAUGHT' ? ' Capture cooldown started.' : ''}
-                </p>
-                <ClayButton variant="success" onClick={() => finishRaid(hud.outcome)} className="w-full py-2.5 rounded-2xl text-xs">
-                  Return to base
-                </ClayButton>
-              </ClayPanel>
-            </motion.div>
+            <ClayPanel depth="deep" className="p-5 rounded-3xl w-[280px] max-w-[88vw] flex flex-col gap-3 text-center">
+              <h2 className="font-heading font-semibold text-sm text-clay-text">
+                {hud.outcome === 'SILENT' ? 'Silent' : hud.outcome === 'ESCAPED' ? 'Escaped' : 'Caught'}
+              </h2>
+              <p className="text-[11px] text-clay-muted">
+                {hud.outcome === 'CAUGHT' ? 'Loot 0×' : hud.outcome === 'ESCAPED' ? 'Loot 1.5×' : 'Loot 1.0×'}
+              </p>
+              <ClayButton variant="success" onClick={() => finishRaid(hud.outcome)} className="w-full py-2 rounded-xl text-xs">
+                Base
+              </ClayButton>
+            </ClayPanel>
           </motion.div>
         )}
       </AnimatePresence>
 
-      <div className="absolute right-5 top-1/2 -translate-y-1/2 z-40 flex flex-col gap-2 pointer-events-auto">
+      <div className="absolute right-4 top-[4.75rem] z-40 flex flex-col gap-1.5 pointer-events-auto">
         <ClayButton
           variant="ghost"
           onClick={() => sceneApi.current && sceneApi.current.zoomIn()}
-          className="w-10 h-10 rounded-2xl flex items-center justify-center"
+          className="w-9 h-9 rounded-xl flex items-center justify-center"
           aria-label="Zoom in"
         >
-          <Plus size={16} />
+          <Plus size={15} />
         </ClayButton>
         <ClayButton
           variant="ghost"
           onClick={() => sceneApi.current && sceneApi.current.zoomOut()}
-          className="w-10 h-10 rounded-2xl flex items-center justify-center"
+          className="w-9 h-9 rounded-xl flex items-center justify-center"
           aria-label="Zoom out"
         >
-          <Minus size={16} />
+          <Minus size={15} />
         </ClayButton>
       </div>
 
@@ -680,12 +629,12 @@ export default function StealthRaidView() {
         paintedTiles={paintedTiles}
         onExtract={() => {
           if (hud.alarm || hud.gateLocked) {
-            showToast('Alarm active — climb unavailable; break a wall', 'error');
+            showToast('Break wall', 'error');
             return;
           }
           finishRaid(resolveRaidOutcome({ alarmTriggered: hud.alarm, caught: false }));
         }}
       />
-    </motion.div>
+    </div>
   );
 }

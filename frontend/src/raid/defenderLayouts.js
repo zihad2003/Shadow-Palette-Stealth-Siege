@@ -50,14 +50,14 @@ export function generateDefenderTiles(seed = 34) {
 }
 
 /**
- * Houses spread across the larger fortress — same 2×2 footprints as the base builder.
+ * Houses spread across the larger fortress — same 3×3 footprints as the base builder.
  */
 export function generateDefenderBuildings(seed = 34, count = 4) {
   const slots = [
     { x: 2, y: 2 },
-    { x: MAP_COLS - 4, y: 2 },
-    { x: 2, y: MAP_ROWS - 4 },
-    { x: MAP_COLS - 4, y: MAP_ROWS - 4 },
+    { x: MAP_COLS - 5, y: 2 },
+    { x: 2, y: MAP_ROWS - 5 },
+    { x: MAP_COLS - 5, y: MAP_ROWS - 5 },
     { x: Math.floor(MAP_COLS * 0.35), y: 3 },
     { x: Math.floor(MAP_COLS * 0.6), y: MAP_ROWS - 5 },
     { x: 4, y: Math.floor(MAP_ROWS * 0.45) },
@@ -73,8 +73,8 @@ export function generateDefenderBuildings(seed = 34, count = 4) {
       buildingType: type,
       xPos: slot.x,
       yPos: slot.y,
-      footprintWidth: 2,
-      footprintHeight: 2,
+      footprintWidth: 3,
+      footprintHeight: 3,
       hexColor: HOUSE_GRAY[i % HOUSE_GRAY.length],
       level: 1 + Math.floor(hashSeed(seed + i * 31) * 3),
     });

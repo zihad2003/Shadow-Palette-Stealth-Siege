@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { UPGRADE_COSTS, MAKEUP_RECOLOR_INK } from '../data/raidTargets.js';
-import { GAME_COLORS, COLOR_NAMES, hexForColor, isGameColor } from '../colors.js';
+import { GAME_COLORS, hexForColor, isGameColor } from '../colors.js';
 import {
   placeBuilding,
   placeDefense,
@@ -29,7 +29,7 @@ import {
 import { soundEngine } from '../soundEngine.js';
 import { createRaidSession, rejectColorChange } from '../raid/RaidSession.js';
 import { MAP_COLS, MAP_ROWS } from '../gamemap/mapConfig.js';
-import { canPlaceOnGameMap, getGameFootprint } from '../gamemap/placeUtils.js';
+import { canPlaceOnGameMap, getGameFootprint, migrateHouseFootprints } from '../gamemap/placeUtils.js';
 import { createStarterRuins, REPAIR_BUILDING_COST, findRuinNear, nextGuideRuin, STARTER_HOUSE_COUNT, REBUILD_SECONDS } from '../gamemap/starterRuins.js';
 import { GATE_SPAWN_TILE } from '../gamemap/mapConfig.js';
 import {
@@ -157,7 +157,7 @@ export function GameStateProvider({ children }) {
   /** Walk-brush: paint/erase the tiles you step on while ON. size 1 = single, 3 = 3×3. */
   const [brush, setBrush] = useState({ on: false, size: 1, erase: false });
   const [searchlightLevel, setSearchlightLevel] = useState(DEFAULT_SEARCHLIGHT_LEVEL);
-  const [buildings, setBuildings] = useState(() => createStarterRuins());
+  const [buildings, setBuildings] = useState(() => migrateHouseFootprints(createStarterRuins()));
   const [defenses, setDefenses] = useState([]);
   const [paintedTiles, setPaintedTiles] = useState({});
   const [selectedBuildingId, setSelectedBuildingId] = useState(null);
@@ -216,7 +216,7 @@ export function GameStateProvider({ children }) {
     setToasts((prev) => [...prev, { id, message, type }]);
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 4000);
+    }, 2200);
   };
 
   const triggerLoading = (title, subtitle, durationMs = 400, onDone) => {
@@ -232,7 +232,7 @@ export function GameStateProvider({ children }) {
     const id = Number(plotId) || activePlotId || 1;
     setActivePlotId(id);
     soundEngine.playSuccessSound();
-    showToast(`Home base ready · Fortress #${id}`, 'success');
+    showToast('Base ready', 'success');
   };
 
   const transitionTo = (nextState, params = {}) => {
@@ -245,8 +245,8 @@ export function GameStateProvider({ children }) {
       setActivePlotId(targetPlotId);
       setRaidSession(null);
       triggerLoading(
-        params.loadingTitle || (isVisitGuest ? 'ARRIVING...' : 'ENTERING YOUR BASE...'),
-        params.loadingSubtitle || (isVisitGuest ? 'Friendly visit — color world' : 'Paint & fortify your fortress'),
+        params.loadingTitle || (isVisitGuest ? 'Visit' : 'Base'),
+        params.loadingSubtitle || '',
         params.loadingMs || 400,
         () => {
           setGameState('BASE_BUILDER');
@@ -254,17 +254,17 @@ export function GameStateProvider({ children }) {
       );
     } else if (nextState === 'RAID_FINDER') {
       setRaidSession(null);
-      triggerLoading('SCANNING RAID TARGETS...', 'Matching nearby fortress snapshots', 400, () => {
+      triggerLoading('Raids', '', 400, () => {
         setGameState('RAID_FINDER');
       });
     } else if (nextState === 'STEALTH_RAID') {
       if (Date.now() < raidCooldownUntil) {
         const secs = Math.ceil((raidCooldownUntil - Date.now()) / 1000);
-        showToast(`Capture cooldown — wait ${secs}s before another raid`, 'error');
+        showToast(`Cooldown ${secs}s`, 'error');
         return;
       }
       if (!isGameColor(camoColor)) {
-        showToast('Visit the Makeup House and choose a camouflage color first', 'error');
+        showToast('Set camo', 'error');
         return;
       }
       const defender = params.defenderId || raidTargetId;
@@ -273,9 +273,9 @@ export function GameStateProvider({ children }) {
       const session = createRaidSession({ attackerId: userId, defenderId: defender, camoColor });
       setRaidSession(session);
       triggerLoading(
-        'CALIBRATING STEALTH LINK...',
-        `Camo locked ${session.camoColor} · grayscale infiltration`,
-        500,
+        'Raid',
+        '',
+        400,
         async () => {
           try {
             const res = await fetchRaidTarget(defender);
@@ -287,7 +287,7 @@ export function GameStateProvider({ children }) {
         }
       );
     } else if (nextState === 'MAIN_MENU') {
-      triggerLoading('INITIALIZING OPERATIVE PROFILE...', 'Character & Camo Setup', 450, () => {
+      triggerLoading('Setup', '', 350, () => {
         setGameState('MAIN_MENU');
       });
     } else {
@@ -301,10 +301,7 @@ export function GameStateProvider({ children }) {
   const changeCamoColor = (nextColor) => {
     const gate = rejectColorChange(raidSession, nextColor);
     if (!gate.ok) {
-      showToast(
-        gate.reason === 'RAID_CAMO_LOCKED' ? 'Camouflage is locked for this raid' : 'Pick one of the five colors',
-        'error'
-      );
+      showToast(gate.reason === 'RAID_CAMO_LOCKED' ? 'Camo locked' : 'Pick a color', 'error');
       return false;
     }
     if (gate.camoColor === camoColor) {
@@ -313,7 +310,7 @@ export function GameStateProvider({ children }) {
       return true;
     }
     if (inkEnergy < MAKEUP_RECOLOR_INK) {
-      showToast(`Need ${MAKEUP_RECOLOR_INK} Ink to recamo`, 'error');
+      showToast(`Need ${MAKEUP_RECOLOR_INK} ink`, 'error');
       return false;
     }
     soundEngine.playPaintSound();
@@ -321,7 +318,7 @@ export function GameStateProvider({ children }) {
     setCamoColor(gate.camoColor);
     setHasRecamoed(true);
     setSelectedColor(gate.camoColor);
-    showToast(`Body color set to ${gate.camoColor}`, 'success');
+    showToast(`Camo ${gate.camoColor}`, 'success');
     return true;
   };
 
@@ -334,7 +331,7 @@ export function GameStateProvider({ children }) {
       counts[key] = (counts[key] || 0) + 1;
     });
     blds.forEach((b) => {
-      const area = (b.footprintWidth || 2) * (b.footprintHeight || 2);
+      const area = (b.footprintWidth || 3) * (b.footprintHeight || 3);
       const colorKey = b.colorKey || b.hexColor;
       if (colorKey) counts[colorKey] = (counts[colorKey] || 0) + area;
     });
@@ -346,27 +343,27 @@ export function GameStateProvider({ children }) {
 
   const paintTile = (x, y) => {
     if (isVisitGuest) {
-      showToast('Visiting — you cannot paint the host fortress', 'info');
+      showToast('Visit — no paint', 'info');
       return false;
     }
     const key = `${x},${y}`;
     if (!isGameColor(selectedColor)) {
-      showToast('Pick a paint color from the five-color palette', 'error');
+      showToast('Pick a color', 'error');
       return false;
     }
     if (paintedTiles[key] === selectedColor) return false;
     if (inkEnergy < PAINT_TILE_INK) {
-      showToast(`Painting needs ${PAINT_TILE_INK} Ink`, 'error');
+      showToast('Need ink', 'error');
       return false;
     }
     const nextTiles = { ...paintedTiles, [key]: selectedColor };
     const usage = computeColorUsage(nextTiles, buildings)[selectedColor] / TOTAL_SURFACE;
     if (usage > COLOR_QUOTA_LIMIT) {
-      showToast(`COLOR_QUOTA_EXCEEDED: ${Math.round(usage * 100)}% of surface — max 35% per color`, 'error');
+      showToast('Quota 35%', 'error');
       return false;
     }
     if (usage >= COLOR_QUOTA_WARN) {
-      showToast(`Careful: this color is at ${Math.round(usage * 100)}% of the 35% quota`, 'info');
+      showToast(`Quota ${Math.round(usage * 100)}%`, 'info');
     }
     soundEngine.playPaintSound();
     setInkEnergy((v) => Math.max(0, v - PAINT_TILE_INK));
@@ -382,7 +379,7 @@ export function GameStateProvider({ children }) {
   const paintTiles = (coords) => {
     if (isVisitGuest) return { painted: 0, stop: true };
     if (!isGameColor(selectedColor)) {
-      showToast('Pick a paint color from the five-color palette', 'error');
+      showToast('Pick a color', 'error');
       return { painted: 0, stop: true };
     }
     const todo = coords.filter(
@@ -392,7 +389,7 @@ export function GameStateProvider({ children }) {
     if (!todo.length) return { painted: 0, stop: false };
     const affordable = Math.floor(inkEnergy / PAINT_TILE_INK);
     if (affordable <= 0) {
-      showToast(`Out of ink — brush off (${PAINT_TILE_INK} ink per tile)`, 'error');
+      showToast('Out of ink', 'error');
       return { painted: 0, stop: true };
     }
     const batch = todo.slice(0, affordable);
@@ -402,11 +399,11 @@ export function GameStateProvider({ children }) {
     });
     const usage = computeColorUsage(nextTiles, buildings)[selectedColor] / TOTAL_SURFACE;
     if (usage > COLOR_QUOTA_LIMIT) {
-      showToast(`${COLOR_NAMES[selectedColor]} hit the 35% quota — brush off`, 'error');
+      showToast('Quota 35%', 'error');
       return { painted: 0, stop: true };
     }
     if (usage >= COLOR_QUOTA_WARN) {
-      showToast(`${COLOR_NAMES[selectedColor]} at ${Math.round(usage * 100)}% of the 35% quota`, 'info');
+      showToast(`Quota ${Math.round(usage * 100)}%`, 'info');
     }
     soundEngine.playPaintSound();
     setInkEnergy((v) => Math.max(0, v - PAINT_TILE_INK * batch.length));
@@ -429,7 +426,7 @@ export function GameStateProvider({ children }) {
     if (isVisitGuest) return;
     setBrush((b) => {
       const on = !b.on;
-      showToast(on ? `Brush ON — walk to ${b.erase ? 'erase' : 'paint'}` : 'Brush off', 'info');
+      showToast(on ? (b.erase ? 'Erase' : 'Brush on') : 'Brush off', 'info');
       return { ...b, on };
     });
   };
@@ -445,26 +442,26 @@ export function GameStateProvider({ children }) {
     if (isVisitGuest) return;
     setBrush((b) => {
       const erase = !b.erase;
-      showToast(erase ? 'Eraser mode' : 'Paint mode', 'info');
+      showToast(erase ? 'Erase' : 'Paint', 'info');
       return { ...b, erase };
     });
   };
 
   const paintBuilding = (buildingId) => {
     if (isVisitGuest) {
-      showToast('Visiting — you cannot paint', 'info');
+      showToast('Visit — no paint', 'info');
       return false;
     }
     const building = buildings.find((b) => b.id === buildingId);
     if (!building) return false;
     if (building.ruined) {
-      showToast('Repair this ruin first (walk close · hold F)', 'info');
+      showToast('Hold F to rebuild', 'info');
       return false;
     }
     const nextHex = hexForColor(selectedColor) || GAME_COLORS.GREEN;
     if (building.hexColor === nextHex) return false;
     if (inkEnergy < PAINT_TILE_INK) {
-      showToast(`Painting needs ${PAINT_TILE_INK} Ink`, 'error');
+      showToast('Need ink', 'error');
       return false;
     }
     soundEngine.playPaintSound();
@@ -472,7 +469,7 @@ export function GameStateProvider({ children }) {
     setBuildings((prev) =>
       prev.map((b) => (b.id === buildingId ? { ...b, hexColor: nextHex, colorKey: selectedColor } : b))
     );
-    showToast(`Painted ${building.buildingType.replace(/_/g, ' ')}`, 'success');
+    showToast('Painted', 'success');
     return true;
   };
 
@@ -520,7 +517,7 @@ export function GameStateProvider({ children }) {
 
   const repairBuilding = (buildingId) => {
     if (isVisitGuest) {
-      showToast('Visiting — you cannot repair the host fortress', 'info');
+      showToast('Visit — no repair', 'info');
       return false;
     }
     const building = buildings.find((b) => b.id === buildingId);
@@ -533,10 +530,7 @@ export function GameStateProvider({ children }) {
       return false;
     }
     if (coins < REPAIR_BUILDING_COST.coins || inkEnergy < REPAIR_BUILDING_COST.ink) {
-      showToast(
-        `Repair needs ${REPAIR_BUILDING_COST.coins} coins and ${REPAIR_BUILDING_COST.ink} ink`,
-        'error'
-      );
+      showToast(`Need ${REPAIR_BUILDING_COST.coins}c / ${REPAIR_BUILDING_COST.ink} ink`, 'error');
       return false;
     }
     const hex = hexForColor(selectedColor) || GAME_COLORS.GREEN;
@@ -560,7 +554,7 @@ export function GameStateProvider({ children }) {
       else if (nextRepaired >= STARTER_HOUSE_COUNT) persistGuideDone();
       else setGuideStep(GUIDE_STEPS.REBUILD);
     }
-    showToast(`Repaired ${building.buildingType.replace(/_/g, ' ')} · M to move`, 'success');
+    showToast('Repaired · M to move', 'success');
     return true;
   };
 
@@ -608,27 +602,27 @@ export function GameStateProvider({ children }) {
 
   const beginMoveBuilding = (buildingId) => {
     if (isVisitGuest) {
-      showToast('Visiting — you cannot move houses', 'info');
+      showToast('Visit — no move', 'info');
       return false;
     }
     const building = buildings.find((b) => b.id === buildingId);
     if (!building) {
-      showToast('Select a repaired house to move', 'info');
+      showToast('Select a house', 'info');
       return false;
     }
     if (building.ruined) {
-      showToast('Repair this ruin first (walk close · hold F)', 'info');
+      showToast('Hold F to rebuild', 'info');
       return false;
     }
     if (building.buildingType === 'MAKEUP_HOUSE') {
-      showToast('Makeup House stays put', 'info');
+      showToast('Makeup stays', 'info');
       return false;
     }
     setSelectedBuildingId(buildingId);
     setMovingBuildingId(buildingId);
     setSelectedTool('MOVE');
     setBrush((prev) => ({ ...prev, on: false }));
-    showToast('Click a tile to place · M drop in front · Esc cancel', 'info');
+    showToast('Click tile · M drop · Esc', 'info');
     return true;
   };
 
@@ -644,21 +638,21 @@ export function GameStateProvider({ children }) {
     const id = movingBuildingId || (selectedTool === 'MOVE' ? selectedBuildingId : null);
     const building = buildings.find((b) => b.id === id);
     if (!building) {
-      showToast('Select a repaired house, then press Move', 'info');
+      showToast('Select a house', 'info');
       return false;
     }
     if (building.ruined) {
-      showToast('Repair this ruin first before moving it', 'info');
+      showToast('Rebuild first', 'info');
       return false;
     }
     const w = building.footprintWidth || getGameFootprint(building.buildingType).w;
     const h = building.footprintHeight || getGameFootprint(building.buildingType).h;
     if (occupantBlocksFootprint(x, y, w, h, occupant)) {
-      showToast('Cannot drop a house on yourself', 'error');
+      showToast('Cannot drop on you', 'error');
       return false;
     }
     if (!canPlaceOnGameMap(buildings, x, y, w, h, building.id)) {
-      showToast('Cannot place house here', 'error');
+      showToast('Cannot place here', 'error');
       return false;
     }
     if (building.xPos === x && building.yPos === y) {
@@ -670,7 +664,7 @@ export function GameStateProvider({ children }) {
     setBuildings((prev) => prev.map((b) => (b.id === building.id ? { ...b, xPos: x, yPos: y } : b)));
     setMovingBuildingId(null);
     setSelectedTool('PAINT');
-    showToast(`Moved ${building.buildingType.replace(/_/g, ' ')}`, 'success');
+    showToast('Moved', 'success');
     return true;
   };
 
@@ -682,11 +676,11 @@ export function GameStateProvider({ children }) {
   const repairRuinNear = (column, row) => {
     const ruin = findRuinNear(buildings, column, row);
     if (!ruin) {
-      showToast('Walk onto a ruined house · hold F to rebuild', 'info');
+      showToast('Hold F on a ruin', 'info');
       return false;
     }
     if (guideActive && guideStep !== GUIDE_STEPS.MOVE_TIP && ruin.id !== activeRuinId) {
-      showToast('Follow the marker — rebuild that house first', 'info');
+      showToast('Follow the marker', 'info');
       return false;
     }
     return repairBuilding(ruin.id);
@@ -694,7 +688,7 @@ export function GameStateProvider({ children }) {
 
   const handlePlaceAt = async (x, y, extras = {}) => {
     if (isVisitGuest) {
-      showToast('Visiting — you cannot paint or build here', 'info');
+      showToast('Visit — no build', 'info');
       return false;
     }
     if (movingBuildingId || selectedTool === 'MOVE') {
@@ -713,15 +707,15 @@ export function GameStateProvider({ children }) {
 
     if (selectedTool === 'PATROL_ROBOT') {
       if (!patrolUnlocked) {
-        showToast(`Unlock Patrol Robot after ${PATROL_UNLOCK_RAIDS} successful raids`, 'error');
+        showToast(`Unlock after ${PATROL_UNLOCK_RAIDS} raids`, 'error');
         return false;
       }
       if (defenses.some((d) => (d.type || d.defenseType) === 'PATROL_ROBOT')) {
-        showToast('Patrol Robot already placed', 'info');
+        showToast('Patrol already placed', 'info');
         return false;
       }
       if (!canPlaceOnGameMap(buildings, x, y, 1, 1)) {
-        showToast('Cannot place Patrol Robot here', 'error');
+        showToast('Cannot place patrol', 'error');
         return false;
       }
       soundEngine.playBuildSound();
@@ -734,12 +728,12 @@ export function GameStateProvider({ children }) {
       }
       setDefenses((prev) => [...prev, { id, type: 'PATROL_ROBOT', defenseType: 'PATROL_ROBOT', xPos: x, yPos: y }]);
       setSelectedTool('PAINT');
-      showToast('Patrol Robot deployed', 'success');
+      showToast('Patrol placed', 'success');
       return true;
     }
 
     if (PLACEABLE_BUILDINGS.includes(selectedTool)) {
-      showToast('Houses start ruined — walk to one and press F to repair', 'info');
+      showToast('Hold F on a ruin', 'info');
       return false;
     }
 
@@ -761,11 +755,11 @@ export function GameStateProvider({ children }) {
   const handleUpgradeSelected = async () => {
     const building = buildings.find((b) => b.id === selectedBuildingId);
     if (!building) {
-      showToast('Select a building on your base first', 'info');
+      showToast('Select a house', 'info');
       return;
     }
     if (building.ruined) {
-      showToast('Repair this ruin first (walk close · hold F)', 'info');
+      showToast('Hold F to rebuild', 'info');
       return;
     }
     if (building.level >= 3) {
@@ -775,7 +769,7 @@ export function GameStateProvider({ children }) {
     const cost = UPGRADE_COSTS[building.level];
     if (!cost) return;
     if (coins < cost.coins || inkEnergy < cost.ink) {
-      showToast(`Upgrade needs ${cost.coins} coins and ${cost.ink} ink`, 'error');
+      showToast(`Need ${cost.coins}c / ${cost.ink} ink`, 'error');
       return;
     }
     soundEngine.playBuildSound();
@@ -787,19 +781,19 @@ export function GameStateProvider({ children }) {
     setCoins((v) => v - cost.coins);
     setInkEnergy((v) => v - cost.ink);
     setBuildings((prev) => prev.map((b) => (b.id === building.id ? { ...b, level: b.level + 1 } : b)));
-    showToast(`Upgraded ${building.buildingType.replace(/_/g, ' ')} to Lvl ${building.level + 1}`, 'success');
+    showToast(`Lvl ${building.level + 1}`, 'success');
   };
 
   const upgradeSearchlight = () => {
     const lv = clampSearchlightLevel(searchlightLevel);
     if (lv >= 3) {
-      showToast('Searchlight already Lvl 3 — full fortress cover', 'info');
+      showToast('Light max', 'info');
       return false;
     }
     const cost = SEARCHLIGHT_UPGRADE_COSTS[lv];
     if (!cost) return false;
     if (coins < cost.coins || inkEnergy < cost.ink) {
-      showToast(`Searchlight L${lv + 1} needs ${cost.coins}c / ${cost.ink} ink`, 'error');
+      showToast(`Need ${cost.coins}c / ${cost.ink} ink`, 'error');
       return false;
     }
     soundEngine.playBuildSound();
@@ -807,28 +801,28 @@ export function GameStateProvider({ children }) {
     setInkEnergy((v) => v - cost.ink);
     setSearchlightLevel(lv + 1);
     const next = searchlightSpec(lv + 1);
-    showToast(`Searchlight L${next.level} · ${Math.round(next.cover * 100)}% radius`, 'success');
+    showToast(`Light L${next.level}`, 'success');
     return true;
   };
 
   const unlockPatrolRobot = () => {
     if (patrolUnlocked) {
-      showToast('Patrol Robot already unlocked', 'info');
+      showToast('Patrol unlocked', 'info');
       return false;
     }
     if (successfulRaids < PATROL_UNLOCK_RAIDS) {
-      showToast(`Need ${PATROL_UNLOCK_RAIDS - successfulRaids} more successful raids`, 'error');
+      showToast(`Need ${PATROL_UNLOCK_RAIDS - successfulRaids} raids`, 'error');
       return false;
     }
     if (coins < PATROL_UNLOCK_COINS) {
-      showToast(`Need ${PATROL_UNLOCK_COINS} coins to unlock`, 'error');
+      showToast(`Need ${PATROL_UNLOCK_COINS}c`, 'error');
       return false;
     }
     setCoins((v) => v - PATROL_UNLOCK_COINS);
     setPatrolUnlocked(true);
     setSelectedTool('PATROL_ROBOT');
     soundEngine.playSuccessSound();
-    showToast('Patrol Robot unlocked — place it on your base', 'success');
+    showToast('Patrol ready', 'success');
     return true;
   };
 
@@ -845,7 +839,7 @@ export function GameStateProvider({ children }) {
   const claimDailyLogin = () => {
     const today = new Date().toISOString().slice(0, 10);
     if (lastDailyClaim === today) {
-      showToast('Daily bonus already claimed today', 'info');
+      showToast('Claimed', 'info');
       return false;
     }
     setCoins((v) => v + DAILY_LOGIN_COINS);
@@ -863,7 +857,7 @@ export function GameStateProvider({ children }) {
   const tradeChipsForCoins = (amount) => {
     const n = Math.floor(Number(amount) || 0);
     if (n <= 0) {
-      showToast('Enter a chip amount to trade', 'info');
+      showToast('Enter chips', 'info');
       return false;
     }
     if (chips < n) {
@@ -888,7 +882,7 @@ export function GameStateProvider({ children }) {
         ['SLEEP_HOUSE', 'INK_HOUSE', 'CRAFT_HOUSE', 'COIN_GENERATOR'].includes(b.buildingType)
     );
     if (upgradable.length < 4 || !upgradable.every((b) => (b.level || 1) >= 3)) {
-      showToast('Repair & upgrade 4 houses to Lvl 3 before Prestige', 'error');
+      showToast('Need 4× L3 houses', 'error');
       return false;
     }
     const next = prestigeLevel + 1;
@@ -912,7 +906,7 @@ export function GameStateProvider({ children }) {
     setBuggyTrackT(0);
     writeBuggySave({ mountedParts: [], carriedPart: null, remaining: [], scattered: false });
     soundEngine.playSuccessSound();
-    showToast(`Prestige ${next} — ruins reset · +${next * 5}% stealth bonus`, 'success');
+    showToast(`Prestige ${next}`, 'success');
     return true;
   };
 
@@ -947,10 +941,7 @@ export function GameStateProvider({ children }) {
     persistBuggy({ remaining: next, carriedPart: part.id, scattered: true });
     soundEngine.playClickSound();
     const spec = cartPartById(part.id);
-    showToast(
-      `Picked up ${spec?.label || 'part'} · carry it to the garage and Hold F`,
-      'success'
-    );
+    showToast(`${spec?.label || 'Part'} · Hold F at garage`, 'success');
     return true;
   };
 
@@ -998,23 +989,17 @@ export function GameStateProvider({ children }) {
     mountHoldRef.current.progress = 0;
     setMountProgress(0);
     soundEngine.playBuildSound();
-    const wheelsOn = nextMounted.filter((id) => WHEEL_PART_IDS.includes(id)).length;
-    const bodyOn = nextMounted.filter((id) => BODY_PART_IDS.includes(id)).length;
     if (done) {
-      showToast('Palette buggy ready — press E to sit', 'success');
+      showToast('Buggy ready · E', 'success');
     } else {
-      const miss = CART_PARTS.find((p) => !nextMounted.includes(p.id));
-      showToast(
-        `Snapped on · wheels ${wheelsOn}/4 · body ${bodyOn}/5${miss ? ` · next ${miss.label}` : ''}`,
-        'success'
-      );
+      showToast('Part mounted', 'success');
     }
     return true;
   };
 
   const sitInBuggy = (role = 'driver') => {
     if (!garageComplete) {
-      showToast('Find all 4 wheels and 5 color skins, then snap them on at the garage', 'info');
+      showToast('Find remaining parts', 'info');
       return false;
     }
     setBuggySeated(true);
@@ -1029,13 +1014,13 @@ export function GameStateProvider({ children }) {
         trackT: host ? buggyTrackT : undefined,
       }).catch(() => {});
     }
-    showToast(role === 'passenger' ? 'Passenger seat · Leave anytime' : 'Driver seat · W/S gears', 'success');
+    showToast(role === 'passenger' ? 'Passenger' : 'Driver · W/S', 'success');
     return true;
   };
 
   const standFromBuggy = () => {
     if (buggyGear !== 0 && visitRole !== 'guest') {
-      showToast('Park first — gear down to 0', 'info');
+      showToast('Park first', 'info');
       return false;
     }
     setBuggySeated(false);
@@ -1085,7 +1070,7 @@ export function GameStateProvider({ children }) {
 
   const applyHostSnapshot = (snap) => {
     if (!snap || typeof snap !== 'object') return;
-    if (Array.isArray(snap.buildings)) setBuildings(snap.buildings);
+    if (Array.isArray(snap.buildings)) setBuildings(migrateHouseFootprints(snap.buildings));
     if (snap.paintedTiles && typeof snap.paintedTiles === 'object') setPaintedTiles(snap.paintedTiles);
     const parts = Array.isArray(snap.mountedParts) ? snap.mountedParts.filter((id) => CART_PART_IDS.includes(id)) : [];
     setMountedParts(parts);
@@ -1097,7 +1082,7 @@ export function GameStateProvider({ children }) {
   const restoreHomeBackup = () => {
     const home = homeBackupRef.current;
     if (!home) return;
-    setBuildings(home.buildings);
+    setBuildings(migrateHouseFootprints(home.buildings));
     setPaintedTiles(home.paintedTiles);
     setMountedParts(home.mountedParts);
     setPartSpawns(home.partSpawns);
@@ -1120,7 +1105,7 @@ export function GameStateProvider({ children }) {
     setPendingInvite(null);
     setVisitSpawnToken((n) => n + 1);
     if (role === 'guest') applyHostSnapshot(session.snapshot);
-    showToast(role === 'guest' ? `Arrived at ${session.hostName}'s fortress` : `${session.guestName} is arriving`, 'success');
+    showToast(role === 'guest' ? `Visit ${session.hostName}` : `${session.guestName} arriving`, 'success');
   };
 
   const endVisit = async ({ silent = false, kicked = false } = {}) => {
@@ -1142,19 +1127,19 @@ export function GameStateProvider({ children }) {
     setBuggySeated(false);
     setBuggyGear(0);
     if (!silent) {
-      showToast(kicked ? 'The host ended the visit' : 'Visit ended', 'info');
+      showToast(kicked ? 'Visit ended' : 'Visit ended', 'info');
     }
   };
   endVisitRef.current = endVisit;
 
   const invitePlayer = async (guestId) => {
     if (!garageComplete || !buggySeated) {
-      showToast('Sit in the finished buggy to invite', 'info');
+      showToast('Sit to invite', 'info');
       return false;
     }
     try {
       const res = await sendVisitInvite(userId, guestId);
-      showToast(`Invite sent to ${res.guestName || 'player'}`, 'success');
+      showToast('Invite sent', 'success');
       return true;
     } catch (e) {
       showToast(e?.data?.error || e.message || 'Could not send invite', 'error');

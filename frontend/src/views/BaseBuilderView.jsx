@@ -6,10 +6,11 @@ import BottomBuildDock from '../components/hud/BottomBuildDock.jsx';
 import BaseStatusPanel from '../components/hud/BaseStatusPanel.jsx';
 import MakeupHousePanel from '../components/hud/MakeupHousePanel.jsx';
 import HudBanner from '../components/ui/HudBanner.jsx';
+import HudHeader from '../components/ui/HudHeader.jsx';
 import ClayPanel from '../components/ui/ClayPanel.jsx';
 import ClayButton from '../components/ui/ClayButton.jsx';
 import GameMap from '../gamemap/GameMap.jsx';
-import { useGameState, REPAIR_BUILDING_COST, GUIDE_STEPS } from '../state/GameStateContext.jsx';
+import { useGameState, GUIDE_STEPS } from '../state/GameStateContext.jsx';
 import { GATE_SPAWN_TILE, WALK_TILE_SECONDS } from '../gamemap/mapConfig.js';
 import { collectSolidTiles } from '../gamemap/occupancy.js';
 import { isNearGarage } from '../gamemap/paletteBuggy.js';
@@ -178,14 +179,14 @@ export default function BaseBuilderView() {
       collectSolidTiles({
         buildings,
         decorTiles: listDecorOccupiedTiles(BASE_DECOR_SEED, buildings),
+        blockGarage: !buggySeated,
       }),
-    [buildings]
+    [buildings, buggySeated]
   );
   const solidRef = useRef(solidTiles);
   solidRef.current = solidTiles;
 
   const nearRuin = findRuinNear(buildings, walker.column, walker.row);
-  const nearRepaired = findRepairedNear(buildings, walker.column, walker.row);
   const nearActive = !!(activeRuin && nearRuin && nearRuin.id === activeRuin.id);
   const nearGarage = isNearGarage(walker.column, walker.row);
   const movingBuilding = buildings.find((b) => b.id === movingBuildingId) || null;
@@ -238,7 +239,7 @@ export default function BaseBuilderView() {
     const res = brushFnRef.current.paintTiles(tiles);
     if (res.stop) {
       brushFnRef.current.setBrush((b) => ({ ...b, on: false }));
-      showToast('Brush off — out of ink or color quota', 'error');
+      showToast('Brush off', 'error');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [walker.column, walker.row, brush.on, brush.size, brush.erase, selectedColor]);
@@ -344,8 +345,8 @@ export default function BaseBuilderView() {
         if (screen) {
           const same =
             lastCompass &&
-            Math.abs(lastCompass.nx - screen.nx) < 0.04 &&
-            Math.abs(lastCompass.ny - screen.ny) < 0.04 &&
+            Math.abs(lastCompass.nx - screen.nx) < 0.016 &&
+            Math.abs(lastCompass.ny - screen.ny) < 0.016 &&
             lastCompass.onScreen === screen.onScreen;
           if (!same) {
             lastCompass = screen;
@@ -385,7 +386,7 @@ export default function BaseBuilderView() {
         const dir = stepDirection(yaw, forward, strafe);
         const step = attemptStep(walkerRef.current, dir, solidRef.current);
         if (step.ok) {
-          moveCooldown = (WALK_TILE_SECONDS * (step.diagonal ? Math.SQRT2 : 1) / sprintMul) * 0.92;
+          moveCooldown = WALK_TILE_SECONDS * (step.diagonal ? Math.SQRT2 : 1) / sprintMul;
           soundEngine.playFootstepSound(sp.sprinting);
           setWalker((prev) => ({ ...prev, column: step.column, row: step.row }));
         } else if (step.blocked) {
@@ -434,8 +435,8 @@ export default function BaseBuilderView() {
       if (screen) {
         const same =
           lastCompass &&
-          Math.abs(lastCompass.nx - screen.nx) < 0.04 &&
-          Math.abs(lastCompass.ny - screen.ny) < 0.04 &&
+          Math.abs(lastCompass.nx - screen.nx) < 0.016 &&
+          Math.abs(lastCompass.ny - screen.ny) < 0.016 &&
           lastCompass.onScreen === screen.onScreen;
         if (!same) {
           lastCompass = screen;
@@ -529,7 +530,7 @@ export default function BaseBuilderView() {
         const nearby = findRepairedNear(mv.buildings, here.column, here.row);
         const targetId = nearby?.id || mv.selectedBuildingId;
         if (targetId) mv.beginMoveBuilding(targetId);
-        else showToast('Walk next to a repaired house · press M to move', 'info');
+        else showToast('Stand by a house · M', 'info');
       }
     };
     const up = (e) => keys.current.delete(e.key);
@@ -575,9 +576,9 @@ export default function BaseBuilderView() {
     const building = buildings.find((b) => b.id === buildingId);
     if (building?.ruined) {
       if (guideActive && activeRuinId && building.id !== activeRuinId) {
-        showToast('Follow the marker — rebuild that house first', 'info');
+        showToast('Follow the marker', 'info');
       } else {
-        showToast('Walk to this ruin and hold F to rebuild', 'info');
+        showToast('Hold F to rebuild', 'info');
       }
       handleBuildingSelect(buildingId);
       return;
@@ -586,30 +587,24 @@ export default function BaseBuilderView() {
   };
 
   const hint = movingBuilding
-    ? `Moving ${movingBuilding.buildingType.replace(/_/g, ' ')} · click a tile or M to drop · Esc cancel`
+    ? 'Click a tile to drop'
     : buggySeated
       ? visitRole === 'guest'
-        ? 'Passenger · E leave seat'
-        : `Gear ${buggyGear} · W/S shift · E stand when parked`
+        ? 'E leave'
+        : `Gear ${buggyGear} · E stand`
       : nearGarage && garageComplete
-        ? 'Palette buggy ready · E to sit'
+        ? 'E sit'
         : nearGarage && carriedPart
-          ? 'Hold F to snap this part onto the ghost buggy'
+          ? 'Hold F to mount'
           : carriedPart
-            ? 'Carry the part to the dark garage pad · Hold F'
+            ? 'Carry to garage'
             : nearActive
-      ? `Hold F to rebuild (${REPAIR_BUILDING_COST.coins}c / ${REPAIR_BUILDING_COST.ink} ink)`
-      : nearRuin && guideActive
-        ? 'Follow the marker to the highlighted ruin'
-        : nearRuin
-          ? `Ruin: ${nearRuin.buildingType.replace(/_/g, ' ')} · hold F (${REPAIR_BUILDING_COST.coins}c / ${REPAIR_BUILDING_COST.ink} ink)`
-          : nearRepaired
-            ? `${nearRepaired.buildingType.replace(/_/g, ' ')} · M to move · click to paint`
-            : brush.on
-              ? `Brush ON · ${brush.erase ? 'erasing' : 'painting'} ${brush.size}×${brush.size} under your feet · E off · Q size · R ${brush.erase ? 'paint' : 'eraser'} · 1–5 color`
-              : isPov
-                ? 'WASD · Mouse look · E walk-brush · 1–5 color · hold F rebuild · M move · V map'
-                : 'WASD walk · hold F to rebuild · M move a house · V for character POV';
+              ? 'Hold F'
+              : nearRuin && guideActive
+                ? 'Follow marker'
+                : brush.on
+                  ? `Brush ${brush.size}×${brush.size}`
+                  : null;
 
   return (
     <div className="relative w-full h-full overflow-hidden bg-clay-bg">
@@ -640,25 +635,30 @@ export default function BaseBuilderView() {
         pickupAnim={pickupAnim}
       />
 
-      <header className="absolute top-3 left-4 right-4 z-50 flex items-start justify-between pointer-events-none gap-3">
-        <HudBanner
-          icon="🏠"
-          title="Your Base"
-          subtitle={
-            movingBuilding
-              ? `Moving ${movingBuilding.buildingType.replace(/_/g, ' ')} · drop on a tile`
-              : guideActive
-                ? `Rebuild ${repairedCount}/6 · hold F`
-                : brush.on
-                ? `Walk-brush ${brush.size}×${brush.size} · ${brush.erase ? 'eraser' : selectedColor}`
-                : isPov
-                  ? 'Character POV · E to paint as you walk'
-                  : 'Map view · Click paint · E walk-brush'
-          }
-        />
-        <NavigationTabs />
-        <TopResourceBar />
-      </header>
+      <HudHeader
+        left={
+          <HudBanner
+            title="Base"
+            subtitle={
+              movingBuilding
+                ? 'Drop on a tile'
+                : guideActive
+                  ? `${repairedCount}/6`
+                  : brush.on
+                    ? `Brush ${brush.size}×${brush.size}`
+                    : isPov
+                      ? 'POV'
+                      : null
+            }
+          />
+        }
+        right={
+          <>
+            <NavigationTabs />
+            <TopResourceBar />
+          </>
+        }
+      />
 
       <BuildQuestHud
         guideStep={guideStep}
@@ -671,44 +671,41 @@ export default function BaseBuilderView() {
         onDismissMoveTip={dismissMoveTip}
       />
 
-      {guideStep !== GUIDE_STEPS.REBUILD && guideStep !== GUIDE_STEPS.WELCOME && (
-        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-40 pointer-events-none">
-          <ClayPanel className="px-4 py-1.5 rounded-full text-[11px] font-bold text-clay-text">
+      {hint && guideStep !== GUIDE_STEPS.REBUILD && guideStep !== GUIDE_STEPS.WELCOME && (
+        <div className="absolute top-[4.75rem] left-1/2 -translate-x-1/2 z-40 pointer-events-none">
+          <ClayPanel className="h-11 px-3.5 rounded-2xl text-[11px] font-semibold text-clay-text flex items-center">
             {hint}
           </ClayPanel>
         </div>
       )}
 
-      <aside className="absolute right-4 top-28 z-40 hidden md:flex flex-col items-end gap-3">
-        <BaseStatusPanel
-          selectedTile={selectedTile}
-          onBuildClick={() => setSelectedTool('PAINT')}
-        />
-        <div className="flex flex-col gap-2 pointer-events-auto">
+      <aside className="absolute right-4 top-[4.75rem] z-40 hidden md:flex flex-col items-end gap-2">
+        <BaseStatusPanel />
+        <div className="flex flex-col gap-1.5 pointer-events-auto">
           <ClayButton
             variant="ghost"
             onClick={() => setCameraMode((m) => (m === 'chase' ? 'iso' : 'chase'))}
-            className="w-10 h-10 rounded-2xl flex items-center justify-center"
-            aria-label={isPov ? 'Switch to map view' : 'Switch to character POV'}
-            title={isPov ? 'Map view (V)' : 'Character POV (V)'}
+            className="w-9 h-9 rounded-xl flex items-center justify-center"
+            aria-label={isPov ? 'Map view' : 'POV'}
+            title={isPov ? 'Map (V)' : 'POV (V)'}
           >
-            {isPov ? <Map size={16} /> : <Eye size={16} />}
+            {isPov ? <Map size={15} /> : <Eye size={15} />}
           </ClayButton>
           <ClayButton
             variant="ghost"
             onClick={() => sceneApi.current && sceneApi.current.zoomIn()}
-            className="w-10 h-10 rounded-2xl flex items-center justify-center"
+            className="w-9 h-9 rounded-xl flex items-center justify-center"
             aria-label="Zoom in"
           >
-            <Plus size={16} />
+            <Plus size={15} />
           </ClayButton>
           <ClayButton
             variant="ghost"
             onClick={() => sceneApi.current && sceneApi.current.zoomOut()}
-            className="w-10 h-10 rounded-2xl flex items-center justify-center"
+            className="w-9 h-9 rounded-xl flex items-center justify-center"
             aria-label="Zoom out"
           >
-            <Minus size={16} />
+            <Minus size={15} />
           </ClayButton>
         </div>
       </aside>
@@ -717,7 +714,7 @@ export default function BaseBuilderView() {
         stamina={stamina.stamina}
         sprinting={stamina.sprinting}
         exhausted={stamina.exhausted}
-        className="absolute left-4 bottom-3 z-40"
+        className="absolute left-4 bottom-4 z-40"
       />
 
       {!isVisitGuest && <BottomBuildDock />}

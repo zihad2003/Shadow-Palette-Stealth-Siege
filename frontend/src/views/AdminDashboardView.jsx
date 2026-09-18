@@ -445,9 +445,8 @@ export default function AdminDashboardView() {
                   value={form.characterModel}
                   onChange={(e) => setForm((f) => ({ ...f, characterModel: Number(e.target.value) }))}
                 >
-                  <option value={1}>1 — Shadow Ninja</option>
-                  <option value={2}>2 — Forest Scout</option>
-                  <option value={3}>3 — Phantom Ghost</option>
+                  <option value={1}>1 — Male Operative</option>
+                  <option value={2}>2 — Female Operative</option>
                 </select>
               </Field>
             </div>

@@ -2,7 +2,7 @@ import { MAP_COLS, MAP_ROWS } from '../gamemap/mapConfig.js';
 import { canEnterTile } from '../gamemap/occupancy.js';
 
 /** Turn speed in radians/second when steering with A/D. */
-export const TURN_RATE = 2.6;
+export const TURN_RATE = 2.05;
 
 /**
  * Quantize camera-relative input into an 8-way tile step.
@@ -35,8 +35,8 @@ const clampRow = (r) => Math.max(0, Math.min(MAP_ROWS - 1, r));
  */
 export function attemptStep(pos, dir, solids) {
   if (!dir) return { ok: false };
-  const column = clampCol(pos.column + dir.dCol);
-  const row = clampRow(pos.row + dir.dRow);
+  const column = clampCol(Math.round(pos.column) + dir.dCol);
+  const row = clampRow(Math.round(pos.row) + dir.dRow);
   if (column === pos.column && row === pos.row) return { ok: false };
 
   const diagonal = column !== pos.column && row !== pos.row;

@@ -24,8 +24,8 @@ export function createStarterRuins() {
     buildingType: s.buildingType,
     xPos: s.xPos,
     yPos: s.yPos,
-    footprintWidth: 2,
-    footprintHeight: 2,
+    footprintWidth: 3,
+    footprintHeight: 3,
     hexColor: '#9A958C',
     level: 1,
     ruined: true,
@@ -34,8 +34,8 @@ export function createStarterRuins() {
 
 export function buildingCoversTile(building, column, row) {
   if (!building) return false;
-  const w = building.footprintWidth || 2;
-  const h = building.footprintHeight || 2;
+  const w = building.footprintWidth || 3;
+  const h = building.footprintHeight || 3;
   return (
     column >= building.xPos &&
     column < building.xPos + w &&
@@ -108,8 +108,8 @@ export function nextGuideRuin(buildings, fromTile = GATE_SPAWN_TILE) {
   const fx = fromTile.column ?? fromTile.x ?? GATE_SPAWN_TILE.column;
   const fy = fromTile.row ?? fromTile.y ?? GATE_SPAWN_TILE.row;
   return [...ruins].sort((a, b) => {
-    const da = Math.hypot(a.xPos + (a.footprintWidth || 2) / 2 - fx, a.yPos + (a.footprintHeight || 2) / 2 - fy);
-    const db = Math.hypot(b.xPos + (b.footprintWidth || 2) / 2 - fx, b.yPos + (b.footprintHeight || 2) / 2 - fy);
+    const da = Math.hypot(a.xPos + (a.footprintWidth || 3) / 2 - fx, a.yPos + (a.footprintHeight || 3) / 2 - fy);
+    const db = Math.hypot(b.xPos + (b.footprintWidth || 3) / 2 - fx, b.yPos + (b.footprintHeight || 3) / 2 - fy);
     return da - db;
   })[0];
 }

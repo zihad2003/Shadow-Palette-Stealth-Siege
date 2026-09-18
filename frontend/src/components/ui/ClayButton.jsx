@@ -23,9 +23,8 @@ export default function ClayButton({
       type={type}
       disabled={disabled}
       className={`${VARIANTS[variant] || VARIANTS.ghost} ${className}`}
-      whileHover={disabled ? undefined : { y: -1 }}
-      whileTap={disabled ? undefined : { y: 4 }}
-      transition={{ duration: 0.12, ease: 'easeOut' }}
+      whileTap={disabled ? undefined : { scale: 0.97 }}
+      transition={{ duration: 0.08, ease: 'easeOut' }}
       {...rest}
     >
       {children}

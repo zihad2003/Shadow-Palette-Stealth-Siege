@@ -4,14 +4,13 @@ import {
   MAP_COLS,
   MAP_ROWS,
   TILE_HEIGHT,
-  TILE_PITCH,
   LARGE_MAP,
   MAP_COLORS,
   tileWorldPos,
   SEARCHLIGHT_TILE,
   GATE_SPAWN_TILE,
 } from './mapConfig.js';
-import { isDecorBannedTile } from './occupancy.js';
+import { isStaticDecorBanned, buildingCoversTile, tileKey } from './occupancy.js';
 import { GAME_COLORS, GAME_COLOR_KEYS } from '../colors.js';
 
 function hash(n, salt = 0) {
@@ -408,11 +407,9 @@ function pickMaker(n, column, row) {
   return pool[Math.floor(hash(n, 3) * pool.length)];
 }
 
-/**
- * Deterministic list of tiles occupied by courtyard props (same as visuals).
- */
-export function listDecorOccupiedTiles(seed = 7, buildings = []) {
+function collectDecorPlacements(seed = 7) {
   const used = new Set();
+  const tiles = [];
   const target = LARGE_MAP ? 72 : 28;
   let placed = 0;
   let attempts = 0;
@@ -420,28 +417,46 @@ export function listDecorOccupiedTiles(seed = 7, buildings = []) {
   while (placed < target && attempts < target * 40) {
     attempts += 1;
     const n = seed * 97 + attempts * 13;
-    const column = 1 + Math.floor(hash(n, 1) * (MAP_COLS - 2));
-    const row = 1 + Math.floor(hash(n, 2) * (MAP_ROWS - 2));
-    const key = `${column},${row}`;
-    if (used.has(key) || isDecorBannedTile(column, row, buildings)) continue;
+    const column = 2 + Math.floor(hash(n, 1) * (MAP_COLS - 4));
+    const row = 2 + Math.floor(hash(n, 2) * (MAP_ROWS - 4));
+    const key = tileKey(column, row);
+    if (used.has(key) || isStaticDecorBanned(column, row)) continue;
     used.add(key);
+    tiles.push({ column, row, key, n });
     placed += 1;
   }
 
   const edgeStep = LARGE_MAP ? 5 : 3;
-  for (let c = 2; c < MAP_COLS - 2; c += edgeStep) {
-    [1, MAP_ROWS - 2].forEach((r) => {
-      if (isDecorBannedTile(c, r, buildings)) return;
-      used.add(`${c},${r}`);
+  for (let c = 3; c < MAP_COLS - 3; c += edgeStep) {
+    [2, MAP_ROWS - 3].forEach((r, idx) => {
+      if (isStaticDecorBanned(c, r)) return;
+      const key = tileKey(c, r);
+      if (used.has(key)) return;
+      used.add(key);
+      tiles.push({ column: c, row: r, key, n: seed + c * 17 + idx, lantern: true });
     });
   }
-  for (let r = 3; r < MAP_ROWS - 3; r += edgeStep) {
-    [1, MAP_COLS - 2].forEach((c) => {
-      if (isDecorBannedTile(c, r, buildings)) return;
-      used.add(`${c},${r}`);
+  for (let r = 4; r < MAP_ROWS - 4; r += edgeStep) {
+    [2, MAP_COLS - 3].forEach((c, idx) => {
+      if (isStaticDecorBanned(c, r)) return;
+      const key = tileKey(c, r);
+      if (used.has(key)) return;
+      used.add(key);
+      tiles.push({ column: c, row: r, key, n: seed + r * 19 + idx + 99, lantern: true });
     });
   }
+  return tiles;
+}
 
+/**
+ * Deterministic list of tiles occupied by courtyard props (same as visuals).
+ */
+export function listDecorOccupiedTiles(seed = 7, buildings = []) {
+  const used = new Set();
+  collectDecorPlacements(seed).forEach((p) => {
+    if (buildings.some((b) => buildingCoversTile(b, p.column, p.row))) return;
+    used.add(p.key);
+  });
   return used;
 }
 
@@ -453,57 +468,18 @@ export function createInteriorDecor({ seed = 7, buildings = [] } = {}) {
   const group = new THREE.Group();
   group.name = 'InteriorDecor';
 
-  const target = LARGE_MAP ? 72 : 28;
-  const used = new Set();
-  let placed = 0;
-  let attempts = 0;
-
-  while (placed < target && attempts < target * 40) {
-    attempts += 1;
-    const n = seed * 97 + attempts * 13;
-    const column = 1 + Math.floor(hash(n, 1) * (MAP_COLS - 2));
-    const row = 1 + Math.floor(hash(n, 2) * (MAP_ROWS - 2));
-    const key = `${column},${row}`;
-    if (used.has(key) || isDecorBannedTile(column, row, buildings)) continue;
-    used.add(key);
-
-    const maker = pickMaker(n, column, row);
-    const prop = noRaycast(maker(n));
-    const p = tileWorldPos(column, row);
-    const jitterX = (hash(n, 4) - 0.5) * TILE_PITCH * 0.22;
-    const jitterZ = (hash(n, 5) - 0.5) * TILE_PITCH * 0.22;
-    prop.position.set(p.x + jitterX, TILE_HEIGHT, p.z + jitterZ);
-    prop.rotation.y = hash(n, 6) * Math.PI * 2;
-    prop.scale.setScalar(0.92 + hash(n, 7) * 0.22);
-    prop.userData.decorTile = key;
+  collectDecorPlacements(seed).forEach((spot) => {
+    if (buildings.some((b) => buildingCoversTile(b, spot.column, spot.row))) return;
+    const maker = spot.lantern ? lantern : pickMaker(spot.n, spot.column, spot.row);
+    const prop = noRaycast(maker(spot.n));
+    const p = tileWorldPos(spot.column, spot.row);
+    prop.position.set(p.x, TILE_HEIGHT, p.z);
+    if (!spot.lantern) prop.rotation.y = hash(spot.n, 6) * Math.PI * 2;
+    prop.scale.setScalar(spot.lantern ? 1 : 0.92 + hash(spot.n, 7) * 0.18);
+    prop.userData.decorTile = spot.key;
     prop.userData.solid = true;
     group.add(prop);
-    placed += 1;
-  }
-
-  const edgeStep = LARGE_MAP ? 5 : 3;
-  for (let c = 2; c < MAP_COLS - 2; c += edgeStep) {
-    [1, MAP_ROWS - 2].forEach((r, idx) => {
-      if (isDecorBannedTile(c, r, buildings)) return;
-      const lamp = noRaycast(lantern(seed + c * 17 + idx));
-      const p = tileWorldPos(c, r);
-      lamp.position.set(p.x, TILE_HEIGHT, p.z);
-      lamp.userData.decorTile = `${c},${r}`;
-      lamp.userData.solid = true;
-      group.add(lamp);
-    });
-  }
-  for (let r = 3; r < MAP_ROWS - 3; r += edgeStep) {
-    [1, MAP_COLS - 2].forEach((c, idx) => {
-      if (isDecorBannedTile(c, r, buildings)) return;
-      const lamp = noRaycast(lantern(seed + r * 19 + idx + 99));
-      const p = tileWorldPos(c, r);
-      lamp.position.set(p.x, TILE_HEIGHT, p.z);
-      lamp.userData.decorTile = `${c},${r}`;
-      lamp.userData.solid = true;
-      group.add(lamp);
-    });
-  }
+  });
 
   return group;
 }

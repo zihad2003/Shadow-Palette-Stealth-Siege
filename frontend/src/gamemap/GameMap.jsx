@@ -11,7 +11,7 @@ import { applyGrayscaleWorld, desaturateObject } from './applyGrayscale.js';
 import { createSearchlight } from './Searchlight.js';
 import { createMakeupHouse } from './MakeupHouse.js';
 import { createWallBreakFX } from './WallBreakFX.js';
-import { buildGameHouse, buildRuinedHouse, placeHouseOnTile, createGamePatrolRobot, tickBuildingMotion, buildHouseBlueprint, tintBlueprint, createGuideMarker, createRebuildFX, tickRebuildFX } from './buildStructure.js';
+import { buildGameHouse, buildRuinedHouse, placeHouseOnTile, createGamePatrolRobot, tickBuildingMotion, buildHouseBlueprint, tintBlueprint, createGuideMarker, tickGuideMarker, createRebuildFX, tickRebuildFX } from './buildStructure.js';
 import { createAttacker, tickCharacter } from '../character/buildCharacter.js';
 import {
   buildPaletteBuggy,
@@ -40,6 +40,8 @@ import {
 } from './mapConfig.js';
 import { DEFAULT_SEARCHLIGHT_LEVEL } from '../raid/stealthConstants.js';
 import { isTileInBeam } from '../raid/SearchlightSensor.js';
+import { getGameFootprint } from './placeUtils.js';
+import { HOUSE_MESH_REV } from './houseKit.js';
 
 export default function GameMap({
   onTileClick,
@@ -278,8 +280,8 @@ export default function GameMap({
     };
 
     const makeHouseMesh = (b) => {
-      const w = b.footprintWidth || 2;
-      const h = b.footprintHeight || 2;
+      const w = b.footprintWidth || getGameFootprint(b.buildingType).w;
+      const h = b.footprintHeight || getGameFootprint(b.buildingType).h;
       const house = b.ruined
         ? buildRuinedHouse(b.buildingType, w, h)
         : buildGameHouse(b.buildingType, b.hexColor, b.level || 1, w, h);
@@ -290,6 +292,7 @@ export default function GameMap({
       house.userData.yPos = b.yPos;
       house.userData.hexColor = b.hexColor;
       house.userData.level = b.level || 1;
+      house.userData.meshRev = HOUSE_MESH_REV;
       house.traverse((n) => {
         n.userData.buildingId = b.id;
         n.userData.ruined = !!b.ruined;
@@ -314,15 +317,16 @@ export default function GameMap({
       });
 
       list.forEach((b) => {
-        const w = b.footprintWidth || 2;
-        const hgt = b.footprintHeight || 2;
+        const w = b.footprintWidth || getGameFootprint(b.buildingType).w;
+        const hgt = b.footprintHeight || getGameFootprint(b.buildingType).h;
         const existing = byId.get(b.id);
         const ruined = !!b.ruined;
         if (
           existing &&
           existing.userData.ruined === ruined &&
           existing.userData.hexColor === b.hexColor &&
-          existing.userData.level === (b.level || 1)
+          existing.userData.level === (b.level || 1) &&
+          existing.userData.meshRev === HOUSE_MESH_REV
         ) {
           const dest = tileWorldPos(b.xPos + (w - 1) / 2, b.yPos + (hgt - 1) / 2);
           const dist = Math.hypot(dest.x - existing.position.x, dest.z - existing.position.z);
@@ -378,8 +382,8 @@ export default function GameMap({
         selectRing.visible = false;
         return;
       }
-      const w = building.footprintWidth || 2;
-      const h = building.footprintHeight || 2;
+      const w = building.footprintWidth || getGameFootprint(building.buildingType).w;
+      const h = building.footprintHeight || getGameFootprint(building.buildingType).h;
       const cx = building.xPos + (w - 1) / 2;
       const cy = building.yPos + (h - 1) / 2;
       const p = tileWorldPos(cx, cy);
@@ -436,7 +440,7 @@ export default function GameMap({
         }
         buggyMesh = buildPaletteBuggy(parts);
         lastPartSig = sig;
-        buggyMesh.scale.setScalar(1.35);
+        buggyMesh.scale.setScalar(1.48);
         scene.add(buggyMesh);
       }
       buggyMesh.visible = true;
@@ -524,6 +528,12 @@ export default function GameMap({
         if (attackerMesh) attackerMesh.visible = false;
         return;
       }
+      const charSig = `${data.characterModel || 1}|${data.camoColor || 'BLUE'}|${cameraModeRef.current}`;
+      if (attackerMesh && attackerMesh.userData.charSig !== charSig) {
+        scene.remove(attackerMesh);
+        disposeObject(attackerMesh);
+        attackerMesh = null;
+      }
       if (!attackerMesh) {
         attackerMesh = createAttacker({
           camoColor: data.camoColor,
@@ -531,6 +541,7 @@ export default function GameMap({
           scale: cameraModeRef.current === 'chase' ? 0.78 : 0.42,
         });
         attackerMesh.userData.isAttacker = true;
+        attackerMesh.userData.charSig = charSig;
         attackerMesh.traverse((n) => {
           n.userData.isAttacker = true;
           n.userData.keepColor = true;
@@ -573,7 +584,8 @@ export default function GameMap({
       let moved = 0;
       if (dist > 1e-4) {
         const speed = walkSpeed * attackerSmooth.sprintMul;
-        const step = Math.min(dist, speed * safeDt);
+        const ease = dist < TILE_PITCH * 0.14 ? 0.45 + 0.55 * (dist / (TILE_PITCH * 0.14)) : 1;
+        const step = Math.min(dist, speed * safeDt * ease);
         attackerSmooth.x += (dx / dist) * step;
         attackerSmooth.z += (dz / dist) * step;
         moved = step;
@@ -583,13 +595,13 @@ export default function GameMap({
       }
       // Gait speed in walk units (1 = walking, ~1.9 = sprint) — smoothed for the animator
       const instSpeed = moved / safeDt / walkSpeed;
-      attackerSmooth.speed += (instSpeed - attackerSmooth.speed) * (1 - Math.exp(-14 * dt));
+      attackerSmooth.speed += (instSpeed - attackerSmooth.speed) * (1 - Math.exp(-10 * dt));
       // Body faces the direction of travel while moving, the camera look when idle (GTA feel)
-      const targetYaw = dist > 0.05 ? Math.atan2(dx, dz) : chase.lookYaw;
+      const targetYaw = dist > 0.08 ? Math.atan2(dx, dz) : chase.lookYaw;
       let yawDiff = targetYaw - attackerSmooth.yaw;
       while (yawDiff > Math.PI) yawDiff -= Math.PI * 2;
       while (yawDiff < -Math.PI) yawDiff += Math.PI * 2;
-      attackerSmooth.yaw += yawDiff * (1 - Math.exp(-(dist > 0.05 ? 14 : 8) * dt));
+      attackerSmooth.yaw += yawDiff * (1 - Math.exp(-(dist > 0.08 ? 9 : 5.5) * dt));
       attackerMesh.position.set(attackerSmooth.x, TILE_HEIGHT, attackerSmooth.z);
       attackerMesh.rotation.y = attackerSmooth.yaw;
     };
@@ -668,8 +680,8 @@ export default function GameMap({
         });
         return;
       }
-      const w = spec.w || 2;
-      const h = spec.h || 2;
+      const w = spec.w || getGameFootprint(spec.type).w;
+      const h = spec.h || getGameFootprint(spec.type).h;
       const key = `${spec.type || 'SLEEP_HOUSE'}|${w}|${h}|${spec.level || 1}`;
       if (!blueprint || blueprint.userData.bpKey !== key) {
         if (blueprint) {
@@ -901,7 +913,7 @@ export default function GameMap({
         getGuideScreen: () => {
           if (!guideMarker.root.visible) return null;
           guideScr.copy(guideMarker.root.position);
-          guideScr.y += 1.1;
+          guideScr.y += 1.62;
           guideScr.project(camera);
           const onScreen = guideScr.z < 1 && Math.abs(guideScr.x) < 0.9 && Math.abs(guideScr.y) < 0.78;
           return { nx: guideScr.x, ny: guideScr.y, onScreen };
@@ -1115,8 +1127,8 @@ export default function GameMap({
       if (!grayscale && rebuildId && rebuildP > 0.02) {
         const b = (buildingsRef.current || []).find((x) => x.id === rebuildId);
         if (b) {
-          const w = b.footprintWidth || 2;
-          const hgt = b.footprintHeight || 2;
+          const w = b.footprintWidth || getGameFootprint(b.buildingType).w;
+          const hgt = b.footprintHeight || getGameFootprint(b.buildingType).h;
           if (!scaffold || scaffold.userData.buildingId !== rebuildId) {
             clearScaffold();
             scaffold = buildGameHouse(b.buildingType, b.hexColor || '#C9B79A', 1, w, hgt);
@@ -1155,19 +1167,17 @@ export default function GameMap({
       const guideId = grayscale ? null : activeRuinRef.current;
       const guideB = guideId ? (buildingsRef.current || []).find((x) => x.id === guideId) : null;
       if (guideB) {
-        const w = guideB.footprintWidth || 2;
-        const hgt = guideB.footprintHeight || 2;
+        const w = guideB.footprintWidth || getGameFootprint(guideB.buildingType).w;
+        const hgt = guideB.footprintHeight || getGameFootprint(guideB.buildingType).h;
         const p = tileWorldPos(guideB.xPos + (w - 1) / 2, guideB.yPos + (hgt - 1) / 2);
         guideMarker.root.visible = true;
         guideMarker.root.position.set(p.x, TILE_HEIGHT, p.z);
-        guideMarker.chevron.position.y = 1.28 + Math.sin(elapsed * 3.1) * 0.16;
-        const pulse = 1 + Math.sin(elapsed * 3.1) * 0.08;
-        guideMarker.ring.scale.set(pulse, pulse, 1);
+        tickGuideMarker(guideMarker, elapsed, camera);
         buildingsGroup.children.forEach((house) => {
           if (!house.userData.ruined) return;
           const on = house.userData.buildingId === guideId;
           house.traverse((n) => {
-            if (n.material?.emissive) n.material.emissiveIntensity = on ? 0.28 + Math.sin(elapsed * 4) * 0.14 : 0;
+            if (n.material?.emissive) n.material.emissiveIntensity = on ? 0.1 + Math.sin(elapsed * 1.4) * 0.04 : 0;
           });
         });
       } else {
@@ -1193,9 +1203,7 @@ export default function GameMap({
         if (mark) {
           guideMarker.root.visible = true;
           guideMarker.root.position.set(mark.x, TILE_HEIGHT, mark.z);
-          guideMarker.chevron.position.y = 1.28 + Math.sin(elapsed * 3.1) * 0.16;
-          const pulse = 1 + Math.sin(elapsed * 3.1) * 0.08;
-          guideMarker.ring.scale.set(pulse, pulse, 1);
+          tickGuideMarker(guideMarker, elapsed, camera);
         } else {
           guideMarker.root.visible = false;
         }

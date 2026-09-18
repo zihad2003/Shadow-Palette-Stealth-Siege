@@ -89,7 +89,7 @@ export const CHASE_CAM = {
 };
 
 /** Seconds to glide from one tile center to the next (WASD). */
-export const WALK_TILE_SECONDS = 0.28;
+export const WALK_TILE_SECONDS = 0.34;
 
 export function cameraDistance() {
   // Flat board ≠ bounding sphere: use the larger half-extent so 48×40 fills the view.

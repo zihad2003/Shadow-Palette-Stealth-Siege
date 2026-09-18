@@ -22,13 +22,12 @@ export default function MainMenuView() {
     isFirstRun,
     provisionHomeBase,
   } = useGameState();
-  const [selectedChar, setSelectedChar] = useState(characterModel || 1);
+  const [selectedChar, setSelectedChar] = useState(Number(characterModel) === 2 ? 2 : 1);
   const [selectedCamo, setSelectedCamo] = useState(camoColor || 'BLUE');
 
   const charList = [
-    { id: 1, name: 'Shadow Ninja', desc: 'Silent infiltration operative' },
-    { id: 2, name: 'Forest Scout', desc: 'Tactical camouflage specialist' },
-    { id: 3, name: 'Phantom Ghost', desc: 'High-stealth extraction operative' },
+    { id: 1, name: 'Male Operative', desc: 'Broad-frame stealth runner' },
+    { id: 2, name: 'Female Operative', desc: 'Agile infiltration specialist' },
   ];
 
   const camoList = [
@@ -83,7 +82,7 @@ export default function MainMenuView() {
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 w-full">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 w-full">
             {charList.map((c) => {
               const isSelected = selectedChar === c.id;
               return (
