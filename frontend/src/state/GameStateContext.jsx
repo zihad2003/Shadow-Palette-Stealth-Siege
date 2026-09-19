@@ -41,7 +41,7 @@ import {
 
 const GameStateContext = createContext(null);
 
-export const INTRO_DONE_KEY = 'sp_intro_done_v1';
+export const INTRO_DONE_KEY = 'sp_intro_done_v2';
 export const BUILD_GUIDE_KEY = 'sp_base_build_guide_v1';
 export const DAILY_LOGIN_KEY = 'sp_daily_login_v1';
 export const PAINT_TILE_INK = 5;
@@ -98,11 +98,14 @@ export const GRID_SIZE = MAP_COLS * MAP_ROWS;
 export const PLACEABLE_BUILDINGS = ['CRAFT_HOUSE', 'INK_HOUSE', 'SLEEP_HOUSE', 'COIN_GENERATOR'];
 
 export function GameStateProvider({ children }) {
-  // FSM: SPLASH | STORY | MAIN_MENU | PAINT_TUTORIAL | BASE_BUILDER | RAID_FINDER | STEALTH_RAID
+  // FSM: SPLASH | STORY | INTRO_* | MAIN_MENU | PAINT_TUTORIAL | BASE_BUILDER | RAID_FINDER | STEALTH_RAID
   const initialView = new URLSearchParams(window.location.search).get('view');
   const allowedViews = [
     'SPLASH',
     'STORY',
+    'INTRO_FORTRESS',
+    'INTRO_COLOR',
+    'INTRO_RAID',
     'MAIN_MENU',
     'PAINT_TUTORIAL',
     'BASE_BUILDER',
@@ -241,6 +244,15 @@ export function GameStateProvider({ children }) {
       void endVisitRef.current({ silent: true });
     }
     if (nextState === 'BASE_BUILDER') {
+      try {
+        const url = new URL(window.location.href);
+        if (url.searchParams.has('view')) {
+          url.searchParams.delete('view');
+          window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+        }
+      } catch {
+        /* ignore */
+      }
       const targetPlotId = params.plotId || activePlotId;
       setActivePlotId(targetPlotId);
       setRaidSession(null);
@@ -287,9 +299,7 @@ export function GameStateProvider({ children }) {
         }
       );
     } else if (nextState === 'MAIN_MENU') {
-      triggerLoading('Setup', '', 350, () => {
-        setGameState('MAIN_MENU');
-      });
+      setGameState('MAIN_MENU');
     } else {
       setGameState(nextState);
     }
@@ -1317,7 +1327,7 @@ export function GameStateProvider({ children }) {
     acceptPendingInvite,
     declinePendingInvite,
     endVisit,
-    missingPartLabel: missingPartLabel(),
+    missingPartLabel,
   };
 
   useEffect(() => {
@@ -1355,7 +1365,17 @@ export function GameStateProvider({ children }) {
   }, [visitRole, mountedParts, carriedPart, partSpawns]);
 
   useEffect(() => {
-    if (gameState === 'STEALTH_RAID' || gameState === 'SPLASH' || gameState === 'STORY') return undefined;
+    if (
+      gameState === 'STEALTH_RAID' ||
+      gameState === 'SPLASH' ||
+      gameState === 'STORY' ||
+      gameState === 'INTRO_FORTRESS' ||
+      gameState === 'INTRO_COLOR' ||
+      gameState === 'INTRO_RAID' ||
+      gameState === 'MAIN_MENU' ||
+      gameState === 'PAINT_TUTORIAL'
+    )
+      return undefined;
     const beat = () => {
       postPresenceHeartbeat({
         userId,
@@ -1371,7 +1391,17 @@ export function GameStateProvider({ children }) {
   }, [gameState, userId, username, characterModel, camoColor]);
 
   useEffect(() => {
-    if (gameState === 'STEALTH_RAID' || gameState === 'SPLASH' || gameState === 'STORY') return undefined;
+    if (
+      gameState === 'STEALTH_RAID' ||
+      gameState === 'SPLASH' ||
+      gameState === 'STORY' ||
+      gameState === 'INTRO_FORTRESS' ||
+      gameState === 'INTRO_COLOR' ||
+      gameState === 'INTRO_RAID' ||
+      gameState === 'MAIN_MENU' ||
+      gameState === 'PAINT_TUTORIAL'
+    )
+      return undefined;
     const poll = async () => {
       try {
         const box = await fetchVisitInbox(userId);

@@ -1,8 +1,12 @@
 import React from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
 import { GameStateProvider, useGameState } from './state/GameStateContext.jsx';
 import SplashView from './views/SplashView.jsx';
-import StoryView from './views/StoryView.jsx';
+import {
+  StoryView,
+  FortressIntroView,
+  ColorIntroView,
+  RaidIntroView,
+} from './views/OnboardSlides.jsx';
 import MainMenuView from './views/MainMenuView.jsx';
 import PaintTutorialView from './views/PaintTutorialView.jsx';
 import BaseBuilderView from './views/BaseBuilderView.jsx';
@@ -15,6 +19,24 @@ import LoadingOverlay from './components/hud/LoadingOverlay.jsx';
 import ToastContainer from './components/hud/ToastContainer.jsx';
 import VisitHud from './components/hud/VisitHud.jsx';
 
+class ScreenError extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { err: null };
+  }
+  static getDerivedStateFromError(err) {
+    return { err };
+  }
+  render() {
+    if (!this.state.err) return this.props.children;
+    return (
+      <div className="w-full h-full flex items-center justify-center p-8">
+        <p className="text-[13px] text-clay-accent">{String(this.state.err.message || this.state.err)}</p>
+      </div>
+    );
+  }
+}
+
 function GameViewRouter() {
   const { gameState } = useGameState();
 
@@ -23,6 +45,12 @@ function GameViewRouter() {
       <SplashView />
     ) : gameState === 'STORY' ? (
       <StoryView />
+    ) : gameState === 'INTRO_FORTRESS' ? (
+      <FortressIntroView />
+    ) : gameState === 'INTRO_COLOR' ? (
+      <ColorIntroView />
+    ) : gameState === 'INTRO_RAID' ? (
+      <RaidIntroView />
     ) : gameState === 'MAIN_MENU' ? (
       <MainMenuView />
     ) : gameState === 'PAINT_TUTORIAL' ? (
@@ -37,33 +65,23 @@ function GameViewRouter() {
       <BaseBuilderView />
     );
 
-  return (
-    <AnimatePresence mode="wait">
-      <motion.div
-        key={gameState}
-        className="w-full h-full"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        transition={{ duration: 0.16, ease: 'easeOut' }}
-      >
-        {view}
-      </motion.div>
-    </AnimatePresence>
-  );
+  return <div className="w-full h-full">{view}</div>;
 }
 
 export default function App() {
   return (
     <GameStateProvider>
       <div className="w-screen h-screen overflow-hidden bg-clay-bg text-clay-text font-body relative select-none">
-        <GameViewRouter />
-        <OptionsModal />
-        <MetaEconomyPanel />
-        <LoadingOverlay />
-        <VisitHud />
-        <ToastContainer />
+        <ScreenError>
+          <GameViewRouter />
+          <OptionsModal />
+          <MetaEconomyPanel />
+          <LoadingOverlay />
+          <VisitHud />
+          <ToastContainer />
+        </ScreenError>
       </div>
     </GameStateProvider>
   );
 }
+

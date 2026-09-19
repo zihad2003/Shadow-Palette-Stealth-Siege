@@ -27,7 +27,17 @@ export default function VisitHud() {
     bumpBuggyGear,
   } = useGameState();
 
-  if (gameState === 'STEALTH_RAID' || gameState === 'SPLASH' || gameState === 'STORY') return null;
+  if (
+    gameState === 'STEALTH_RAID' ||
+    gameState === 'SPLASH' ||
+    gameState === 'STORY' ||
+    gameState === 'INTRO_FORTRESS' ||
+    gameState === 'INTRO_COLOR' ||
+    gameState === 'INTRO_RAID' ||
+    gameState === 'MAIN_MENU' ||
+    gameState === 'PAINT_TUTORIAL'
+  )
+    return null;
 
   const showParts = gameState === 'BASE_BUILDER' && !isVisitGuest;
   const showRide = gameState === 'BASE_BUILDER' && buggySeated;
@@ -120,7 +130,7 @@ export default function VisitHud() {
                   : 'Hold F'
                 : garageComplete
                   ? 'E sit'
-                  : missingPartLabel() || ''}
+                  : (typeof missingPartLabel === 'function' ? missingPartLabel() : missingPartLabel) || ''}
             </span>
           </ClayPanel>
         </div>

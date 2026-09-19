@@ -1,11 +1,10 @@
 import React, { useState, Suspense, lazy } from 'react';
-import { motion } from 'framer-motion';
 import { ArrowRight } from 'lucide-react';
 import { useGameState } from '../state/GameStateContext.jsx';
-import { COLORS } from '../colors.js';
+import { GAME_COLOR_KEYS, GAME_COLORS, COLOR_NAMES } from '../colors.js';
 import { setupPlayer } from '../api.js';
 import { soundEngine } from '../soundEngine.js';
-import ClayPanel from '../components/ui/ClayPanel.jsx';
+import OnboardShell from '../components/ui/OnboardShell.jsx';
 import ClayButton from '../components/ui/ClayButton.jsx';
 
 const CharacterPreview = lazy(() => import('../components/three/CharacterPreview.jsx'));
@@ -18,126 +17,69 @@ export default function MainMenuView() {
     camoColor,
     setCamoColor,
     transitionTo,
-    showToast,
     isFirstRun,
     provisionHomeBase,
   } = useGameState();
   const [selectedChar, setSelectedChar] = useState(Number(characterModel) === 2 ? 2 : 1);
   const [selectedCamo, setSelectedCamo] = useState(camoColor || 'BLUE');
 
-  const charList = [
-    { id: 1, name: 'Male Operative', desc: 'Broad-frame stealth runner' },
-    { id: 2, name: 'Female Operative', desc: 'Agile infiltration specialist' },
-  ];
-
-  const camoList = [
-    { key: 'RED', hex: COLORS.RED, label: 'Red' },
-    { key: 'GREEN', hex: COLORS.GREEN, label: 'Green' },
-    { key: 'BLUE', hex: COLORS.BLUE, label: 'Blue' },
-    { key: 'YELLOW', hex: COLORS.YELLOW, label: 'Yellow' },
-    { key: 'PURPLE', hex: COLORS.PURPLE, label: 'Purple' },
-  ];
-
-  const handleStartGame = async () => {
+  const handleStartGame = () => {
     soundEngine.playClickSound();
-    let plotId = null;
-    try {
-      const res = await setupPlayer(userId, selectedChar, selectedCamo);
-      plotId = res?.plotId;
-      showToast('Operative setup synchronized!', 'success');
-    } catch (e) {
-      showToast('Profile saved locally — assigning home base', 'info');
-    }
     setCharacterModel(selectedChar);
     setCamoColor(selectedCamo);
-    provisionHomeBase(plotId);
-    transitionTo(isFirstRun ? 'PAINT_TUTORIAL' : 'BASE_BUILDER', plotId ? { plotId } : {});
+    provisionHomeBase();
+    setupPlayer(userId, selectedChar, selectedCamo)
+      .then((res) => {
+        if (res?.plotId) provisionHomeBase(res.plotId);
+      })
+      .catch(() => {});
+    transitionTo(isFirstRun ? 'PAINT_TUTORIAL' : 'BASE_BUILDER');
   };
 
   return (
-    <div className="relative w-full h-full flex items-center justify-center bg-clay-bg p-6 overflow-y-auto">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_40%,rgba(244,162,97,0.12)_0%,transparent_55%)] pointer-events-none" />
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_80%_70%,rgba(42,157,143,0.1)_0%,transparent_50%)] pointer-events-none" />
-
-      <div className="relative z-10 w-full max-w-5xl grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-5 items-stretch">
-        <ClayPanel depth="deep" className="p-4 rounded-[28px] flex flex-col min-h-[320px]">
-          <p className="text-[10px] font-heading font-bold text-clay-accent uppercase tracking-widest text-center mb-1">
-            Operative Preview
-          </p>
-          <div className="flex-1 clay-inset rounded-3xl overflow-hidden h-[280px] min-h-[280px]">
-            <Suspense fallback={<div className="w-full h-full min-h-[240px]" />}>
-              <CharacterPreview characterModel={selectedChar} camoColor={selectedCamo} />
-            </Suspense>
+    <OnboardShell
+      step={5}
+      footer={
+        <div className="w-full max-w-3xl flex flex-col items-center gap-3">
+          <div className="flex items-center gap-2">
+            {[
+              { id: 1, label: 'Male' },
+              { id: 2, label: 'Female' },
+            ].map((c) => (
+              <ClayButton
+                key={c.id}
+                variant={selectedChar === c.id ? 'primary' : 'ghost'}
+                onClick={() => {
+                  soundEngine.playClickSound();
+                  setSelectedChar(c.id);
+                }}
+                className="h-11 px-5 rounded-2xl text-[12px]"
+              >
+                {c.label}
+              </ClayButton>
+            ))}
+            <span className="w-px h-6 bg-clay-muted/25 mx-1" />
+            {GAME_COLOR_KEYS.map((key) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => {
+                  soundEngine.playPaintSound();
+                  setSelectedCamo(key);
+                }}
+                className={`w-8 h-8 rounded-full clay-blob ${selectedCamo === key ? 'ring-2 ring-clay-text' : 'opacity-70'}`}
+                style={{ backgroundColor: GAME_COLORS[key] }}
+                title={COLOR_NAMES[key]}
+                aria-label={COLOR_NAMES[key]}
+              />
+            ))}
           </div>
-        </ClayPanel>
-
-        <ClayPanel depth="deep" delay={0.06} className="p-7 rounded-[28px] flex flex-col items-center gap-5">
-          <div className="text-center flex flex-col gap-1">
-            <h1 className="font-heading font-extrabold text-2xl md:text-3xl tracking-wider text-clay-text">
-              Shadow Palette
-            </h1>
-            <p className="text-xs text-clay-muted">
-              Pick your operative and starting camouflage. A new home base is assigned automatically — no map
-              selection. Recolor later at the Makeup House.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 w-full">
-            {charList.map((c) => {
-              const isSelected = selectedChar === c.id;
-              return (
-                <ClayButton
-                  key={c.id}
-                  variant={isSelected ? 'primary' : 'ghost'}
-                  onClick={() => {
-                    soundEngine.playClickSound();
-                    setSelectedChar(c.id);
-                  }}
-                  className="p-4 rounded-2xl flex flex-col items-center text-center gap-2"
-                >
-                  <h3 className="font-heading font-bold text-xs tracking-wide">{c.name}</h3>
-                  <p className={`text-[10px] ${isSelected ? 'text-clay-bg/70' : 'text-clay-muted'}`}>{c.desc}</p>
-                </ClayButton>
-              );
-            })}
-          </div>
-
-          <div className="w-full clay-inset p-4 rounded-2xl flex flex-col items-center gap-3">
-            <h3 className="font-heading font-bold text-xs text-clay-accent uppercase tracking-wider">
-              Starting Camo Color
-            </h3>
-            <p className="text-[11px] text-clay-muted text-center">
-              One color. Makeup House can change it later — never during a raid.
-            </p>
-            <div className="flex items-center gap-3">
-              {camoList.map((c) => {
-                const isSelected = selectedCamo === c.key;
-                return (
-                  <motion.button
-                    key={c.key}
-                    type="button"
-                    style={{ backgroundColor: c.hex }}
-                    onClick={() => {
-                      soundEngine.playPaintSound();
-                      setSelectedCamo(c.key);
-                    }}
-                    className={`w-11 h-11 rounded-full clay-blob ${isSelected ? 'ring-2 ring-clay-text' : ''}`}
-                    whileHover={{ y: -2 }}
-                    whileTap={{ y: 2 }}
-                    title={`${c.key} (${c.label})`}
-                    aria-label={c.key}
-                  />
-                );
-              })}
-            </div>
-          </div>
-
           <ClayButton
             variant="success"
             onClick={handleStartGame}
-            className="w-full max-w-xs py-3 rounded-2xl text-sm flex items-center justify-center gap-2"
+            className="h-11 px-8 rounded-2xl text-[12px] flex items-center gap-2"
           >
-            {isFirstRun ? 'Continue to Training' : 'Enter Your Base'} <ArrowRight size={16} />
+            {isFirstRun ? 'Train' : 'Enter base'} <ArrowRight size={14} />
           </ClayButton>
           <button
             type="button"
@@ -145,12 +87,18 @@ export default function MainMenuView() {
               soundEngine.playClickSound();
               transitionTo('ADMIN');
             }}
-            className="text-[10px] text-clay-muted hover:text-clay-accent underline-offset-2 hover:underline"
+            className="text-[10px] text-clay-muted/70 hover:text-clay-accent"
           >
-            User dashboard
+            Dashboard
           </button>
-        </ClayPanel>
+        </div>
+      }
+    >
+      <div className="w-full max-w-md h-full max-h-[min(52vh,380px)] clay-inset rounded-[28px] overflow-hidden">
+        <Suspense fallback={<div className="w-full h-full" />}>
+          <CharacterPreview characterModel={selectedChar} camoColor={selectedCamo} />
+        </Suspense>
       </div>
-    </div>
+    </OnboardShell>
   );
 }
