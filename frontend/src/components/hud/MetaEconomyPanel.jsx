@@ -4,7 +4,6 @@ import { Coins, Gem, Crown, CalendarCheck, X } from 'lucide-react';
 import {
   useGameState,
   DAILY_LOGIN_COINS,
-  PATROL_UNLOCK_RAIDS,
 } from '../../state/GameStateContext.jsx';
 import ClayPanel from '../ui/ClayPanel.jsx';
 import ClayButton from '../ui/ClayButton.jsx';
@@ -133,8 +132,11 @@ export default function MetaEconomyPanel() {
 
             <div className="clay-inset p-3.5 rounded-2xl flex flex-col gap-1.5 text-xs text-clay-muted">
               <p>
+                Robots scale 500 → 750 → 1125c. Rebuild, parts, and raids pay for the next one.
+              </p>
+              <p>
                 Successful raids: <strong className="text-clay-text">{successfulRaids}</strong>
-                {patrolUnlocked ? ' · Patrol unlocked' : ` · Patrol unlock at ${PATROL_UNLOCK_RAIDS}`}
+                {patrolUnlocked ? ' · Patrol in field' : ''}
               </p>
               <p>
                 Raid cooldown:{' '}

@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { UPGRADE_COSTS, MAKEUP_RECOLOR_INK } from '../data/raidTargets.js';
-import { GAME_COLORS, hexForColor, isGameColor } from '../colors.js';
+import { GAME_COLORS, GAME_COLOR_KEYS, COLOR_NAMES, hexForColor, isGameColor } from '../colors.js';
 import {
   placeBuilding,
   placeDefense,
@@ -30,7 +30,7 @@ import { soundEngine } from '../soundEngine.js';
 import { createRaidSession, rejectColorChange } from '../raid/RaidSession.js';
 import { MAP_COLS, MAP_ROWS } from '../gamemap/mapConfig.js';
 import { canPlaceOnGameMap, getGameFootprint, migrateHouseFootprints } from '../gamemap/placeUtils.js';
-import { createStarterRuins, REPAIR_BUILDING_COST, findRuinNear, nextGuideRuin, STARTER_HOUSE_COUNT, REBUILD_SECONDS } from '../gamemap/starterRuins.js';
+import { createStarterRuins, createMaxedHome, REPAIR_BUILDING_COST, findRuinNear, findRepairedNear, nextGuideRuin, STARTER_HOUSE_COUNT, REBUILD_SECONDS, houseLabel } from '../gamemap/starterRuins.js';
 import { GATE_SPAWN_TILE } from '../gamemap/mapConfig.js';
 import {
   DEFAULT_SEARCHLIGHT_LEVEL,
@@ -38,6 +38,16 @@ import {
   clampSearchlightLevel,
   searchlightSpec,
 } from '../raid/stealthConstants.js';
+import {
+  TASK_REWARDS,
+  ROBOT_MAX,
+  robotCost,
+  formatReward,
+  INK_CAP,
+  WORLD_SAVE_KEY,
+  MOUNT_SECONDS,
+  PICKUP_SECONDS,
+} from '../economy.js';
 
 const GameStateContext = createContext(null);
 
@@ -88,8 +98,20 @@ function writeBuggySave(data) {
     /* private mode */
   }
 }
+
+function readWorldSave() {
+  try {
+    const raw = JSON.parse(window.localStorage.getItem(WORLD_SAVE_KEY) || 'null');
+    if (!raw || typeof raw !== 'object') return null;
+    return raw;
+  } catch {
+    return null;
+  }
+}
+
 export const PATROL_UNLOCK_RAIDS = 3;
-export const PATROL_UNLOCK_COINS = 200;
+export const PATROL_UNLOCK_COINS = 500;
+export { robotCost, ROBOT_MAX };
 export const DAILY_LOGIN_COINS = 100;
 export const RAID_COOLDOWN_MS = 5 * 60 * 1000;
 export const COLOR_QUOTA_LIMIT = 0.35;
@@ -133,17 +155,21 @@ export function GameStateProvider({ children }) {
   };
   const [activePlotId, setActivePlotId] = useState(1);
 
+  const forceFullHome = new URLSearchParams(window.location.search).get('full') === '1';
+  const savedWorld = useRef(forceFullHome ? createMaxedHome() : readWorldSave()).current;
   const [userId, setUserId] = useState(12);
-  const [coins, setCoins] = useState(500);
-  const [inkEnergy, setInkEnergy] = useState(100);
-  const [chips, setChips] = useState(200);
-  const [characterModel, setCharacterModel] = useState(1);
-  const [camoColor, setCamoColor] = useState('BLUE');
+  const [coins, setCoins] = useState(() => (Number.isFinite(savedWorld?.coins) ? savedWorld.coins : 500));
+  const [inkEnergy, setInkEnergy] = useState(() => (Number.isFinite(savedWorld?.inkEnergy) ? savedWorld.inkEnergy : 100));
+  const [chips, setChips] = useState(() => (Number.isFinite(savedWorld?.chips) ? savedWorld.chips : 200));
+  const [characterModel, setCharacterModel] = useState(() => savedWorld?.characterModel || 1);
+  const [camoColor, setCamoColor] = useState(() => savedWorld?.camoColor || 'BLUE');
   const [camoReady, setCamoReady] = useState(false);
   const [raidSession, setRaidSession] = useState(null);
-  const [prestigeLevel, setPrestigeLevel] = useState(0);
-  const [successfulRaids, setSuccessfulRaids] = useState(0);
-  const [patrolUnlocked, setPatrolUnlocked] = useState(false);
+  const [prestigeLevel, setPrestigeLevel] = useState(() => savedWorld?.prestigeLevel || 0);
+  const [successfulRaids, setSuccessfulRaids] = useState(() => savedWorld?.successfulRaids || 0);
+  const [patrolUnlocked, setPatrolUnlocked] = useState(() =>
+    Array.isArray(savedWorld?.defenses) ? savedWorld.defenses.some((d) => (d.type || d.defenseType) === 'PATROL_ROBOT') : false
+  );
   const [raidCooldownUntil, setRaidCooldownUntil] = useState(0);
   const [lastDailyClaim, setLastDailyClaim] = useState(() => {
     try {
@@ -155,14 +181,38 @@ export function GameStateProvider({ children }) {
   const [isMetaOpen, setIsMetaOpen] = useState(false);
 
   // New users receive this home base automatically — no world-map plot pick
-  const [selectedColor, setSelectedColor] = useState('GREEN');
+  const [selectedColor, setSelectedColor] = useState(() => savedWorld?.selectedColor || 'GREEN');
+  const [gameDay, setGameDay] = useState(() => {
+    const n = Number(savedWorld?.gameDay);
+    return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 1;
+  });
+  const [coinBanks, setCoinBanks] = useState(() => {
+    const raw = savedWorld?.coinBanks;
+    if (!raw || typeof raw !== 'object') return {};
+    const next = {};
+    Object.entries(raw).forEach(([id, amount]) => {
+      const n = Math.floor(Number(amount) || 0);
+      if (n > 0) next[String(id)] = n;
+    });
+    return next;
+  });
   const [selectedTool, setSelectedTool] = useState('PAINT');
   /** Walk-brush: paint/erase the tiles you step on while ON. size 1 = single, 3 = 3×3. */
   const [brush, setBrush] = useState({ on: false, size: 1, erase: false });
-  const [searchlightLevel, setSearchlightLevel] = useState(DEFAULT_SEARCHLIGHT_LEVEL);
-  const [buildings, setBuildings] = useState(() => migrateHouseFootprints(createStarterRuins()));
-  const [defenses, setDefenses] = useState([]);
-  const [paintedTiles, setPaintedTiles] = useState({});
+  const [searchlightLevel, setSearchlightLevel] = useState(() =>
+    savedWorld?.searchlightLevel || DEFAULT_SEARCHLIGHT_LEVEL
+  );
+  const [buildings, setBuildings] = useState(() =>
+    migrateHouseFootprints(
+      Array.isArray(savedWorld?.buildings) && savedWorld.buildings.length
+        ? savedWorld.buildings
+        : createStarterRuins()
+    )
+  );
+  const [defenses, setDefenses] = useState(() => (Array.isArray(savedWorld?.defenses) ? savedWorld.defenses : []));
+  const [paintedTiles, setPaintedTiles] = useState(() =>
+    savedWorld?.paintedTiles && typeof savedWorld.paintedTiles === 'object' ? savedWorld.paintedTiles : {}
+  );
   const [selectedBuildingId, setSelectedBuildingId] = useState(null);
   const [movingBuildingId, setMovingBuildingId] = useState(null);
   const [rebuildProgress, setRebuildProgress] = useState(0);
@@ -177,15 +227,23 @@ export function GameStateProvider({ children }) {
   })();
   const [guideStep, setGuideStep] = useState(() => (guideDoneStored ? GUIDE_STEPS.DONE : GUIDE_STEPS.WELCOME));
   const [raidLoot, setRaidLoot] = useState(null);
-  const [nextEntityId, setNextEntityId] = useState(() => createStarterRuins().length + 1);
+  const [nextEntityId, setNextEntityId] = useState(() => {
+    const list = Array.isArray(savedWorld?.buildings) ? savedWorld.buildings : createStarterRuins();
+    const defs = Array.isArray(savedWorld?.defenses) ? savedWorld.defenses : [];
+    return Math.max(0, ...list.map((b) => Number(b.id) || 0), ...defs.map((d) => Number(d.id) || 0)) + 1;
+  });
 
-  const [raidTargetId, setRaidTargetId] = useState(34);
+  const [raidTargetId, setRaidTargetId] = useState(forceFullHome ? 21 : 34);
   const [raidData, setRaidData] = useState(null);
 
   const [isOptionsOpen, setIsOptionsOpen] = useState(false);
   const [loadingScreen, setLoadingScreen] = useState({ active: false, title: '', subtitle: '', progress: 0 });
   const [toasts, setToasts] = useState([]);
-  const buggySave = useRef(readBuggySave()).current;
+  const buggySave = useRef(
+    forceFullHome
+      ? { mountedParts: [...CART_PART_IDS], carriedPart: null, remaining: [], scattered: true }
+      : readBuggySave()
+  ).current;
   const [mountedParts, setMountedParts] = useState(() => buggySave.mountedParts);
   const [carriedPart, setCarriedPart] = useState(() => buggySave.carriedPart);
   const [partSpawns, setPartSpawns] = useState(() => buggySave.remaining);
@@ -200,6 +258,7 @@ export function GameStateProvider({ children }) {
   const [buggyTrackT, setBuggyTrackT] = useState(0);
   const [onlinePlayers, setOnlinePlayers] = useState([]);
   const [pendingInvite, setPendingInvite] = useState(null);
+  const [rideInviteOpen, setRideInviteOpen] = useState(false);
   const [visitSession, setVisitSession] = useState(null);
   const [visitRole, setVisitRole] = useState(null);
   const [visitSpawnToken, setVisitSpawnToken] = useState(0);
@@ -213,6 +272,25 @@ export function GameStateProvider({ children }) {
   visitSessionRef.current = visitSession;
   visitRoleRef.current = visitRole;
   snapshotRef.current = { buildings, paintedTiles, mountedParts, garageComplete };
+  const buildingsRef = useRef(buildings);
+  buildingsRef.current = buildings;
+  const worldRef = useRef({});
+  worldRef.current = {
+    coins,
+    inkEnergy,
+    chips,
+    buildings,
+    paintedTiles,
+    defenses,
+    camoColor,
+    characterModel,
+    searchlightLevel,
+    prestigeLevel,
+    successfulRaids,
+    selectedColor,
+    gameDay,
+    coinBanks,
+  };
 
   const showToast = (message, type = 'info') => {
     const id = Date.now() + Math.random();
@@ -220,6 +298,92 @@ export function GameStateProvider({ children }) {
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
     }, 2200);
+  };
+
+  const grantReward = (kind, label) => {
+    const r = TASK_REWARDS[kind];
+    if (!r) return;
+    if (r.coins) setCoins((v) => v + r.coins);
+    if (r.chips) setChips((v) => v + r.chips);
+    showToast(`${label} · ${formatReward(r)}`, 'success');
+  };
+
+  const saveWorld = (message = 'Saved') => {
+    try {
+      window.localStorage.setItem(WORLD_SAVE_KEY, JSON.stringify(worldRef.current));
+      if (message) showToast(message, 'success');
+      return true;
+    } catch {
+      showToast('Save failed', 'error');
+      return false;
+    }
+  };
+
+  const collectHouseCoins = (buildingId) => {
+    const id = String(buildingId);
+    const banks = { ...(worldRef.current.coinBanks || {}) };
+    const n = Math.floor(Number(banks[id]) || 0);
+    if (n <= 0) {
+      showToast('No coins yet', 'info');
+      return false;
+    }
+    banks[id] = 0;
+    const nextCoins = (Number(worldRef.current.coins) || 0) + n;
+    worldRef.current = { ...worldRef.current, coinBanks: banks, coins: nextCoins };
+    setCoinBanks(banks);
+    setCoins(nextCoins);
+    soundEngine.playSuccessSound();
+    showToast(`Collected ${n} coins`, 'success');
+    return true;
+  };
+
+  const sleepAtHouse = () => {
+    const nextDay = (Number(worldRef.current.gameDay) || 1) + 1;
+    const nextCoins = (Number(worldRef.current.coins) || 0) + DAILY_LOGIN_COINS;
+    const banks = { ...(worldRef.current.coinBanks || {}) };
+    let inkAdd = 0;
+    (worldRef.current.buildings || []).forEach((b) => {
+      if (b.ruined) return;
+      const level = b.level || 1;
+      if (b.buildingType === 'COIN_GENERATOR') {
+        const key = String(b.id);
+        banks[key] = (Number(banks[key]) || 0) + level * 8;
+      }
+      if (b.buildingType === 'INK_HOUSE') inkAdd += level * 4;
+    });
+    const nextInk = Math.min(INK_CAP, (Number(worldRef.current.inkEnergy) || 0) + inkAdd);
+    worldRef.current = {
+      ...worldRef.current,
+      gameDay: nextDay,
+      coins: nextCoins,
+      inkEnergy: nextInk,
+      coinBanks: banks,
+    };
+    setGameDay(nextDay);
+    setCoins(nextCoins);
+    setInkEnergy(nextInk);
+    setCoinBanks(banks);
+    soundEngine.playSuccessSound();
+    return saveWorld(`Day ${nextDay} · saved`);
+  };
+
+  const pickPaintColor = (key) => {
+    const next = String(key || '').trim().toUpperCase();
+    if (!isGameColor(next)) return false;
+    setSelectedColor(next);
+    setSelectedTool('PAINT');
+    setMovingBuildingId(null);
+    worldRef.current = { ...worldRef.current, selectedColor: next };
+    soundEngine.playPaintSound();
+    showToast(COLOR_NAMES[next] || next, 'success');
+    return true;
+  };
+
+  const cyclePaintColor = () => {
+    const cur = worldRef.current.selectedColor;
+    const i = GAME_COLOR_KEYS.indexOf(cur);
+    const next = GAME_COLOR_KEYS[(i + 1) % GAME_COLOR_KEYS.length];
+    return pickPaintColor(next);
   };
 
   const triggerLoading = (title, subtitle, durationMs = 400, onDone) => {
@@ -564,7 +728,7 @@ export function GameStateProvider({ children }) {
       else if (nextRepaired >= STARTER_HOUSE_COUNT) persistGuideDone();
       else setGuideStep(GUIDE_STEPS.REBUILD);
     }
-    showToast('Repaired · M to move', 'success');
+    grantReward('REBUILD', `Repaired ${houseLabel(building.buildingType)}`);
     return true;
   };
 
@@ -580,7 +744,8 @@ export function GameStateProvider({ children }) {
         ruinId === activeRuinId);
     if (allowed) {
       r.id = ruinId;
-      r.progress = Math.min(1, r.progress + dt / REBUILD_SECONDS);
+      const craftMul = buildingsRef.current.some((b) => !b.ruined && b.buildingType === 'CRAFT_HOUSE') ? 0.7 : 1;
+      r.progress = Math.min(1, r.progress + dt / (REBUILD_SECONDS * craftMul));
     } else {
       r.progress = Math.max(0, r.progress - dt * 1.7);
       if (r.progress <= 0.001) {
@@ -716,12 +881,14 @@ export function GameStateProvider({ children }) {
     }
 
     if (selectedTool === 'PATROL_ROBOT') {
-      if (!patrolUnlocked) {
-        showToast(`Unlock after ${PATROL_UNLOCK_RAIDS} raids`, 'error');
+      const owned = defenses.filter((d) => (d.type || d.defenseType) === 'PATROL_ROBOT').length;
+      if (owned >= ROBOT_MAX) {
+        showToast('Robot cap', 'info');
         return false;
       }
-      if (defenses.some((d) => (d.type || d.defenseType) === 'PATROL_ROBOT')) {
-        showToast('Patrol already placed', 'info');
+      const cost = robotCost(owned);
+      if (coins < cost) {
+        showToast(`Need ${cost}c`, 'error');
         return false;
       }
       if (!canPlaceOnGameMap(buildings, x, y, 1, 1)) {
@@ -731,14 +898,16 @@ export function GameStateProvider({ children }) {
       soundEngine.playBuildSound();
       const id = nextEntityId;
       setNextEntityId((n) => n + 1);
+      setCoins((v) => v - cost);
       try {
         await placeDefense(userId, activePlotId, 'PATROL_ROBOT', 1);
       } catch (e) {
         /* offline ok */
       }
       setDefenses((prev) => [...prev, { id, type: 'PATROL_ROBOT', defenseType: 'PATROL_ROBOT', xPos: x, yPos: y }]);
+      setPatrolUnlocked(true);
       setSelectedTool('PAINT');
-      showToast('Patrol placed', 'success');
+      showToast(`Robot ${owned + 1}`, 'success');
       return true;
     }
 
@@ -762,25 +931,25 @@ export function GameStateProvider({ children }) {
     return building;
   };
 
-  const handleUpgradeSelected = async () => {
-    const building = buildings.find((b) => b.id === selectedBuildingId);
+  const upgradeHouse = async (buildingId) => {
+    const building = buildings.find((b) => b.id === buildingId);
     if (!building) {
       showToast('Select a house', 'info');
-      return;
+      return false;
     }
     if (building.ruined) {
       showToast('Hold F to rebuild', 'info');
-      return;
+      return false;
     }
     if (building.level >= 3) {
       showToast('Already at Lvl 3', 'info');
-      return;
+      return false;
     }
     const cost = UPGRADE_COSTS[building.level];
-    if (!cost) return;
+    if (!cost) return false;
     if (coins < cost.coins || inkEnergy < cost.ink) {
       showToast(`Need ${cost.coins}c / ${cost.ink} ink`, 'error');
-      return;
+      return false;
     }
     soundEngine.playBuildSound();
     try {
@@ -790,9 +959,13 @@ export function GameStateProvider({ children }) {
     }
     setCoins((v) => v - cost.coins);
     setInkEnergy((v) => v - cost.ink);
-    setBuildings((prev) => prev.map((b) => (b.id === building.id ? { ...b, level: b.level + 1 } : b)));
-    showToast(`Lvl ${building.level + 1}`, 'success');
+    const nextLevel = building.level + 1;
+    setBuildings((prev) => prev.map((b) => (b.id === building.id ? { ...b, level: nextLevel } : b)));
+    showToast(`${houseLabel(building.buildingType)} L${nextLevel}`, 'success');
+    return true;
   };
+
+  const handleUpgradeSelected = () => upgradeHouse(selectedBuildingId);
 
   const upgradeSearchlight = () => {
     const lv = clampSearchlightLevel(searchlightLevel);
@@ -816,23 +989,18 @@ export function GameStateProvider({ children }) {
   };
 
   const unlockPatrolRobot = () => {
-    if (patrolUnlocked) {
-      showToast('Patrol unlocked', 'info');
+    const owned = defenses.filter((d) => (d.type || d.defenseType) === 'PATROL_ROBOT').length;
+    if (owned >= ROBOT_MAX) {
+      showToast('Robot cap', 'info');
       return false;
     }
-    if (successfulRaids < PATROL_UNLOCK_RAIDS) {
-      showToast(`Need ${PATROL_UNLOCK_RAIDS - successfulRaids} raids`, 'error');
+    const cost = robotCost(owned);
+    if (coins < cost) {
+      showToast(`Need ${cost}c`, 'error');
       return false;
     }
-    if (coins < PATROL_UNLOCK_COINS) {
-      showToast(`Need ${PATROL_UNLOCK_COINS}c`, 'error');
-      return false;
-    }
-    setCoins((v) => v - PATROL_UNLOCK_COINS);
-    setPatrolUnlocked(true);
     setSelectedTool('PATROL_ROBOT');
-    soundEngine.playSuccessSound();
-    showToast('Patrol ready', 'success');
+    showToast(`Click tile · ${cost}c`, 'info');
     return true;
   };
 
@@ -843,6 +1011,7 @@ export function GameStateProvider({ children }) {
     }
     if (outcome === 'SILENT' || outcome === 'ESCAPED') {
       setSuccessfulRaids((n) => n + 1);
+      setCoins((v) => v + (outcome === 'SILENT' ? 80 : 50));
     }
   };
 
@@ -950,15 +1119,24 @@ export function GameStateProvider({ children }) {
     pickupAnimRef.current = anim;
     persistBuggy({ remaining: next, carriedPart: part.id, scattered: true });
     soundEngine.playClickSound();
-    const spec = cartPartById(part.id);
-    showToast(`${spec?.label || 'Part'} · Hold F at garage`, 'success');
+    grantReward('PICK_PART', cartPartById(part.id)?.label || 'Part');
+    return true;
+  };
+
+  const dropCarriedPart = (column, row) => {
+    if (isVisitGuest || !carriedPart) return false;
+    const next = [...partSpawns, { id: carriedPart, column: Math.round(column), row: Math.round(row) }];
+    setPartSpawns(next);
+    setCarriedPart(null);
+    persistBuggy({ remaining: next, carriedPart: null, scattered: true });
+    showToast('Dropped · E to pick', 'info');
     return true;
   };
 
   const tickPickupAnim = (dt) => {
     const a = pickupAnimRef.current;
     if (!a) return false;
-    a.t = Math.min(1, (a.t || 0) + dt / 0.48);
+    a.t = Math.min(1, (a.t || 0) + dt / PICKUP_SECONDS);
     if (a.t >= 1) {
       pickupAnimRef.current = null;
       setPickupAnim(null);
@@ -970,7 +1148,8 @@ export function GameStateProvider({ children }) {
   const tickMountHold = (dt, holding) => {
     const r = mountHoldRef.current;
     if (holding && carriedPart && !isVisitGuest) {
-      r.progress = Math.min(1, r.progress + dt / REBUILD_SECONDS);
+      const craftMul = buildingsRef.current.some((b) => !b.ruined && b.buildingType === 'CRAFT_HOUSE') ? 0.7 : 1;
+      r.progress = Math.min(1, r.progress + dt / (MOUNT_SECONDS * craftMul));
     } else {
       r.progress = Math.max(0, r.progress - dt * 1.7);
     }
@@ -1000,9 +1179,9 @@ export function GameStateProvider({ children }) {
     setMountProgress(0);
     soundEngine.playBuildSound();
     if (done) {
-      showToast('Buggy ready · E', 'success');
+      grantReward('BUGGY_DONE', 'Buggy ready');
     } else {
-      showToast('Part mounted', 'success');
+      grantReward('MOUNT_PART', 'Mounted');
     }
     return true;
   };
@@ -1020,20 +1199,24 @@ export function GameStateProvider({ children }) {
         visitId: visitSession.visitId,
         userId,
         seated: true,
-        gear: host ? buggyGear : undefined,
+        gear: host ? 1 : undefined,
         trackT: host ? buggyTrackT : undefined,
       }).catch(() => {});
     }
-    showToast(role === 'passenger' ? 'Passenger' : 'Driver · W/S', 'success');
+    if (role === 'passenger') {
+      showToast('Passenger', 'success');
+      return true;
+    }
+    setBuggyGear(1);
+    setRideInviteOpen(true);
+    showToast('Car started', 'success');
     return true;
   };
 
   const standFromBuggy = () => {
-    if (buggyGear !== 0 && visitRole !== 'guest') {
-      showToast('Park first', 'info');
-      return false;
-    }
+    setBuggyGear(0);
     setBuggySeated(false);
+    setRideInviteOpen(false);
     if (visitSession) {
       void postVisitState({
         visitId: visitSession.visitId,
@@ -1108,14 +1291,17 @@ export function GameStateProvider({ children }) {
     visitRoleRef.current = role;
     setVisitSession(session);
     setVisitRole(role);
-    setBuggySeated(false);
-    setBuggyGear(0);
-    setBuggyTrackT(0);
     setBrush((b) => ({ ...b, on: false }));
     setPendingInvite(null);
-    setVisitSpawnToken((n) => n + 1);
-    if (role === 'guest') applyHostSnapshot(session.snapshot);
-    showToast(role === 'guest' ? `Visit ${session.hostName}` : `${session.guestName} arriving`, 'success');
+    setRideInviteOpen(false);
+    if (role === 'guest') {
+      setBuggyGear(0);
+      setBuggyTrackT(0);
+      setVisitSpawnToken((n) => n + 1);
+      applyHostSnapshot(session.snapshot);
+      setBuggySeated(true);
+    }
+    showToast(role === 'guest' ? `Joined ${session.hostName}` : `${session.guestName} joined your base`, 'success');
   };
 
   const endVisit = async ({ silent = false, kicked = false } = {}) => {
@@ -1148,14 +1334,25 @@ export function GameStateProvider({ children }) {
       return false;
     }
     try {
-      const res = await sendVisitInvite(userId, guestId);
+      await postPresenceHeartbeat({
+        userId,
+        username,
+        characterModel,
+        camoColor,
+        snapshot: snapshotRef.current,
+      });
+      await sendVisitInvite(userId, guestId);
       showToast('Invite sent', 'success');
       return true;
     } catch (e) {
-      showToast(e?.data?.error || e.message || 'Could not send invite', 'error');
+      const raw = e?.data?.error || e.message || '';
+      showToast(raw === 'GUEST_OFFLINE' ? 'Player offline' : raw || 'Could not send invite', 'error');
       return false;
     }
   };
+
+  const closeRideInvite = () => setRideInviteOpen(false);
+  const openRideInvite = () => setRideInviteOpen(true);
 
   const acceptPendingInvite = async (invite = pendingInvite) => {
     if (!invite) return false;
@@ -1171,9 +1368,14 @@ export function GameStateProvider({ children }) {
       };
       const session = await acceptVisitInvite(invite.id, userId);
       enterVisit(session, 'guest');
+      void postVisitState({
+        visitId: session.visitId,
+        userId,
+        seated: true,
+      }).catch(() => {});
       triggerLoading(
         `ARRIVING AT ${String(session.hostName || 'HOST').toUpperCase()} FORTRESS`,
-        'Friendly visit — color world, no stealing',
+        'You are in their base',
         700,
         () => setGameState('BASE_BUILDER')
       );
@@ -1197,6 +1399,58 @@ export function GameStateProvider({ children }) {
     showToast('Invite declined', 'info');
     return true;
   };
+
+  const patrolCount = defenses.filter((d) => (d.type || d.defenseType) === 'PATROL_ROBOT').length;
+  const nextRobotCost = robotCost(patrolCount);
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      const list = buildingsRef.current || [];
+      const inkN = list
+        .filter((b) => !b.ruined && b.buildingType === 'INK_HOUSE')
+        .reduce((s, b) => s + (b.level || 1), 0);
+      const coinN = list
+        .filter((b) => !b.ruined && b.buildingType === 'COIN_GENERATOR')
+        .reduce((s, b) => s + (b.level || 1), 0);
+      if (inkN) {
+        setInkEnergy((v) => {
+          const next = Math.min(INK_CAP, v + inkN);
+          worldRef.current = { ...worldRef.current, inkEnergy: next };
+          return next;
+        });
+      }
+      if (coinN) {
+        setCoinBanks((prev) => {
+          const next = { ...prev };
+          list.forEach((b) => {
+            if (b.ruined || b.buildingType !== 'COIN_GENERATOR') return;
+            const key = String(b.id);
+            next[key] = (Number(next[key]) || 0) + (b.level || 1);
+          });
+          worldRef.current = { ...worldRef.current, coinBanks: next };
+          return next;
+        });
+      }
+    }, 10000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    if (!forceFullHome) return;
+    try {
+      window.localStorage.setItem(WORLD_SAVE_KEY, JSON.stringify(worldRef.current));
+      window.localStorage.setItem(INTRO_DONE_KEY, '1');
+      window.localStorage.setItem(BUILD_GUIDE_KEY, '1');
+      writeBuggySave({
+        mountedParts: [...CART_PART_IDS],
+        carriedPart: null,
+        remaining: [],
+        scattered: true,
+      });
+    } catch {
+      /* private mode */
+    }
+  }, [forceFullHome]);
 
   const value = {
     gameState,
@@ -1282,6 +1536,8 @@ export function GameStateProvider({ children }) {
     setSearchlightLevel,
     upgradeSearchlight,
     unlockPatrolRobot,
+    patrolCount,
+    nextRobotCost,
     recordRaidResult,
     claimDailyLogin,
     tradeChipsForCoins,
@@ -1309,6 +1565,9 @@ export function GameStateProvider({ children }) {
     buggyTrackT,
     onlinePlayers,
     pendingInvite,
+    rideInviteOpen,
+    closeRideInvite,
+    openRideInvite,
     visitSession,
     visitRole,
     isVisitGuest,
@@ -1316,6 +1575,7 @@ export function GameStateProvider({ children }) {
     pickupAnim,
     tickPickupAnim,
     pickUpPartAt,
+    dropCarriedPart,
     tickMountHold,
     mountCarriedPart,
     sitInBuggy,
@@ -1328,6 +1588,14 @@ export function GameStateProvider({ children }) {
     declinePendingInvite,
     endVisit,
     missingPartLabel,
+    saveWorld,
+    gameDay,
+    coinBanks,
+    collectHouseCoins,
+    sleepAtHouse,
+    pickPaintColor,
+    cyclePaintColor,
+    upgradeHouse,
   };
 
   useEffect(() => {

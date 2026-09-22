@@ -88,8 +88,8 @@ export const CHASE_CAM = {
   maxDist: 7.5,
 };
 
-/** Seconds to glide from one tile center to the next (WASD). */
-export const WALK_TILE_SECONDS = 0.34;
+/** Seconds to glide from one tile center to the next (WASD). 25% faster than 0.34. */
+export const WALK_TILE_SECONDS = 0.272;
 
 export function cameraDistance() {
   // Flat board ≠ bounding sphere: use the larger half-extent so 48×40 fills the view.

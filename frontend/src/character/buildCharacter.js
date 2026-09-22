@@ -1,17 +1,25 @@
 import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { COLORS, GAME_COLORS, CLAY_SKIN, hexForColor } from '../colors.js';
+const SKIN = '#E4C2A0';
+const HAIR = '#2A1F1E';
+const HAIR_FEMALE = '#1C1412';
+const NAVY = '#1B2430';
+const SOLE = '#EDE6DC';
+const INK = '#121820';
 
 function clayMat(color, extras = {}) {
   return new THREE.MeshStandardMaterial({
     color,
-    roughness: 0.48,
-    metalness: 0.05,
+    roughness: 0.62,
+    metalness: 0.04,
     ...extras,
   });
 }
 
-function markCamo(mesh) {
+function markCamo(mesh, region) {
   mesh.userData.isCamo = true;
+  mesh.userData.camoRegion = region;
   return mesh;
 }
 
@@ -21,512 +29,398 @@ function addShadow(mesh) {
   return mesh;
 }
 
-const HAIR_HEX = '#2A1F1E';
-const HAIR_FEMALE = '#1A1214';
-const MOUTH_HEX = '#5A3A3A';
-const CHEEK_HEX = '#F2A08A';
-
-/** 1 = male, 2 = female. Older ids (3) map to female. */
-export function normalizeModelId(modelId) {
-  const n = Number(modelId) || 1;
-  return n === 1 ? 1 : 2;
+function rbox(w, h, d, radius = 0.04, segments = 2) {
+  return new RoundedBoxGeometry(w, h, d, segments, radius);
 }
 
+/** Capsule extends ±(len/2 + radius) from its mesh center. */
+function capHalf(len, radius) {
+  return len * 0.5 + radius;
+}
+
+export function normalizeModelId(modelId) {
+  const n = Number(modelId) || 1;
+  return n === 2 ? 2 : 1;
+}
+
+/**
+ * 6.5-head clay. Crown ~1.52. One volume per body part.
+ * Head width ≈ 0.21, shoulder span ≈ 2.1 heads, arms reach mid-thigh,
+ * hands ≈ 0.75 of face width, legs ≈ half of height.
+ */
 const MALE = {
-  hipY: 0.52,
-  hipS: [1.14, 0.74, 0.96],
-  torsoY: 1.02,
-  torsoR: 0.36,
-  torsoLen: 0.46,
-  chestW: 0.5,
-  chestH: 0.3,
-  shoulderX: 0.46,
-  shoulderY: 1.28,
-  armR: 0.092,
-  armLen: 0.36,
-  headR: 0.3,
-  neckY: 1.42,
-  headPivot: 1.48,
-  headWorld: 1.66,
-  hipSpread: 0.175,
-  thighR: 0.122,
-  shinR: 0.09,
+  hipY: 0.72,
+  hipR: 0.112,
+  torsoY: 0.98,
+  torsoW: 0.32,
+  torsoH: 0.48,
+  torsoD: 0.2,
+  waistW: 0.3,
+  shoulderX: 0.168,
+  shoulderY: 1.175,
+  armR: 0.046,
+  upperLen: 0.26,
+  foreLen: 0.22,
+  headR: 0.12,
+  headSX: 0.92,
+  headSY: 1.12,
+  headSZ: 0.94,
+  neckY: 1.22,
+  headPivot: 1.235,
+  headLocalY: 0.12,
+  hipSpread: 0.08,
+  thighR: 0.058,
+  thighLen: 0.34,
+  shinR: 0.048,
+  shinLen: 0.28,
+  restArmZ: 0.1,
   stride: 1,
   hz: 1,
   lean: 1,
+  female: false,
 };
 
 const FEMALE = {
-  hipY: 0.5,
-  hipS: [0.94, 0.68, 0.9],
-  torsoY: 0.98,
-  torsoR: 0.28,
-  torsoLen: 0.4,
-  chestW: 0.36,
-  chestH: 0.24,
-  shoulderX: 0.34,
-  shoulderY: 1.2,
-  armR: 0.07,
-  armLen: 0.32,
-  headR: 0.275,
-  neckY: 1.34,
-  headPivot: 1.4,
-  headWorld: 1.56,
-  hipSpread: 0.145,
-  thighR: 0.098,
-  shinR: 0.075,
-  stride: 0.86,
-  hz: 1.1,
+  hipY: 0.7,
+  hipR: 0.128,
+  torsoY: 0.96,
+  torsoW: 0.27,
+  torsoH: 0.44,
+  torsoD: 0.17,
+  waistW: 0.22,
+  shoulderX: 0.142,
+  shoulderY: 1.145,
+  armR: 0.04,
+  upperLen: 0.24,
+  foreLen: 0.21,
+  headR: 0.118,
+  headSX: 0.88,
+  headSY: 1.18,
+  headSZ: 0.9,
+  neckY: 1.18,
+  headPivot: 1.198,
+  headLocalY: 0.118,
+  hipSpread: 0.092,
+  thighR: 0.052,
+  thighLen: 0.33,
+  shinR: 0.044,
+  shinLen: 0.27,
+  restArmZ: 0.09,
+  stride: 0.88,
+  hz: 1.04,
   lean: 0.82,
+  female: true,
 };
 
-function hy(body, worldY) {
-  return worldY - body.headPivot;
+function createHair(body) {
+  const hair = new THREE.Group();
+  hair.name = 'Hair';
+  const r = body.headR;
+  const hy = body.headLocalY;
+  const mat = clayMat(body.female ? HAIR_FEMALE : HAIR);
+
+  const cap = addShadow(
+    new THREE.Mesh(new THREE.SphereGeometry(r * 1.03, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.5), mat)
+  );
+  cap.position.set(0, hy, -0.004);
+  cap.scale.set(body.headSX * 1.03, body.headSY * 1.02, body.headSZ * 1.03);
+  hair.add(cap);
+
+  if (body.female) {
+    [-1, 1].forEach((side) => {
+      const fall = addShadow(new THREE.Mesh(new THREE.CapsuleGeometry(r * 0.18, r * 0.7, 4, 8), mat));
+      fall.position.set(side * r * body.headSX * 0.95, hy - r * 0.2, -r * 0.04);
+      fall.rotation.z = side * 0.1;
+      hair.add(fall);
+    });
+
+    const pony = new THREE.Group();
+    pony.name = 'Ponytail';
+    pony.position.set(0, hy + r * 0.05, -r * body.headSZ * 0.95);
+    const knot = addShadow(new THREE.Mesh(new THREE.SphereGeometry(0.034, 10, 8), mat));
+    pony.add(knot);
+    const tail = addShadow(new THREE.Mesh(new THREE.CapsuleGeometry(0.032, 0.24, 4, 8), mat));
+    tail.position.set(0, -0.16, -0.03);
+    tail.rotation.x = 0.35;
+    pony.add(tail);
+    hair.add(pony);
+  }
+
+  return hair;
 }
 
-function createHand(inkMat, camoMat, side = 1, scale = 1) {
-  const hand = new THREE.Group();
-  hand.name = side > 0 ? 'RightHand' : 'LeftHand';
-  const glove = inkMat.clone();
-  const s = scale;
+function createHead(body, skin, ink) {
+  const head = new THREE.Group();
+  head.name = 'Head';
+  head.position.y = body.headPivot;
 
-  const wrist = addShadow(new THREE.Mesh(new THREE.CylinderGeometry(0.055 * s, 0.06 * s, 0.06, 12), glove));
-  wrist.position.y = 0.02;
-  hand.add(wrist);
+  const r = body.headR;
+  const hy = body.headLocalY;
+  const f = body.female;
 
-  const palm = addShadow(new THREE.Mesh(new THREE.CapsuleGeometry(0.048 * s, 0.045, 4, 10), glove));
-  palm.position.set(0, -0.05, 0.01);
-  palm.scale.set(1.18, 1, 0.88);
-  hand.add(palm);
+  const skull = addShadow(new THREE.Mesh(new THREE.SphereGeometry(r, 22, 18), skin));
+  skull.position.y = hy;
+  skull.scale.set(body.headSX, body.headSY, body.headSZ);
+  head.add(skull);
 
-  const cushion = addShadow(new THREE.Mesh(new THREE.SphereGeometry(0.034 * s, 10, 8), camoMat.clone()));
-  markCamo(cushion);
-  cushion.position.set(0, -0.05, 0.044);
-  cushion.scale.set(1.3, 1.1, 0.42);
-  hand.add(cushion);
-
-  [
-    { x: -0.032, len: 0.075, r: 0.013 },
-    { x: -0.01, len: 0.085, r: 0.014 },
-    { x: 0.01, len: 0.08, r: 0.013 },
-    { x: 0.03, len: 0.065, r: 0.011 },
-  ].forEach((f, i) => {
-    const digit = new THREE.Group();
-    digit.position.set(f.x * side * s, -0.095 * s, 0.01);
-    digit.rotation.z = f.x * side * 0.5;
-    digit.rotation.x = 0.45 + i * 0.04;
-    const bone = addShadow(new THREE.Mesh(new THREE.CapsuleGeometry(f.r * s, f.len * 0.45, 3, 8), glove));
-    bone.position.y = -f.len * 0.3;
-    digit.add(bone);
-    const tip = addShadow(new THREE.Mesh(new THREE.SphereGeometry(f.r * 1.05 * s, 8, 6), glove));
-    tip.position.y = -f.len * 0.65;
-    digit.add(tip);
-    hand.add(digit);
+  [-1, 1].forEach((side) => {
+    const ear = addShadow(new THREE.Mesh(new THREE.SphereGeometry(r * 0.18, 8, 7), skin));
+    ear.scale.set(0.45, 1.05, 0.65);
+    ear.position.set(side * r * body.headSX * 1.02, hy - r * 0.02, 0);
+    head.add(ear);
   });
 
-  const thumb = new THREE.Group();
-  thumb.position.set(-0.044 * side * s, -0.022, 0.028);
-  thumb.rotation.set(0.8, side * 0.48, side * -0.1);
-  const thumbBone = addShadow(new THREE.Mesh(new THREE.CapsuleGeometry(0.014 * s, 0.04, 3, 8), glove));
-  thumbBone.position.y = -0.028;
-  thumb.add(thumbBone);
-  const thumbTip = addShadow(new THREE.Mesh(new THREE.SphereGeometry(0.015 * s, 8, 6), glove));
-  thumbTip.position.y = -0.062;
-  thumb.add(thumbTip);
+  const eyeX = r * body.headSX * 0.4;
+  const eyeY = hy + r * 0.06;
+  const eyeZ = r * body.headSZ * 0.9;
+  const white = clayMat('#F4EDE3');
+  [-eyeX, eyeX].forEach((x) => {
+    const ball = addShadow(new THREE.Mesh(new THREE.SphereGeometry(f ? 0.016 : 0.015, 8, 7), white));
+    ball.scale.set(1.15, 1, 0.55);
+    ball.position.set(x, eyeY, eyeZ);
+    head.add(ball);
+    const iris = addShadow(new THREE.Mesh(new THREE.SphereGeometry(f ? 0.009 : 0.0085, 8, 7), ink));
+    iris.position.set(x, eyeY, eyeZ + 0.007);
+    head.add(iris);
+  });
+
+  const nose = addShadow(new THREE.Mesh(new THREE.SphereGeometry(f ? 0.012 : 0.015, 8, 7), skin));
+  nose.scale.set(0.8, 1, 1.15);
+  nose.position.set(0, hy - r * 0.06, r * body.headSZ * 1.02);
+  head.add(nose);
+
+  const mouth = addShadow(new THREE.Mesh(rbox(f ? 0.028 : 0.032, 0.006, 0.01, 0.002, 1), clayMat('#A07868')));
+  mouth.position.set(0, hy - r * 0.38, r * body.headSZ * 0.82);
+  head.add(mouth);
+
+  head.add(createHair(body));
+  return head;
+}
+
+function createHand(side, body, camo) {
+  const hand = new THREE.Group();
+  hand.name = side > 0 ? 'RightHand' : 'LeftHand';
+  const r = body.armR;
+  const palmW = r * 2.35;
+  const palmH = r * 2.2;
+  const palmD = r * 1.85;
+
+  const wrist = addShadow(new THREE.Mesh(new THREE.SphereGeometry(r * 1.08, 10, 8), camo.clone()));
+  markCamo(wrist, 'GLOVES');
+  wrist.position.set(0, 0, 0.004);
+  hand.add(wrist);
+
+  const palm = addShadow(new THREE.Mesh(rbox(palmW, palmH, palmD, 0.024, 2), camo.clone()));
+  markCamo(palm, 'GLOVES');
+  palm.position.set(0, -r * 1.2, r * 0.55);
+  hand.add(palm);
+
+  for (let i = 0; i < 3; i += 1) {
+    const t = (i - 1) * r * 0.72;
+    const finger = addShadow(new THREE.Mesh(new THREE.CapsuleGeometry(r * 0.38, r * 0.7, 3, 6), camo.clone()));
+    markCamo(finger, 'GLOVES');
+    finger.position.set(t, -r * 2.35, r * 0.62);
+    finger.rotation.x = 0.18;
+    hand.add(finger);
+  }
+
+  const thumb = addShadow(new THREE.Mesh(new THREE.CapsuleGeometry(r * 0.4, r * 0.62, 3, 6), camo.clone()));
+  markCamo(thumb, 'GLOVES');
+  thumb.position.set(-palmW * 0.46 * side, -r * 0.75, r * 0.85);
+  thumb.rotation.z = side * 0.7;
+  thumb.rotation.x = 0.45;
   hand.add(thumb);
   return hand;
 }
 
-function createArm(camo, ink, side, body) {
+function createArm(side, body, camo) {
   const arm = new THREE.Group();
   arm.name = side > 0 ? 'RightArm' : 'LeftArm';
   const r = body.armR;
-  const len = body.armLen;
+  const upper = body.upperLen;
+  const fore = body.foreLen;
+  const foreR = r * 0.94;
 
-  const shoulder = addShadow(new THREE.Mesh(new THREE.SphereGeometry(r * 1.45, 14, 12), camo.clone()));
-  markCamo(shoulder);
+  const shoulder = addShadow(new THREE.Mesh(new THREE.SphereGeometry(r * 1.35, 10, 8), camo.clone()));
+  markCamo(shoulder, 'SHIRT');
   arm.add(shoulder);
 
-  const upper = addShadow(new THREE.Mesh(new THREE.CapsuleGeometry(r, len * 0.92, 4, 12), camo.clone()));
-  markCamo(upper);
-  upper.position.set(0, -len * 0.55, 0);
-  arm.add(upper);
-
-  const elbow = addShadow(new THREE.Mesh(new THREE.SphereGeometry(r * 1.02, 12, 10), camo.clone()));
-  markCamo(elbow);
-  elbow.position.set(0, -len * 1.08, 0);
-  arm.add(elbow);
+  const sleeve = addShadow(new THREE.Mesh(new THREE.CapsuleGeometry(r, upper, 4, 10), camo.clone()));
+  markCamo(sleeve, 'SHIRT');
+  const upperHalf = capHalf(upper, r);
+  sleeve.position.y = -upperHalf + r * 0.4;
+  arm.add(sleeve);
 
   const forearm = new THREE.Group();
   forearm.name = 'Forearm';
-  forearm.position.set(0, -len * 1.08, 0);
-  forearm.rotation.z = side * 0.16;
-  forearm.rotation.x = 0.12;
-  forearm.userData.restX = 0.12;
-  forearm.userData.restZ = side * 0.16;
+  forearm.position.y = sleeve.position.y - upperHalf + r * 0.65;
   arm.add(forearm);
 
-  const foreMesh = addShadow(new THREE.Mesh(new THREE.CapsuleGeometry(r * 0.82, len * 0.78, 4, 12), camo.clone()));
-  markCamo(foreMesh);
-  foreMesh.position.set(0, -len * 0.48, 0);
+  const elbow = addShadow(new THREE.Mesh(new THREE.SphereGeometry(r * 1.02, 8, 7), camo.clone()));
+  markCamo(elbow, 'SHIRT');
+  forearm.add(elbow);
+
+  const foreMesh = addShadow(new THREE.Mesh(new THREE.CapsuleGeometry(foreR, fore, 4, 10), camo.clone()));
+  markCamo(foreMesh, 'SHIRT');
+  const foreHalf = capHalf(fore, foreR);
+  foreMesh.position.y = -foreHalf + r * 0.4;
   forearm.add(foreMesh);
 
-  const wristBall = addShadow(new THREE.Mesh(new THREE.SphereGeometry(r * 0.62, 10, 8), ink.clone()));
-  wristBall.position.set(0, -len * 0.95, 0);
-  forearm.add(wristBall);
-
-  const hand = createHand(ink, camo, side, body.armR / 0.092);
-  hand.position.set(0, -len * 1.05, 0.01);
-  hand.rotation.set(0.22, 0, 0);
+  const hand = createHand(side, body, camo);
+  hand.position.set(0, foreMesh.position.y - foreHalf + r * 0.35, 0.01);
+  hand.rotation.x = 0.08;
   forearm.add(hand);
 
-  arm.rotation.z = side * (body === FEMALE ? 0.48 : 0.55);
-  arm.rotation.x = 0.06;
+  arm.rotation.z = side * body.restArmZ;
   arm.userData.restZ = arm.rotation.z;
   arm.userData.forearm = forearm;
+  arm.userData.hand = hand;
   return arm;
 }
 
-function createLeg(camo, ink, side, body) {
+function createShoe(side, body, camo) {
+  const shoe = new THREE.Group();
+  shoe.name = side > 0 ? 'RightShoe' : 'LeftShoe';
+  const s = body.female ? 0.86 : 1;
+
+  const sole = addShadow(new THREE.Mesh(rbox(0.1 * s, 0.028, 0.17 * s, 0.012, 2), clayMat(SOLE)));
+  sole.position.set(0, 0, 0.03);
+  shoe.add(sole);
+
+  const upper = addShadow(new THREE.Mesh(rbox(0.092 * s, 0.048, 0.14 * s, 0.018, 2), camo.clone()));
+  markCamo(upper, 'SHOES');
+  upper.position.set(0, 0.028, 0.016);
+  shoe.add(upper);
+  return shoe;
+}
+
+function createLeg(side, body, camo) {
   const leg = new THREE.Group();
   leg.name = side > 0 ? 'RightLeg' : 'LeftLeg';
-  leg.position.set(side * body.hipSpread, body.hipY - 0.04, 0.02);
+  leg.position.set(side * body.hipSpread, 0, 0.008);
 
-  const hipBall = addShadow(new THREE.Mesh(new THREE.SphereGeometry(body.thighR * 0.95, 12, 10), camo.clone()));
-  markCamo(hipBall);
-  leg.add(hipBall);
-
-  const thigh = addShadow(new THREE.Mesh(new THREE.CapsuleGeometry(body.thighR, 0.26, 4, 10), camo.clone()));
-  markCamo(thigh);
-  thigh.position.set(0, -0.18, 0);
+  const thigh = addShadow(new THREE.Mesh(new THREE.CapsuleGeometry(body.thighR, body.thighLen, 4, 10), camo.clone()));
+  markCamo(thigh, 'PANTS');
+  thigh.position.set(0, -(body.thighLen * 0.45), 0);
   leg.add(thigh);
-
-  const knee = addShadow(new THREE.Mesh(new THREE.SphereGeometry(body.shinR * 1.05, 12, 10), camo.clone()));
-  markCamo(knee);
-  knee.position.set(0, -0.32, 0.01);
-  leg.add(knee);
 
   const shin = new THREE.Group();
   shin.name = 'Shin';
-  shin.position.set(0, -0.32, 0.01);
+  shin.position.set(0, -(body.thighLen + body.thighR * 0.55), 0);
   leg.add(shin);
 
-  const shinMesh = addShadow(new THREE.Mesh(new THREE.CapsuleGeometry(body.shinR, 0.2, 4, 10), camo.clone()));
-  markCamo(shinMesh);
-  shinMesh.position.set(0, -0.12, 0.01);
+  const shinMesh = addShadow(
+    new THREE.Mesh(new THREE.CapsuleGeometry(body.shinR, body.shinLen, 4, 10), camo.clone())
+  );
+  markCamo(shinMesh, 'PANTS');
+  shinMesh.position.set(0, -(body.shinLen * 0.42), 0.004);
   shin.add(shinMesh);
 
-  const strap = addShadow(new THREE.Mesh(new THREE.TorusGeometry(body.thighR * 1.02, 0.016, 8, 16), ink));
-  strap.rotation.x = Math.PI / 2;
-  strap.position.set(0, -0.12, 0);
-  leg.add(strap);
-
-  const cuff = addShadow(new THREE.Mesh(new THREE.CylinderGeometry(body.shinR * 1.15, body.shinR * 1.08, 0.055, 14), ink));
-  cuff.position.set(0, -0.22, 0.02);
-  shin.add(cuff);
-
-  const boot = addShadow(new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.11, body === FEMALE ? 0.24 : 0.28), ink));
-  boot.position.set(0, -0.28, 0.04);
-  shin.add(boot);
-
-  const toe = addShadow(new THREE.Mesh(new THREE.SphereGeometry(0.078, 12, 10), ink));
-  toe.position.set(0, -0.29, body === FEMALE ? 0.14 : 0.17);
-  toe.scale.set(0.92, 0.68, 0.78);
-  shin.add(toe);
-
-  const sole = addShadow(new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.032, body === FEMALE ? 0.26 : 0.3), clayMat('#3B3A38')));
-  sole.position.set(0, -0.335, 0.05);
-  shin.add(sole);
+  const shoe = createShoe(side, body, camo);
+  shoe.position.set(0, -(body.shinLen + 0.045), 0.016);
+  shin.add(shoe);
 
   leg.userData.shin = shin;
   return leg;
 }
 
-function buildCore(camo, skin, ink, accent, body) {
+function createShirt(body, camo) {
+  const bodyGroup = new THREE.Group();
+  bodyGroup.name = 'Body';
+
+  const shirt = new THREE.Group();
+  shirt.name = 'Shirt';
+  bodyGroup.add(shirt);
+
+  const shell = addShadow(new THREE.Mesh(rbox(body.torsoW, body.torsoH, body.torsoD, 0.09, 3), camo.clone()));
+  markCamo(shell, 'SHIRT');
+  shell.position.y = body.torsoY;
+  shirt.add(shell);
+
+  if (body.female) {
+    const waist = addShadow(new THREE.Mesh(rbox(body.waistW, 0.14, body.torsoD * 0.9, 0.06, 2), camo.clone()));
+    markCamo(waist, 'SHIRT');
+    waist.position.y = body.torsoY - body.torsoH * 0.34;
+    shirt.add(waist);
+  }
+
+  return bodyGroup;
+}
+
+function createBackpack(body, navy) {
+  const pack = new THREE.Group();
+  pack.name = 'SmallAccessory';
+  const s = body.female ? 0.78 : 1;
+  const bag = addShadow(new THREE.Mesh(rbox(0.16 * s, 0.18 * s, 0.08 * s, 0.03, 2), navy.clone()));
+  bag.position.set(0, body.torsoY + 0.01, -(body.torsoD * 0.5 + 0.05));
+  pack.add(bag);
+  return pack;
+}
+
+function buildCore(body, mats) {
+  const { navy, skin, ink, camo } = mats;
   const root = new THREE.Group();
-  root.name = 'CoreFigure';
+  root.name = 'Character';
 
-  const hips = addShadow(new THREE.Mesh(new THREE.SphereGeometry(0.27, 18, 14), camo.clone()));
-  markCamo(hips);
-  hips.position.y = body.hipY;
-  hips.scale.set(...body.hipS);
-  root.add(hips);
+  const head = createHead(body, skin, ink);
+  root.add(head);
 
-  const torso = addShadow(new THREE.Mesh(new THREE.CapsuleGeometry(body.torsoR, body.torsoLen, 6, 16), camo.clone()));
-  markCamo(torso);
-  torso.position.y = body.torsoY;
-  root.add(torso);
+  const shirtBody = createShirt(body, camo);
+  root.add(shirtBody);
 
-  const chest = addShadow(new THREE.Mesh(new THREE.BoxGeometry(body.chestW, body.chestH, 0.16), camo.clone()));
-  markCamo(chest);
-  chest.position.set(0, body.torsoY + 0.08, 0.2);
-  chest.rotation.x = -0.1;
-  root.add(chest);
-
-  [-1, 1].forEach((side) => {
-    const strap = addShadow(new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.62, 0.035), ink));
-    strap.position.set(side * 0.02, body.torsoY, 0.3);
-    strap.rotation.z = side * 0.55;
-    root.add(strap);
-  });
-  const pin = addShadow(new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.028, 12), accent));
-  pin.rotation.x = Math.PI / 2;
-  pin.position.set(0, body.torsoY, 0.325);
-  root.add(pin);
-
-  const neck = addShadow(new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.11, 0.13, 12), skin));
+  const neck = addShadow(new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.036, 0.05, 10), skin));
   neck.position.y = body.neckY;
   root.add(neck);
 
-  const headGroup = new THREE.Group();
-  headGroup.name = 'Head';
-  headGroup.position.y = body.headPivot;
-  root.add(headGroup);
-
-  const head = addShadow(new THREE.Mesh(new THREE.SphereGeometry(body.headR, 24, 20), skin));
-  head.position.y = hy(body, body.headWorld);
-  if (body === MALE) head.scale.set(1.04, 1, 1.02);
-  else head.scale.set(0.98, 1.02, 1);
-  headGroup.add(head);
-
-  const hairHex = body === FEMALE ? HAIR_FEMALE : HAIR_HEX;
-  const hair = addShadow(
-    new THREE.Mesh(new THREE.SphereGeometry(body.headR * 1.04, 22, 14, 0, Math.PI * 2, 0, Math.PI * 0.5), clayMat(hairHex))
-  );
-  hair.position.set(0, hy(body, body.headWorld + 0.01), -0.02);
-  hair.rotation.x = -0.1;
-  headGroup.add(hair);
-
-  const earGeo = new THREE.SphereGeometry(0.065, 10, 10);
-  const leftEar = addShadow(new THREE.Mesh(earGeo, skin));
-  leftEar.position.set(-body.headR * 0.92, hy(body, body.headWorld), 0);
-  leftEar.scale.set(0.52, 1, 0.68);
-  const rightEar = leftEar.clone();
-  rightEar.position.x = body.headR * 0.92;
-  headGroup.add(leftEar, rightEar);
-
-  const eyeWhite = clayMat('#F8F4EC');
-  const catchlight = clayMat('#FFFFFF', { emissive: new THREE.Color('#FFFFFF'), emissiveIntensity: 0.6 });
-  const eyeX = body === FEMALE ? 0.09 : 0.1;
-  [-eyeX, eyeX].forEach((x) => {
-    const socket = addShadow(new THREE.Mesh(new THREE.SphereGeometry(body === FEMALE ? 0.05 : 0.055, 12, 10), eyeWhite));
-    socket.position.set(x, hy(body, body.headWorld + 0.02), body.headR * 0.8);
-    headGroup.add(socket);
-    const iris = addShadow(new THREE.Mesh(new THREE.SphereGeometry(0.028, 10, 8), ink));
-    iris.position.set(x, hy(body, body.headWorld + 0.025), body.headR * 0.94);
-    headGroup.add(iris);
-    const spark = new THREE.Mesh(new THREE.SphereGeometry(0.01, 8, 6), catchlight);
-    spark.position.set(x + 0.01, hy(body, body.headWorld + 0.04), body.headR * 1.02);
-    headGroup.add(spark);
-    const brow = addShadow(new THREE.Mesh(new THREE.BoxGeometry(body === FEMALE ? 0.1 : 0.12, body === FEMALE ? 0.018 : 0.03, 0.035), clayMat(hairHex)));
-    brow.position.set(x, hy(body, body.headWorld + 0.1), body.headR * 0.85);
-    brow.rotation.z = body === FEMALE ? -x * 0.8 : -x * 1.35;
-    headGroup.add(brow);
-  });
-
-  const nose = addShadow(new THREE.Mesh(new THREE.SphereGeometry(body === FEMALE ? 0.024 : 0.03, 10, 8), skin));
-  nose.position.set(0, hy(body, body.headWorld - 0.03), body.headR * 1.0);
-  headGroup.add(nose);
-
-  const mouth = addShadow(new THREE.Mesh(new THREE.TorusGeometry(0.045, 0.011, 6, 14, Math.PI), clayMat(MOUTH_HEX)));
-  mouth.position.set(0, hy(body, body.headWorld - 0.1), body.headR * 0.9);
-  mouth.rotation.set(0.12, 0, Math.PI);
-  headGroup.add(mouth);
-
-  const cheekMat = clayMat(CHEEK_HEX, { transparent: true, opacity: body === FEMALE ? 0.7 : 0.5, roughness: 0.8 });
-  [-0.15, 0.15].forEach((x) => {
-    const cheek = new THREE.Mesh(new THREE.SphereGeometry(0.042, 10, 8), cheekMat);
-    cheek.position.set(x, hy(body, body.headWorld - 0.055), body.headR * 0.7);
-    cheek.scale.set(1, 0.65, 0.42);
-    headGroup.add(cheek);
-  });
-
-  const leftArm = createArm(camo, ink, -1, body);
+  const leftArm = createArm(-1, body, camo);
   leftArm.position.set(-body.shoulderX, body.shoulderY, 0);
-  const rightArm = createArm(camo, ink, 1, body);
+  const rightArm = createArm(1, body, camo);
   rightArm.position.set(body.shoulderX, body.shoulderY, 0);
   root.add(leftArm, rightArm);
 
-  const leftLeg = createLeg(camo, ink, -1, body);
-  const rightLeg = createLeg(camo, ink, 1, body);
-  root.add(leftLeg, rightLeg);
+  const pants = new THREE.Group();
+  pants.name = 'Pants';
+  pants.position.y = body.hipY;
 
-  const belt = addShadow(new THREE.Mesh(new THREE.TorusGeometry(body === FEMALE ? 0.26 : 0.3, 0.04, 10, 24), ink));
+  const hips = addShadow(new THREE.Mesh(new THREE.SphereGeometry(body.hipR, 14, 12), camo.clone()));
+  markCamo(hips, 'PANTS');
+  hips.scale.set(body.female ? 1.2 : 1.06, body.female ? 0.58 : 0.5, 0.82);
+  pants.add(hips);
+
+  const leftLeg = createLeg(-1, body, camo);
+  const rightLeg = createLeg(1, body, camo);
+  pants.add(leftLeg, rightLeg);
+  root.add(pants);
+
+  const belt = addShadow(new THREE.Mesh(new THREE.TorusGeometry(body.female ? 0.13 : 0.15, 0.014, 8, 16), ink));
   belt.rotation.x = Math.PI / 2;
-  belt.position.y = body.hipY + 0.18;
+  belt.position.y = body.hipY + 0.07;
   root.add(belt);
-  const buckle = addShadow(new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.08, 0.045), accent));
-  buckle.position.set(0, body.hipY + 0.18, 0.29);
-  root.add(buckle);
+
+  root.add(createBackpack(body, navy));
 
   return {
     root,
-    head: headGroup,
-    torso,
+    head,
     body,
     rig: {
       root,
-      head: headGroup,
-      torso,
+      head,
+      torso: shirtBody,
       leftArm,
       rightArm,
       leftFore: leftArm.userData.forearm,
       rightFore: rightArm.userData.forearm,
+      leftHand: leftArm.userData.hand,
+      rightHand: rightArm.userData.hand,
       leftLeg,
       rightLeg,
       leftShin: leftLeg.userData.shin,
       rightShin: rightLeg.userData.shin,
+      pants,
+      hairTail: head.getObjectByName('Ponytail'),
     },
   };
-}
-
-function dressMale(group, camo, ink, accent, body) {
-  const rig = group.userData.rig;
-  const head = rig.head;
-  const steel = clayMat('#C9CDD2', { metalness: 0.65, roughness: 0.28 });
-
-  const hood = addShadow(
-    new THREE.Mesh(new THREE.SphereGeometry(0.36, 20, 16, Math.PI * 0.22, Math.PI * 1.56, 0, Math.PI * 0.58), ink)
-  );
-  hood.position.set(0, hy(body, body.headWorld + 0.04), -0.05);
-  hood.rotation.set(0.05, Math.PI / 2, 0);
-  head.add(hood);
-  const hoodTop = addShadow(
-    new THREE.Mesh(new THREE.SphereGeometry(0.36, 20, 12, 0, Math.PI * 2, 0, Math.PI * 0.3), ink)
-  );
-  hoodTop.position.set(0, hy(body, body.headWorld + 0.04), -0.05);
-  head.add(hoodTop);
-
-  const mask = addShadow(new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.12, 0.32), ink));
-  mask.position.set(0, hy(body, body.headWorld - 0.14), 0.1);
-  head.add(mask);
-  const stripe = addShadow(new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.03, 0.33), camo.clone()));
-  markCamo(stripe);
-  stripe.position.set(0, hy(body, body.headWorld - 0.13), 0.1);
-  head.add(stripe);
-
-  [-0.06, 0.06].forEach((x, i) => {
-    const tail = addShadow(new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.3, 0.02), camo.clone()));
-    markCamo(tail);
-    tail.position.set(x, hy(body, body.headWorld - 0.12), -0.32);
-    tail.rotation.set(0.5, 0, i === 0 ? 0.22 : -0.22);
-    head.add(tail);
-  });
-
-  const scarf = addShadow(new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.5, 0.07), camo.clone()));
-  markCamo(scarf);
-  scarf.position.set(0.2, 1.12, -0.18);
-  scarf.rotation.set(0.32, 0.18, 0.38);
-  group.add(scarf);
-
-  [-body.shoulderX, body.shoulderX].forEach((x, i) => {
-    const wrap = addShadow(new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.032, 8, 16), ink));
-    wrap.position.set(x, body.shoulderY, 0);
-    wrap.rotation.z = i === 0 ? 0.48 : -0.48;
-    group.add(wrap);
-  });
-
-  [rig.leftFore, rig.rightFore].forEach((fore) => {
-    if (!fore) return;
-    [-0.12, -0.2, -0.28].forEach((y) => {
-      const band = addShadow(new THREE.Mesh(new THREE.TorusGeometry(0.075, 0.014, 6, 14), ink));
-      band.rotation.x = Math.PI / 2;
-      band.position.set(0, y, 0);
-      fore.add(band);
-    });
-  });
-
-  const blade = new THREE.Group();
-  blade.position.set(-0.12, 1.02, -0.34);
-  blade.rotation.set(0.08, 0, 0.58);
-  const steelBlade = addShadow(new THREE.Mesh(new THREE.BoxGeometry(0.042, 0.95, 0.014), steel));
-  steelBlade.position.y = 0.48;
-  blade.add(steelBlade);
-  const guard = addShadow(new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.018, 14), accent));
-  blade.add(guard);
-  const grip = addShadow(new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.026, 0.28, 10), ink));
-  grip.position.y = -0.15;
-  blade.add(grip);
-  group.add(blade);
-
-  const pouch = addShadow(new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.11, 0.09), accent));
-  pouch.position.set(0.26, 0.68, 0.2);
-  group.add(pouch);
-}
-
-function dressFemale(group, camo, ink, accent, body) {
-  const rig = group.userData.rig;
-  const head = rig.head;
-  const hairHex = HAIR_FEMALE;
-
-  const bangs = addShadow(new THREE.Mesh(new THREE.SphereGeometry(0.22, 14, 10, 0, Math.PI, 0, Math.PI * 0.45), clayMat(hairHex)));
-  bangs.position.set(0, hy(body, body.headWorld + 0.04), 0.12);
-  bangs.rotation.x = 0.35;
-  head.add(bangs);
-
-  const pony = new THREE.Group();
-  pony.name = 'Ponytail';
-  pony.position.set(0, hy(body, body.headWorld + 0.02), -0.22);
-  const knot = addShadow(new THREE.Mesh(new THREE.SphereGeometry(0.07, 12, 10), clayMat(hairHex)));
-  pony.add(knot);
-  const tie = addShadow(new THREE.Mesh(new THREE.TorusGeometry(0.055, 0.012, 6, 12), camo.clone()));
-  markCamo(tie);
-  tie.rotation.x = Math.PI / 2;
-  pony.add(tie);
-  const tail = addShadow(new THREE.Mesh(new THREE.CapsuleGeometry(0.055, 0.42, 4, 10), clayMat(hairHex)));
-  tail.position.set(0, -0.28, -0.04);
-  tail.rotation.x = 0.35;
-  pony.add(tail);
-  const tip = addShadow(new THREE.Mesh(new THREE.SphereGeometry(0.05, 10, 8), clayMat(hairHex)));
-  tip.position.set(0, -0.52, -0.12);
-  pony.add(tip);
-  head.add(pony);
-  rig.hairTail = pony;
-
-  const cowl = addShadow(
-    new THREE.Mesh(new THREE.SphereGeometry(0.32, 18, 14, Math.PI * 0.28, Math.PI * 1.44, 0, Math.PI * 0.5), ink)
-  );
-  cowl.position.set(0, hy(body, body.headWorld), -0.06);
-  cowl.rotation.set(0.08, Math.PI / 2, 0);
-  head.add(cowl);
-
-  const sash = addShadow(new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.55, 0.05), camo.clone()));
-  markCamo(sash);
-  sash.position.set(-0.16, 1.02, -0.16);
-  sash.rotation.set(0.28, -0.15, -0.35);
-  group.add(sash);
-  const sash2 = addShadow(new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.4, 0.04), camo.clone()));
-  markCamo(sash2);
-  sash2.position.set(0.12, 1.0, -0.2);
-  sash2.rotation.set(0.4, 0.1, 0.2);
-  group.add(sash2);
-
-  const skirt = addShadow(new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.34, 0.28, 14, 1, true), camo.clone()));
-  markCamo(skirt);
-  skirt.position.set(0, 0.52, 0);
-  group.add(skirt);
-
-  [-body.shoulderX, body.shoulderX].forEach((x, i) => {
-    const wrap = addShadow(new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.026, 8, 14), ink));
-    wrap.position.set(x, body.shoulderY, 0);
-    wrap.rotation.z = i === 0 ? 0.42 : -0.42;
-    group.add(wrap);
-  });
-
-  const steel = clayMat('#C9CDD2', { metalness: 0.6, roughness: 0.3 });
-  [-0.2, 0.2].forEach((x) => {
-    const kunai = addShadow(new THREE.Mesh(new THREE.ConeGeometry(0.02, 0.14, 6), steel));
-    kunai.position.set(x, 0.7, 0.2);
-    kunai.rotation.set(0.2, 0, x > 0 ? 0.15 : -0.15);
-    group.add(kunai);
-  });
-
-  [rig.leftLeg, rig.rightLeg].forEach((leg) => {
-    const pad = addShadow(new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), ink));
-    pad.position.set(0, -0.3, 0.09);
-    pad.scale.set(1.05, 0.65, 0.55);
-    leg.add(pad);
-  });
 }
 
 export function markKeepColor(object) {
@@ -544,20 +438,18 @@ export function buildCharacter(modelId = 1, camoKey = 'BLUE') {
   const id = normalizeModelId(modelId);
   const body = id === 2 ? FEMALE : MALE;
   const camoHex = hexForColor(camoKey) || GAME_COLORS.BLUE;
-  const camo = clayMat(camoHex);
-  const skin = clayMat(CLAY_SKIN);
-  const ink = clayMat('#0D1B1E');
-  const accent = clayMat('#F4A261');
+  const mats = {
+    camo: clayMat(camoHex),
+    skin: clayMat(SKIN),
+    ink: clayMat(INK),
+    navy: clayMat(NAVY),
+  };
 
-  const { root, rig } = buildCore(camo, skin, ink, accent, body);
+  const { root, rig } = buildCore(body, mats);
   group.add(root);
   group.userData.rig = rig;
   group.userData.body = body;
   root.userData.rig = rig;
-
-  if (id === 2) dressFemale(root, camo, ink, accent, body);
-  else dressMale(root, camo, ink, accent, body);
-
   group.userData.modelId = id;
   group.userData.camoKey = String(camoKey).toUpperCase();
   markKeepColor(group);
@@ -566,8 +458,7 @@ export function buildCharacter(modelId = 1, camoKey = 'BLUE') {
 
 export function createAttacker({ camoColor = 'BLUE', characterModel = 1, scale = 0.42 } = {}) {
   const figure = buildCharacter(characterModel, camoColor);
-  const body = figure.userData.body || MALE;
-  figure.scale.setScalar(scale * (body === FEMALE ? 0.96 : 1));
+  figure.scale.setScalar(scale);
   return figure;
 }
 
@@ -581,7 +472,10 @@ export function applyCamoColor(figure, camoKey) {
       return;
     }
     const hexNum = child.material.color.getHex();
-    const isSkin = hexNum === new THREE.Color(CLAY_SKIN).getHex() || hexNum === new THREE.Color(COLORS.WHITE).getHex();
+    const isSkin =
+      hexNum === new THREE.Color(SKIN).getHex() ||
+      hexNum === new THREE.Color(CLAY_SKIN).getHex() ||
+      hexNum === new THREE.Color(COLORS.WHITE).getHex();
     const isInk = hexNum < 0x222222;
     if (isSkin || isInk) return;
     const current = `#${child.material.color.getHexString().toUpperCase()}`;
@@ -590,12 +484,45 @@ export function applyCamoColor(figure, camoKey) {
   });
 }
 
+export const CHAR_MESH_REV = 27;
+/** Walk-units: 1 = walking, ~1.9 = sprint. Same contract as the last push. */
 export const RUN_GAIT_SPEED = 1.35;
+
+function resolveRig(figure) {
+  const existing = figure.userData?.rig;
+  if (existing?.leftArm && existing?.leftLeg && existing?.rightArm && existing?.rightLeg) return existing;
+  const pick = (name) => figure.getObjectByName(name);
+  const leftArm = existing?.leftArm || pick('LeftArm');
+  const rightArm = existing?.rightArm || pick('RightArm');
+  const leftLeg = existing?.leftLeg || pick('LeftLeg');
+  const rightLeg = existing?.rightLeg || pick('RightLeg');
+  if (!leftArm || !rightArm || !leftLeg || !rightLeg) return existing;
+  const rig = {
+    ...existing,
+    root: existing?.root || pick('Character') || figure,
+    head: existing?.head || pick('Head'),
+    torso: existing?.torso || pick('Body'),
+    leftArm,
+    rightArm,
+    leftFore: existing?.leftFore || leftArm.userData?.forearm || leftArm.getObjectByName('Forearm'),
+    rightFore: existing?.rightFore || rightArm.userData?.forearm || rightArm.getObjectByName('Forearm'),
+    leftHand: existing?.leftHand || leftArm.userData?.hand || leftArm.getObjectByName('LeftHand'),
+    rightHand: existing?.rightHand || rightArm.userData?.hand || rightArm.getObjectByName('RightHand'),
+    leftLeg,
+    rightLeg,
+    leftShin: existing?.leftShin || leftLeg.userData?.shin || leftLeg.getObjectByName('Shin'),
+    rightShin: existing?.rightShin || rightLeg.userData?.shin || rightLeg.getObjectByName('Shin'),
+    pants: existing?.pants || pick('Pants'),
+    hairTail: existing?.hairTail || pick('Ponytail'),
+  };
+  figure.userData.rig = rig;
+  return rig;
+}
 
 export function tickCharacter(figure, elapsed, motion = null) {
   if (!figure) return;
-  const rig = figure.userData.rig;
-  if (!rig) return;
+  const rig = resolveRig(figure);
+  if (!rig?.leftArm || !rig?.leftLeg) return;
   const body = figure.userData.body || MALE;
   const dt = Math.min(0.05, Math.max(0.001, motion?.dt ?? 0.016));
   const speed = Math.max(0, motion?.speed ?? 0);
@@ -609,9 +536,8 @@ export function tickCharacter(figure, elapsed, motion = null) {
   gait.run += (runTarget - gait.run) * (1 - Math.exp(-6 * dt));
 
   const cadence = (5.6 + speed * 3.4) * body.hz;
-  if (speed > 0.04) {
-    gait.phase += dt * cadence;
-  } else if (gait.amp > 0.015) {
+  if (speed > 0.04) gait.phase += dt * cadence;
+  else if (gait.amp > 0.015) {
     const rest = Math.round(gait.phase / Math.PI) * Math.PI;
     gait.phase += (rest - gait.phase) * (1 - Math.exp(-8 * dt));
   }
@@ -626,57 +552,84 @@ export function tickCharacter(figure, elapsed, motion = null) {
   const bobTarget = Math.abs(s) * (0.042 + gait.run * 0.035) * gait.amp;
   gait.bob += (bobTarget - gait.bob) * (1 - Math.exp(-12 * dt));
 
-  const legSwing = (0.52 + gait.run * 0.28) * stride;
-  rig.leftLeg.rotation.x = s * legSwing;
-  rig.rightLeg.rotation.x = -s * legSwing;
+  const seated = !!motion?.seated;
+  const picking = !!motion?.picking && !seated;
+  const carrying = !!motion?.carrying && !seated && !picking;
 
-  if (rig.leftShin) rig.leftShin.rotation.x = 0.06 * idle + liftL * (0.62 + gait.run * 0.32) * stride;
-  if (rig.rightShin) rig.rightShin.rotation.x = 0.06 * idle + liftR * (0.62 + gait.run * 0.32) * stride;
+  if (!seated && !picking) {
+    const legSwing = (0.52 + gait.run * 0.28) * stride;
+    rig.leftLeg.rotation.x = s * legSwing;
+    rig.rightLeg.rotation.x = -s * legSwing;
+    // +rotation.x swings the foot backward. Bend the knee on the forward leg.
+    if (rig.leftShin) rig.leftShin.rotation.x = 0.06 * idle + liftR * (0.62 + gait.run * 0.32) * stride;
+    if (rig.rightShin) rig.rightShin.rotation.x = 0.06 * idle + liftL * (0.62 + gait.run * 0.32) * stride;
+  }
 
-  const leftRestZ = rig.leftArm.userData.restZ ?? -0.52;
-  const rightRestZ = rig.rightArm.userData.restZ ?? 0.52;
+  const leftRestZ = rig.leftArm.userData.restZ ?? -body.restArmZ;
 
-  if (motion?.picking) {
-    rig.leftArm.rotation.x = -0.7;
-    rig.rightArm.rotation.x = -1.25;
-    rig.leftArm.rotation.z = -0.15;
-    rig.rightArm.rotation.z = 0.35;
+  if (seated) {
+    // Negative X swings the thigh forward into the footwell. Shin folds down.
+    rig.leftLeg.rotation.x = -1.2;
+    rig.rightLeg.rotation.x = -1.2;
+    if (rig.leftShin) rig.leftShin.rotation.x = -0.95;
+    if (rig.rightShin) rig.rightShin.rotation.x = -0.95;
+    rig.leftArm.rotation.set(-0.95, 0.15, -0.18);
+    rig.rightArm.rotation.set(-0.9, -0.12, 0.18);
+    if (rig.leftFore) rig.leftFore.rotation.x = 0.55;
+    if (rig.rightFore) rig.rightFore.rotation.x = 0.5;
+    if (rig.leftHand) rig.leftHand.rotation.set(0.2, 0, -0.04);
+    if (rig.rightHand) rig.rightHand.rotation.set(0.2, 0, 0.04);
+    rig.root.position.y = 0;
+  } else if (picking) {
+    rig.leftLeg.rotation.x = 0.32;
+    rig.rightLeg.rotation.x = 0.18;
+    if (rig.leftShin) rig.leftShin.rotation.x = 0.58;
+    if (rig.rightShin) rig.rightShin.rotation.x = 0.44;
+    rig.leftArm.rotation.set(-0.7, 0, -0.15);
+    rig.rightArm.rotation.set(-1.25, 0, 0.35);
     if (rig.leftFore) rig.leftFore.rotation.x = 0.4;
     if (rig.rightFore) rig.rightFore.rotation.x = 0.55;
+    if (rig.leftHand) rig.leftHand.rotation.set(0.18, 0, -0.06);
+    if (rig.rightHand) rig.rightHand.rotation.set(0.22, 0, 0.08);
     rig.root.position.y = -0.12 + gait.bob;
-  } else if (motion?.carrying) {
-    rig.leftArm.rotation.x = -1.05 + s * 0.05 * gait.amp;
-    rig.rightArm.rotation.x = -1.18 - s * 0.04 * gait.amp;
-    rig.leftArm.rotation.z = -0.28;
-    rig.rightArm.rotation.z = 0.32;
+  } else if (carrying) {
+    rig.leftArm.rotation.set(-1.05 + s * 0.05 * gait.amp, 0, -0.28);
+    rig.rightArm.rotation.set(-1.18 - s * 0.04 * gait.amp, 0, 0.32);
     if (rig.leftFore) rig.leftFore.rotation.x = 0.35;
     if (rig.rightFore) rig.rightFore.rotation.x = 0.4;
+    if (rig.leftHand) rig.leftHand.rotation.set(0.2, 0, -0.05);
+    if (rig.rightHand) rig.rightHand.rotation.set(0.2, 0, 0.05);
     rig.root.position.y = gait.bob + breathe * 0.01 * idle;
   } else {
     const armSwing = (0.48 + gait.run * 0.32) * stride;
-    rig.leftArm.rotation.x = 0.06 - s * armSwing;
-    rig.rightArm.rotation.x = 0.06 + s * armSwing;
-    const tuck = Math.abs(leftRestZ) - gait.amp * 0.12 - gait.run * 0.1;
-    rig.leftArm.rotation.z = -tuck + breathe * 0.025 * idle;
-    rig.rightArm.rotation.z = tuck - breathe * 0.025 * idle;
-    if (rig.leftFore) {
-      const rest = rig.leftFore.userData.restX ?? 0.12;
-      rig.leftFore.rotation.x = rest + liftR * 0.28 * stride;
-    }
-    if (rig.rightFore) {
-      const rest = rig.rightFore.userData.restX ?? 0.12;
-      rig.rightFore.rotation.x = rest + liftL * 0.28 * stride;
-    }
+    rig.leftArm.rotation.set(0.06 - s * armSwing, 0, -Math.abs(leftRestZ) + gait.amp * 0.04 + breathe * 0.02 * idle);
+    rig.rightArm.rotation.set(0.06 + s * armSwing, 0, Math.abs(leftRestZ) - gait.amp * 0.04 - breathe * 0.02 * idle);
+    // Fold the elbow forward on the backswing. +rotation.x hyperextends toward the back.
+    if (rig.leftFore) rig.leftFore.rotation.x = 0.06 - liftR * 0.32 * stride;
+    if (rig.rightFore) rig.rightFore.rotation.x = 0.06 - liftL * 0.32 * stride;
+    if (rig.leftHand) rig.leftHand.rotation.set(0.1 - s * 0.12 * stride, 0, -0.04);
+    if (rig.rightHand) rig.rightHand.rotation.set(0.1 + s * 0.12 * stride, 0, 0.04);
     rig.root.position.y = gait.bob + breathe * 0.012 * idle;
   }
 
-  const targetLean = speed > 0.04 ? (0.04 + gait.run * 0.14) * body.lean : 0;
+  const targetLean = seated ? 0.04 : picking ? 0.14 : speed > 0.04 ? (0.04 + gait.run * 0.14) * body.lean : 0;
   gait.lean += (targetLean - gait.lean) * (1 - Math.exp(-5.5 * dt));
   rig.root.rotation.x = gait.lean;
-  rig.root.rotation.z = -s * 0.028 * stride + breathe * 0.012 * idle * (body === FEMALE ? 1.15 : 0.7);
-  rig.head.rotation.x = -gait.lean * 0.55 + breathe * 0.018 * idle;
-  rig.head.rotation.y = c * 0.04 * stride;
-
+  rig.root.rotation.y = 0;
+  rig.root.rotation.z = seated || picking ? 0 : -s * 0.028 * stride + breathe * 0.01 * idle;
+  rig.root.position.x = 0;
+  if (rig.pants) {
+    rig.pants.rotation.y = seated || picking ? 0 : s * 0.05 * stride;
+    rig.pants.rotation.z = 0;
+  }
+  if (rig.torso) {
+    rig.torso.rotation.y = seated || picking ? 0 : -s * 0.04 * stride;
+    rig.torso.rotation.z = 0;
+  }
+  if (rig.head) {
+    rig.head.rotation.x = -gait.lean * 0.55 + breathe * 0.018 * idle;
+    rig.head.rotation.y = c * 0.04 * stride;
+  }
   if (rig.hairTail) {
     rig.hairTail.rotation.x = 0.12 + s * 0.18 * stride + breathe * 0.04 * idle;
     rig.hairTail.rotation.z = c * 0.08 * stride;

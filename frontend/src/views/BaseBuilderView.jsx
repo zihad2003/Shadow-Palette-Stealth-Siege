@@ -7,21 +7,23 @@ import BaseStatusPanel from '../components/hud/BaseStatusPanel.jsx';
 import MakeupHousePanel from '../components/hud/MakeupHousePanel.jsx';
 import HudBanner from '../components/ui/HudBanner.jsx';
 import HudHeader from '../components/ui/HudHeader.jsx';
-import ClayPanel from '../components/ui/ClayPanel.jsx';
 import ClayButton from '../components/ui/ClayButton.jsx';
 import GameMap from '../gamemap/GameMap.jsx';
 import { useGameState, GUIDE_STEPS } from '../state/GameStateContext.jsx';
-import { GATE_SPAWN_TILE, WALK_TILE_SECONDS } from '../gamemap/mapConfig.js';
+import { GATE_SPAWN_TILE, MAP_ROWS, WALK_TILE_SECONDS } from '../gamemap/mapConfig.js';
 import { collectSolidTiles } from '../gamemap/occupancy.js';
-import { isNearGarage } from '../gamemap/paletteBuggy.js';
-import { stepDirection, attemptStep, TURN_RATE } from '../character/gridMover.js';
+import { isNearGarage, findPartNear } from '../gamemap/paletteBuggy.js';
+import { stepDirection, attemptStep, nudgeOffSolid, TURN_RATE } from '../character/gridMover.js';
+import { noteKeyDown, noteKeyUp, walkAxes, shiftHeld, codeHeld, bindKeyReleaseGuards } from '../character/walkInput.js';
 import { soundEngine } from '../soundEngine.js';
 import { listDecorOccupiedTiles } from '../gamemap/MapDecor.js';
-import { findRuinNear, findRepairedNear } from '../gamemap/starterRuins.js';
+import { findRuinNear, findRepairedNear, isNearMakeupHouse } from '../gamemap/starterRuins.js';
 import { canPlaceOnGameMap } from '../gamemap/placeUtils.js';
 import { createSprintMeter, SPRINT_SPEED_MULT } from '../character/sprint.js';
 import StaminaBar from '../components/hud/StaminaBar.jsx';
 import BuildQuestHud from '../components/hud/BuildQuestHud.jsx';
+import ActionPrompt from '../components/hud/ActionPrompt.jsx';
+import HouseStation from '../components/hud/HouseStation.jsx';
 import { GAME_COLORS, GAME_COLOR_KEYS } from '../colors.js';
 
 const BASE_DECOR_SEED = 7;
@@ -79,6 +81,7 @@ export default function BaseBuilderView() {
     carriedPart,
     garageComplete,
     pickUpPartAt,
+    dropCarriedPart,
     tickPickupAnim,
     pickupAnim,
     tickMountHold,
@@ -94,6 +97,15 @@ export default function BaseBuilderView() {
     visitRole,
     isVisitGuest,
     visitSpawnToken,
+    saveWorld,
+    mountProgress,
+    gameDay,
+    coinBanks,
+    collectHouseCoins,
+    sleepAtHouse,
+    pickPaintColor,
+    cyclePaintColor,
+    upgradeHouse,
   } = useGameState();
   const sceneApi = useRef(null);
   const [selectedTile, setSelectedTile] = useState(null);
@@ -134,6 +146,8 @@ export default function BaseBuilderView() {
     dismissWelcome,
     buildings,
     pickUpPartAt,
+    dropCarriedPart,
+    saveWorld,
     tickPickupAnim,
     tickMountHold,
     mountCarriedPart,
@@ -147,6 +161,11 @@ export default function BaseBuilderView() {
     carriedPart,
     isVisitGuest,
     visitRole,
+    collectHouseCoins,
+    sleepAtHouse,
+    cyclePaintColor,
+    upgradeHouse,
+    showToast,
   });
   rebuildKeysRef.current = {
     tickRebuildHold,
@@ -156,6 +175,8 @@ export default function BaseBuilderView() {
     dismissWelcome,
     buildings,
     pickUpPartAt,
+    dropCarriedPart,
+    saveWorld,
     tickPickupAnim,
     tickMountHold,
     mountCarriedPart,
@@ -169,10 +190,17 @@ export default function BaseBuilderView() {
     carriedPart,
     isVisitGuest,
     visitRole,
+    collectHouseCoins,
+    sleepAtHouse,
+    cyclePaintColor,
+    upgradeHouse,
+    showToast,
   };
   const sprintMeter = useRef(createSprintMeter());
+  const pendingDismount = useRef(null);
   const [stamina, setStamina] = useState({ stamina: 1, sprinting: false, exhausted: false });
   const [compass, setCompass] = useState(null);
+  const [parkedCar, setParkedCar] = useState(null);
 
   const solidTiles = useMemo(
     () =>
@@ -187,8 +215,22 @@ export default function BaseBuilderView() {
   solidRef.current = solidTiles;
 
   const nearRuin = findRuinNear(buildings, walker.column, walker.row);
+  const nearRepaired = findRepairedNear(buildings, walker.column, walker.row);
+  const makeupFirst =
+    isNearMakeupHouse(walker.column, walker.row) && walker.column <= 2 && walker.row >= MAP_ROWS - 4;
+  const makeupStation = makeupFirst ? { id: 'makeup', buildingType: 'MAKEUP_HOUSE', ruined: false } : null;
+  const stationHouse = makeupStation || nearRepaired;
+  const nearSleep = !makeupStation && nearRepaired?.buildingType === 'SLEEP_HOUSE' ? nearRepaired : null;
+  const nearCoin = !makeupStation && nearRepaired?.buildingType === 'COIN_GENERATOR' ? nearRepaired : null;
+  const nearInk = !makeupStation && nearRepaired?.buildingType === 'INK_HOUSE' ? nearRepaired : null;
+  const nearCraft = !makeupStation && nearRepaired?.buildingType === 'CRAFT_HOUSE' ? nearRepaired : null;
+  const nearPart = findPartNear(partSpawns, walker.column, walker.row);
+  const peekHouse = nearRuin || stationHouse;
   const nearActive = !!(activeRuin && nearRuin && nearRuin.id === activeRuin.id);
   const nearGarage = isNearGarage(walker.column, walker.row);
+  const nearCar = parkedCar
+    ? Math.hypot(walker.column - parkedCar.column, walker.row - parkedCar.row) <= 3
+    : nearGarage;
   const movingBuilding = buildings.find((b) => b.id === movingBuildingId) || null;
   const isPov = cameraMode === 'chase';
   const localRideRole = visitRole === 'guest' ? 'passenger' : 'driver';
@@ -311,34 +353,25 @@ export default function BaseBuilderView() {
     let raf = 0;
     let last = performance.now();
     let moveCooldown = 0;
+    let bumpCooldown = 0;
     let gearCooldown = 0;
     let lastSprintMul = 1;
     let lastHud = { stamina: 1, sprinting: false, exhausted: false };
     let lastCompass = null;
+    let lastParkedKey = '';
 
     const loop = (now) => {
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
       moveCooldown = Math.max(0, moveCooldown - dt);
+      bumpCooldown = Math.max(0, bumpCooldown - dt);
       gearCooldown = Math.max(0, gearCooldown - dt);
 
       const rk = rebuildKeysRef.current;
       const picking = !!rk.tickPickupAnim?.(dt);
-      let forward = 0;
-      let turn = 0;
-      if (!picking) {
-        if (keys.current.has('ArrowUp') || keys.current.has('w') || keys.current.has('W')) forward += 1;
-        if (keys.current.has('ArrowDown') || keys.current.has('s') || keys.current.has('S')) forward -= 1;
-        if (keys.current.has('ArrowLeft') || keys.current.has('a') || keys.current.has('A')) turn += 1;
-        if (keys.current.has('ArrowRight') || keys.current.has('d') || keys.current.has('D')) turn -= 1;
-      }
+      const { forward, turn } = picking ? { forward: 0, turn: 0 } : walkAxes(keys.current);
 
-      if (rk.buggySeated) {
-        rk.advanceBuggyTrack(dt);
-        if (rk.visitRole !== 'guest' && gearCooldown <= 0 && forward !== 0) {
-          rk.bumpBuggyGear(forward > 0 ? 1 : -1);
-          gearCooldown = 0.28;
-        }
+      if (rk.buggySeated && rk.visitRole === 'guest') {
         const mouseLocked = sceneApi.current?.isMouseLocked?.() ?? false;
         if (!mouseLocked && turn !== 0) sceneApi.current?.addLookYaw?.(turn * TURN_RATE * dt);
         const screen = sceneApi.current?.getGuideScreen?.();
@@ -361,7 +394,7 @@ export default function BaseBuilderView() {
       }
 
       // Shift = limited sprint; meter drains while moving, refills after a short pause
-      const sp = sprintMeter.current.tick(dt, keys.current.has('Shift'), forward !== 0);
+      const sp = sprintMeter.current.tick(dt, shiftHeld(keys.current), forward !== 0);
       const sprintMul = sp.sprinting ? SPRINT_SPEED_MULT : 1;
       if (sprintMul !== lastSprintMul) {
         lastSprintMul = sprintMul;
@@ -376,29 +409,65 @@ export default function BaseBuilderView() {
         setStamina(lastHud);
       }
 
-      // Mouse locked → A/D strafe (mouse steers); otherwise A/D turns smoothly every frame
+      // In the car, A/D only steers and W/S drives along the nose. On foot, A/D turns or strafes.
       const mouseLocked = sceneApi.current?.isMouseLocked?.() ?? false;
-      const strafe = mouseLocked ? -turn : 0;
-      if (!mouseLocked && turn !== 0) sceneApi.current?.addLookYaw?.(turn * TURN_RATE * dt);
+      const inCar = rk.buggySeated && rk.visitRole !== 'guest';
+      const steerRate = inCar ? 1.25 : TURN_RATE;
+      const strafe = inCar ? 0 : mouseLocked ? -turn : 0;
+      if (!mouseLocked && turn !== 0) sceneApi.current?.addLookYaw?.(turn * steerRate * dt);
+      sceneApi.current?.setDriveInput?.({
+        driving: inCar,
+        forward: inCar && rk.buggyGear > 0 ? forward : 0,
+        sprintMul,
+        solids: solidRef.current,
+      });
+      if (inCar && !pendingDismount.current) {
+        const tile = sceneApi.current?.getCarTile?.();
+        if (tile && (tile.column !== walkerRef.current.column || tile.row !== walkerRef.current.row)) {
+          const next = { ...walkerRef.current, column: tile.column, row: tile.row };
+          walkerRef.current = next;
+          setWalker(next);
+        }
+      } else if (!inCar) {
+        pendingDismount.current = null;
+      }
+      const liveCar = sceneApi.current?.getCarTile?.();
+      if (liveCar) {
+        const carKey = `${liveCar.column},${liveCar.row}`;
+        if (carKey !== lastParkedKey) {
+          lastParkedKey = carKey;
+          setParkedCar({ column: liveCar.column, row: liveCar.row });
+        }
+      }
 
-      if (moveCooldown <= 0 && (forward !== 0 || strafe !== 0)) {
+      if (!inCar && moveCooldown <= 0 && (forward !== 0 || strafe !== 0)) {
         const yaw = sceneApi.current?.getFacingYaw?.() ?? Math.PI;
         const dir = stepDirection(yaw, forward, strafe);
         const step = attemptStep(walkerRef.current, dir, solidRef.current);
         if (step.ok) {
           moveCooldown = WALK_TILE_SECONDS * (step.diagonal ? Math.SQRT2 : 1) / sprintMul;
-          soundEngine.playFootstepSound(sp.sprinting);
-          setWalker((prev) => ({ ...prev, column: step.column, row: step.row }));
-        } else if (step.blocked) {
-          moveCooldown = 0.1;
+          if (!rk.buggySeated) soundEngine.playFootstepSound(sp.sprinting);
+          const next = { ...walkerRef.current, column: step.column, row: step.row };
+          walkerRef.current = next;
+          setWalker(next);
+        } else if (step.blocked && bumpCooldown <= 0) {
+          bumpCooldown = 0.2;
           sceneApi.current?.playBump?.();
+        }
+      } else if (!rk.buggySeated && moveCooldown <= 0) {
+        const escape = nudgeOffSolid(walkerRef.current, solidRef.current);
+        if (escape?.ok) {
+          moveCooldown = WALK_TILE_SECONDS * (escape.diagonal ? Math.SQRT2 : 1);
+          const next = { ...walkerRef.current, column: escape.column, row: escape.row };
+          walkerRef.current = next;
+          setWalker(next);
         }
       }
 
       if (rk.guideStep === GUIDE_STEPS.WELCOME && (forward !== 0 || strafe !== 0)) {
         rk.dismissWelcome();
       }
-      const holdingF = keys.current.has('f') || keys.current.has('F');
+      const holdingF = !rk.buggySeated && codeHeld(keys.current, 'KeyF');
       const pos = walkerRef.current;
       const canMount =
         holdingF &&
@@ -458,29 +527,82 @@ export default function BaseBuilderView() {
 
   useEffect(() => {
     const down = (e) => {
-      keys.current.add(e.key);
-      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'w', 'a', 's', 'd', 'W', 'A', 'S', 'D', 'Shift'].includes(e.key)) {
+      noteKeyDown(keys.current, e);
+      if (e.code === 'KeyF' && !e.repeat) {
         e.preventDefault();
-      }
-      if ((e.key === 'f' || e.key === 'F') && !e.repeat) {
-        e.preventDefault();
-        if (rebuildKeysRef.current.guideStep === GUIDE_STEPS.WELCOME) {
-          rebuildKeysRef.current.dismissWelcome();
+        const rk = rebuildKeysRef.current;
+        if (rk.guideStep === GUIDE_STEPS.WELCOME) {
+          rk.dismissWelcome();
+        }
+        if (rk.buggySeated) {
+          const tile = sceneApi.current?.getDismountTile?.(solidRef.current);
+          if (tile) {
+            pendingDismount.current = tile;
+            const next = { ...walkerRef.current, column: tile.column, row: tile.row };
+            walkerRef.current = next;
+            setWalker(next);
+            sceneApi.current?.placeOnTile?.(tile.column, tile.row);
+          }
+          rk.standFromBuggy();
+          return;
+        }
+        const pos = walkerRef.current;
+        const ruin = findRuinNear(rk.buildings, pos.column, pos.row);
+        const car = sceneApi.current?.getCarTile?.();
+        const besideCar =
+          !!car && Math.hypot(pos.column - car.column, pos.row - car.row) <= 3;
+        if (
+          !rk.carriedPart &&
+          !ruin &&
+          rk.garageComplete &&
+          besideCar
+        ) {
+          if (rk.visitRole !== 'guest') {
+            const tile = sceneApi.current?.getCarTile?.();
+            if (tile) {
+              const next = { ...walkerRef.current, column: tile.column, row: tile.row };
+              walkerRef.current = next;
+              setWalker(next);
+            }
+          }
+          rk.sitInBuggy(rk.visitRole === 'guest' ? 'passenger' : 'driver');
         }
       }
       if ((e.key === 'e' || e.key === 'E') && !e.repeat) {
         e.preventDefault();
         const rk = rebuildKeysRef.current;
         const pos = walkerRef.current;
-        if (rk.buggySeated) {
-          rk.standFromBuggy();
+        if (rk.pickUpPartAt(pos.column, pos.row)) return;
+        if (rk.carriedPart) {
+          rk.dropCarriedPart(pos.column, pos.row);
           return;
         }
-        if (rk.pickUpPartAt(pos.column, pos.row)) return;
-        if (rk.carriedPart) return;
-        if (rk.garageComplete && isNearGarage(pos.column, pos.row)) {
-          rk.sitInBuggy(rk.visitRole === 'guest' ? 'passenger' : 'driver');
+        const house = findRepairedNear(rk.buildings, pos.column, pos.row);
+        const atMakeup = isNearMakeupHouse(pos.column, pos.row) && pos.column <= 2 && pos.row >= MAP_ROWS - 4;
+        if (!rk.isVisitGuest && atMakeup) {
+          setMakeupOpen(true);
           return;
+        }
+        if (!rk.isVisitGuest && house) {
+          if (house.buildingType === 'SLEEP_HOUSE') {
+            rk.sleepAtHouse();
+            return;
+          }
+          if (house.buildingType === 'COIN_GENERATOR') {
+            rk.collectHouseCoins(house.id);
+            return;
+          }
+          if (house.buildingType === 'INK_HOUSE') {
+            rk.cyclePaintColor();
+            return;
+          }
+          if (house.buildingType === 'CRAFT_HOUSE') {
+            const ups = (rk.buildings || []).filter((b) => !b.ruined && (b.level || 1) < 3);
+            const target = ups.find((b) => b.id === house.id) || ups[0];
+            if (target) rk.upgradeHouse(target.id);
+            else rk.showToast('Workshop max', 'info');
+            return;
+          }
         }
         if (!rk.isVisitGuest) {
           brushKeysRef.current.setSelectedTool('PAINT');
@@ -511,6 +633,14 @@ export default function BaseBuilderView() {
         e.preventDefault();
         const rk = rebuildKeysRef.current;
         if (rk.buggySeated) {
+          const tile = sceneApi.current?.getDismountTile?.(solidRef.current);
+          if (tile) {
+            pendingDismount.current = tile;
+            const next = { ...walkerRef.current, column: tile.column, row: tile.row };
+            walkerRef.current = next;
+            setWalker(next);
+            sceneApi.current?.placeOnTile?.(tile.column, tile.row);
+          }
           rk.standFromBuggy();
           return;
         }
@@ -533,15 +663,14 @@ export default function BaseBuilderView() {
         else showToast('Stand by a house · M', 'info');
       }
     };
-    const up = (e) => keys.current.delete(e.key);
-    const blur = () => keys.current.clear();
+    const up = (e) => noteKeyUp(keys.current, e);
     window.addEventListener('keydown', down);
     window.addEventListener('keyup', up);
-    window.addEventListener('blur', blur);
+    const unguard = bindKeyReleaseGuards(keys);
     return () => {
       window.removeEventListener('keydown', down);
       window.removeEventListener('keyup', up);
-      window.removeEventListener('blur', blur);
+      unguard();
     };
   }, []);
 
@@ -586,25 +715,30 @@ export default function BaseBuilderView() {
     handleBuildingSelect(buildingId);
   };
 
-  const hint = movingBuilding
-    ? 'Click a tile to drop'
+  const actionLines = movingBuilding
+    ? ['Click tile or M drop · Esc cancel']
     : buggySeated
-      ? visitRole === 'guest'
-        ? 'E leave'
-        : `Gear ${buggyGear} · E stand`
-      : nearGarage && garageComplete
-        ? 'E sit'
-        : nearGarage && carriedPart
-          ? 'Hold F to mount'
-          : carriedPart
-            ? 'Carry to garage'
-            : nearActive
-              ? 'Hold F'
-              : nearRuin && guideActive
-                ? 'Follow marker'
-                : brush.on
-                  ? `Brush ${brush.size}×${brush.size}`
-                  : null;
+      ? [visitRole === 'guest' ? 'F leave' : 'W drive · A/D steer · S back · F stand']
+      : [
+          nearGarage && carriedPart
+            ? mountProgress > 0.02
+              ? `Hold F · ${Math.round(mountProgress * 100)}%`
+              : 'Hold F to mount'
+            : null,
+          nearPart && !carriedPart ? 'E pick up' : null,
+          carriedPart && !nearGarage ? 'E drop · Hold F at garage' : null,
+          nearRuin && (nearActive || !guideActive) ? 'Hold F rebuild' : null,
+          nearRuin && guideActive && !nearActive ? 'Follow the marker' : null,
+          nearSleep && !nearRuin ? 'E sleep · save' : null,
+          nearCoin && !nearRuin ? 'E collect coins' : null,
+          nearInk && !nearRuin ? 'E next color' : null,
+          nearCraft && !nearRuin ? 'E upgrade' : null,
+          makeupStation ? 'E change camo' : null,
+          nearRepaired && !nearSleep && !nearCoin && !nearInk && !nearCraft && !movingBuilding ? 'M move house' : null,
+          nearCar && garageComplete && !carriedPart ? 'F enter' : null,
+          brush.on ? `E brush off · ${brush.size}×${brush.size}` : null,
+        ].filter(Boolean);
+  if (!actionLines.length) actionLines.push('WASD walk · Shift sprint 10s · V camera');
 
   return (
     <div className="relative w-full h-full overflow-hidden bg-clay-bg">
@@ -671,13 +805,30 @@ export default function BaseBuilderView() {
         onDismissMoveTip={dismissMoveTip}
       />
 
-      {hint && guideStep !== GUIDE_STEPS.REBUILD && guideStep !== GUIDE_STEPS.WELCOME && (
-        <div className="absolute top-[4.75rem] left-1/2 -translate-x-1/2 z-40 pointer-events-none">
-          <ClayPanel className="h-11 px-3.5 rounded-2xl text-[11px] font-semibold text-clay-text flex items-center">
-            {hint}
-          </ClayPanel>
-        </div>
-      )}
+      <HouseStation
+        building={peekHouse}
+        ruined={!!peekHouse?.ruined}
+        gameDay={gameDay}
+        storedCoins={Math.floor(Number(coinBanks[peekHouse?.id]) || 0)}
+        selectedColor={selectedColor}
+        buildings={buildings}
+        onCollect={() => {
+          if (!isVisitGuest) collectHouseCoins(peekHouse?.id);
+        }}
+        onPickColor={(key) => {
+          if (!isVisitGuest) pickPaintColor(key);
+        }}
+        onSleep={() => {
+          if (!isVisitGuest) sleepAtHouse();
+        }}
+        onUpgrade={(id) => {
+          if (!isVisitGuest) upgradeHouse(id);
+        }}
+        onOpenMakeup={() => {
+          if (!isVisitGuest) setMakeupOpen(true);
+        }}
+      />
+      {guideStep !== GUIDE_STEPS.WELCOME && <ActionPrompt lines={actionLines} />}
 
       <aside className="absolute right-4 top-[4.75rem] z-40 hidden md:flex flex-col items-end gap-2">
         <BaseStatusPanel />

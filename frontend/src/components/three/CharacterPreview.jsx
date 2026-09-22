@@ -1,12 +1,12 @@
 import React, { useEffect, useRef } from 'react';
-import { buildCharacter, tickCharacter } from '../../character/buildCharacter.js';
+import { buildCharacter, tickCharacter, CHAR_MESH_REV } from '../../character/buildCharacter.js';
 import * as THREE from 'three';
 
 function clayMat(color, extras = {}) {
   return new THREE.MeshStandardMaterial({
     color,
-    roughness: 0.48,
-    metalness: 0.05,
+    roughness: 0.7,
+    metalness: 0.02,
     ...extras,
   });
 }
@@ -25,15 +25,16 @@ export default function CharacterPreview({
     if (!mount) return;
 
     const scene = new THREE.Scene();
-    scene.background = null;
+    scene.background = new THREE.Color('#C9C2B6');
 
-    const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 24);
-    camera.position.set(0.55, 1.45, 4.4);
-    camera.lookAt(0, 1.05, 0);
+    const camera = new THREE.PerspectiveCamera(28, 1, 0.1, 24);
+    camera.position.set(1.28, 0.92, 2.95);
+    camera.lookAt(0, 0.78, 0);
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     const canvas = renderer.domElement;
     canvas.style.display = 'block';
@@ -42,32 +43,32 @@ export default function CharacterPreview({
     mount.style.overflow = 'hidden';
     mount.appendChild(canvas);
 
-    scene.add(new THREE.HemisphereLight(0xf1faee, 0x0d1b1e, 0.9));
-    const key = new THREE.DirectionalLight(0xffe0c2, 1.25);
-    key.position.set(2.6, 4.4, 3.4);
+    scene.add(new THREE.HemisphereLight(0xf5efe6, 0x8a8478, 0.9));
+    const key = new THREE.DirectionalLight(0xfff6ea, 1.05);
+    key.position.set(2.2, 4.4, 3.2);
     key.castShadow = true;
+    key.shadow.mapSize.set(1024, 1024);
     scene.add(key);
-    const rim = new THREE.DirectionalLight(0x8d5cc7, 0.4);
-    rim.position.set(-2.8, 2.2, -2);
-    scene.add(rim);
-    const fill = new THREE.DirectionalLight(0x72b83f, 0.28);
-    fill.position.set(-2.2, 1.2, 1.5);
+    const fill = new THREE.DirectionalLight(0xffffff, 0.38);
+    fill.position.set(-2.4, 1.8, 1.6);
     scene.add(fill);
 
-    const ground = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.25, 0.16, 36), clayMat('#152428'));
-    ground.position.y = -0.08;
+    const ground = new THREE.Mesh(new THREE.CircleGeometry(1.15, 40), clayMat('#B7AFA3'));
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.y = 0;
     ground.receiveShadow = true;
     scene.add(ground);
 
-    const ring = new THREE.Mesh(
-      new THREE.TorusGeometry(0.95, 0.03, 10, 40),
-      clayMat('#F4A261', { transparent: true, opacity: 0.55 })
+    const contact = new THREE.Mesh(
+      new THREE.CircleGeometry(0.28, 24),
+      new THREE.MeshBasicMaterial({ color: '#8A8478', transparent: true, opacity: 0.28, depthWrite: false })
     );
-    ring.rotation.x = Math.PI / 2;
-    ring.position.y = 0.01;
-    scene.add(ring);
+    contact.rotation.x = -Math.PI / 2;
+    contact.position.y = 0.004;
+    scene.add(contact);
 
     let figure = buildCharacter(stateRef.current.characterModel, stateRef.current.camoColor);
+    figure.rotation.y = 0.62;
     scene.add(figure);
 
     const rebuild = () => {
@@ -80,6 +81,7 @@ export default function CharacterPreview({
         }
       });
       figure = buildCharacter(stateRef.current.characterModel, stateRef.current.camoColor);
+      figure.rotation.y = 0.62;
       scene.add(figure);
     };
 
@@ -100,21 +102,19 @@ export default function CharacterPreview({
     const ro = new ResizeObserver(resize);
     ro.observe(mount);
 
-    let lastSig = `${stateRef.current.characterModel}:${stateRef.current.camoColor}`;
+    let lastSig = `${stateRef.current.characterModel}:${stateRef.current.camoColor}:${CHAR_MESH_REV}`;
     let raf = 0;
     const clock = new THREE.Clock();
     const tick = () => {
       const dt = clock.getDelta();
       const elapsed = clock.elapsedTime;
-      const sig = `${stateRef.current.characterModel}:${stateRef.current.camoColor}`;
+      const sig = `${stateRef.current.characterModel}:${stateRef.current.camoColor}:${CHAR_MESH_REV}`;
       if (sig !== lastSig) {
         lastSig = sig;
         rebuild();
       }
-      figure.rotation.y = elapsed * 0.32;
-      figure.position.y = 0;
+      figure.rotation.y = 0.62;
       tickCharacter(figure, elapsed, { dt, speed: 0.85 });
-      ring.rotation.z = elapsed * 0.25;
       renderer.render(scene, camera);
       raf = requestAnimationFrame(tick);
     };

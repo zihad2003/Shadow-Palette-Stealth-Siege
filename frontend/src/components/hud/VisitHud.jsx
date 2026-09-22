@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Car, Users, LogOut } from 'lucide-react';
 import { useGameState, CART_PARTS, WHEEL_PART_IDS, BODY_PART_IDS } from '../../state/GameStateContext.jsx';
 import ClayPanel from '../ui/ClayPanel.jsx';
@@ -17,6 +17,9 @@ export default function VisitHud() {
     buggyGear,
     onlinePlayers,
     pendingInvite,
+    rideInviteOpen,
+    closeRideInvite,
+    openRideInvite,
     visitSession,
     visitRole,
     isVisitGuest,
@@ -26,6 +29,7 @@ export default function VisitHud() {
     endVisit,
     bumpBuggyGear,
   } = useGameState();
+  const [sentIds, setSentIds] = useState({});
 
   if (
     gameState === 'STEALTH_RAID' ||
@@ -42,23 +46,68 @@ export default function VisitHud() {
   const showParts = gameState === 'BASE_BUILDER' && !isVisitGuest;
   const showRide = gameState === 'BASE_BUILDER' && buggySeated;
   const showVisitBanner = gameState === 'BASE_BUILDER' && visitSession;
+  const showInvite =
+    gameState === 'BASE_BUILDER' && rideInviteOpen && buggySeated && !isVisitGuest && !visitSession;
   const wheelsOn = mountedParts.filter((id) => WHEEL_PART_IDS.includes(id)).length;
   const bodyOn = mountedParts.filter((id) => BODY_PART_IDS.includes(id)).length;
   const wheels = CART_PARTS.filter((p) => p.kind === 'wheel');
   const bodies = CART_PARTS.filter((p) => p.kind === 'body');
+  const players = onlinePlayers || [];
+
+  const sendInvite = async (player) => {
+    const ok = await invitePlayer(player.userId);
+    if (ok) setSentIds((prev) => ({ ...prev, [player.userId]: true }));
+  };
 
   return (
     <>
       {pendingInvite && (
         <div className="fixed top-[4.75rem] left-1/2 -translate-x-1/2 z-[170] pointer-events-auto">
-          <ClayPanel depth="deep" className="h-11 px-3 rounded-2xl flex items-center gap-2">
-            <p className="text-[11px] font-semibold text-clay-text">Visit {pendingInvite.hostName || 'base'}?</p>
-            <ClayButton variant="success" className="h-7 px-3 rounded-lg text-[10px]" onClick={() => acceptPendingInvite(pendingInvite)}>
-              Yes
+          <ClayPanel depth="deep" className="px-3 py-2.5 rounded-2xl flex items-center gap-3">
+            <div>
+              <p className="text-[12px] font-semibold text-clay-text">
+                {pendingInvite.hostName || 'A player'} invited you
+              </p>
+              <p className="text-[10px] text-clay-muted">Accept to enter their base</p>
+            </div>
+            <ClayButton variant="success" className="h-8 px-3 rounded-lg text-[11px]" onClick={() => acceptPendingInvite(pendingInvite)}>
+              Accept
             </ClayButton>
-            <ClayButton variant="ghost" className="h-7 px-3 rounded-lg text-[10px]" onClick={() => declinePendingInvite(pendingInvite)}>
-              No
+            <ClayButton variant="ghost" className="h-8 px-3 rounded-lg text-[11px]" onClick={() => declinePendingInvite(pendingInvite)}>
+              Decline
             </ClayButton>
+          </ClayPanel>
+        </div>
+      )}
+
+      {showInvite && (
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[160] pointer-events-auto w-[17rem]">
+          <ClayPanel depth="deep" className="px-3 py-3 rounded-2xl">
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <p className="text-[12px] font-semibold text-clay-text">Invite a player</p>
+              <ClayButton variant="ghost" className="h-6 px-2 rounded-lg text-[10px]" onClick={closeRideInvite}>
+                Close
+              </ClayButton>
+            </div>
+            <p className="text-[10px] text-clay-muted mb-2">They join your base when they accept.</p>
+            {players.length === 0 ? (
+              <p className="text-[11px] text-clay-muted py-1">No other players online</p>
+            ) : (
+              <div className="flex flex-col gap-1.5">
+                {players.map((p) => (
+                  <div key={p.userId} className="flex items-center justify-between gap-2">
+                    <span className="text-[12px] font-semibold text-clay-text truncate">{p.username || `Player ${p.userId}`}</span>
+                    <ClayButton
+                      variant={sentIds[p.userId] ? 'ghost' : 'success'}
+                      className="h-7 px-2.5 rounded-lg text-[10px]"
+                      onClick={() => sendInvite(p)}
+                    >
+                      {sentIds[p.userId] ? 'Sent' : 'Invite'}
+                    </ClayButton>
+                  </div>
+                ))}
+              </div>
+            )}
           </ClayPanel>
         </div>
       )}
@@ -129,7 +178,9 @@ export default function VisitHud() {
                   ? `${Math.round(mountProgress * 100)}%`
                   : 'Hold F'
                 : garageComplete
-                  ? 'E sit'
+                  ? buggySeated
+                    ? 'F stand'
+                    : 'F enter'
                   : (typeof missingPartLabel === 'function' ? missingPartLabel() : missingPartLabel) || ''}
             </span>
           </ClayPanel>
@@ -154,16 +205,11 @@ export default function VisitHud() {
                 ))}
               </div>
             )}
-            {visitRole !== 'guest' && (onlinePlayers || []).slice(0, 2).map((p) => (
-              <ClayButton
-                key={p.userId}
-                variant="success"
-                className="h-7 px-2 rounded-lg text-[10px]"
-                onClick={() => invitePlayer(p.userId)}
-              >
-                {p.username}
+            {visitRole !== 'guest' && !visitSession && (
+              <ClayButton variant="success" className="h-7 px-2 rounded-lg text-[10px]" onClick={openRideInvite}>
+                Invite
               </ClayButton>
-            ))}
+            )}
           </ClayPanel>
         </div>
       )}

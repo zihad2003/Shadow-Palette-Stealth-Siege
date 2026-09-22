@@ -1,9 +1,9 @@
 /** Sprint tuning shared by base walk + raid. */
 export const SPRINT_SPEED_MULT = 1.9;
 /** Full bar lasts this many seconds of sprinting. */
-export const SPRINT_SECONDS = 3.5;
+export const SPRINT_SECONDS = 10;
 /** Seconds to refill from empty. */
-export const SPRINT_REGEN_SECONDS = 5.5;
+export const SPRINT_REGEN_SECONDS = 8;
 /** Pause before regen starts after releasing sprint. */
 export const SPRINT_REGEN_DELAY = 0.7;
 /** Need at least this much to start a fresh sprint (avoids stutter). */

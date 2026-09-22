@@ -1,112 +1,69 @@
 import * as THREE from 'three';
-import { MAP_COLORS, boardFogRange, LARGE_MAP } from './mapConfig.js';
+import { boardFogRange, LARGE_MAP } from './mapConfig.js';
 import { SLAB_HALF_W, SLAB_HALF_D } from './MapGround.js';
 
-// ─── Purple clay environment in the reference style ──────────────────────
-// Carved, wavy strata layers stepping down from the fortress, dressed with
-// small clay trees, bushes and rocks. Nothing inside the walls.
+const FOREST = {
+  floor: '#07110C',
+  moss: '#0C1A12',
+  canopy: '#102016',
+  leaf: '#163224',
+  leafDk: '#0D1C14',
+  trunk: '#1A1410',
+  rock: '#1C2220',
+  mountain: '#121816',
+  mountainHi: '#1A2420',
+  sea: '#0A1C28',
+  seaDeep: '#061018',
+  foam: '#1A3A44',
+  sky: '#070B0A',
+};
 
 function rand(i, salt) {
   const s = Math.sin(i * 83.9 + salt * 29.3) * 43758.5453;
   return s - Math.floor(s);
 }
 
-// Wavy rounded-rectangle outline (superellipse + organic wobble)
-function strataShape(halfW, halfD, phase) {
-  const shape = new THREE.Shape();
-  const N = 110;
-  for (let k = 0; k <= N; k++) {
-    const t = (k / N) * Math.PI * 2;
-    const c = Math.cos(t);
-    const s = Math.sin(t);
-    const n = 4.2; // superellipse exponent → soft rounded rectangle
-    const base = 1 / Math.pow(Math.pow(Math.abs(c) / halfW, n) + Math.pow(Math.abs(s) / halfD, n), 1 / n);
-    const wobble =
-      1 + 0.045 * Math.sin(3 * t + phase) + 0.03 * Math.sin(7 * t + phase * 2.3) + 0.018 * Math.sin(12 * t + phase * 4.1);
-    const r = base * wobble;
-    const x = r * c;
-    const y = r * s;
-    if (k === 0) shape.moveTo(x, y);
-    else shape.lineTo(x, y);
-  }
-  shape.closePath();
-  return shape;
-}
-
-function strataLayer(halfW, halfD, phase, thickness, color) {
-  const geo = new THREE.ExtrudeGeometry(strataShape(halfW, halfD, phase), {
-    depth: thickness,
-    bevelEnabled: true,
-    bevelThickness: 0.14,
-    bevelSize: 0.22,
-    bevelSegments: 3,
-    curveSegments: 6,
-  });
-  const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color, roughness: 0.86, metalness: 0.02 }));
-  mesh.rotation.x = -Math.PI / 2;
-  mesh.receiveShadow = true;
-  mesh.castShadow = true;
-  return mesh;
-}
-
-// ---- Clay flora ----
-const TREE_COLORS = ['#4E9C5C', '#6FA84F', '#C4B348', '#C97BB6', '#8B6BC7', '#4E9C8D'];
-
-function blobTree(i) {
+function darkTree(i) {
   const tree = new THREE.Group();
-  const color = TREE_COLORS[Math.floor(rand(i, 1) * TREE_COLORS.length)];
-  const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.7 });
+  const leaf = rand(i, 2) > 0.5 ? FOREST.leaf : FOREST.leafDk;
+  const mat = new THREE.MeshStandardMaterial({ color: leaf, roughness: 0.88 });
   const trunk = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.07, 0.1, 0.24, 8),
-    new THREE.MeshStandardMaterial({ color: '#6b4a32', roughness: 0.8 })
+    new THREE.CylinderGeometry(0.06, 0.1, 0.55 + rand(i, 3) * 0.4, 6),
+    new THREE.MeshStandardMaterial({ color: FOREST.trunk, roughness: 0.92 })
   );
-  trunk.position.y = 0.12;
+  trunk.position.y = 0.28;
   tree.add(trunk);
-  const puffs = 2 + Math.floor(rand(i, 2) * 2);
+  const puffs = 2 + Math.floor(rand(i, 4) * 2);
   for (let p = 0; p < puffs; p++) {
-    const r = 0.34 - p * 0.09;
-    const puff = new THREE.Mesh(new THREE.SphereGeometry(r, 14, 12), mat);
-    puff.position.y = 0.3 + p * 0.26;
-    puff.scale.y = 0.82;
-    puff.castShadow = true;
+    const puff = new THREE.Mesh(new THREE.SphereGeometry(0.28 - p * 0.05, 8, 6), mat);
+    puff.position.y = 0.52 + p * 0.22;
+    puff.scale.set(1.15, 0.7, 1.15);
     tree.add(puff);
   }
   return tree;
 }
 
-function pineTree(i) {
-  const tree = new THREE.Group();
-  const color = TREE_COLORS[Math.floor(rand(i, 3) * TREE_COLORS.length)];
-  const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.7 });
-  for (let p = 0; p < 3; p++) {
-    const cone = new THREE.Mesh(new THREE.ConeGeometry(0.34 - p * 0.09, 0.4, 10), mat);
-    cone.position.y = 0.28 + p * 0.26;
-    cone.castShadow = true;
-    tree.add(cone);
-  }
-  return tree;
-}
-
-function rock(i) {
+function mountainChunk(i, scale) {
   const mesh = new THREE.Mesh(
-    new THREE.DodecahedronGeometry(0.16 + rand(i, 4) * 0.16),
-    new THREE.MeshStandardMaterial({ color: rand(i, 5) > 0.5 ? '#7d74a8' : '#9d94c4', roughness: 0.85 })
+    new THREE.ConeGeometry(1.4 + rand(i, 5) * 1.1, 3.2 + rand(i, 6) * 2.4, 5),
+    new THREE.MeshStandardMaterial({
+      color: rand(i, 7) > 0.5 ? FOREST.mountain : FOREST.mountainHi,
+      roughness: 0.94,
+      flatShading: true,
+    })
   );
-  mesh.position.y = 0.1;
-  mesh.rotation.set(rand(i, 6) * 3, rand(i, 7) * 3, 0);
-  mesh.castShadow = true;
+  mesh.scale.set(scale, scale, scale);
+  mesh.rotation.y = rand(i, 8) * Math.PI;
   return mesh;
 }
 
-function bush(i) {
-  const color = TREE_COLORS[Math.floor(rand(i, 8) * TREE_COLORS.length)];
+function seaRock(i) {
   const mesh = new THREE.Mesh(
-    new THREE.SphereGeometry(0.16 + rand(i, 9) * 0.1, 12, 10),
-    new THREE.MeshStandardMaterial({ color, roughness: 0.75 })
+    new THREE.DodecahedronGeometry(0.18 + rand(i, 9) * 0.22),
+    new THREE.MeshStandardMaterial({ color: FOREST.foam, roughness: 0.7 })
   );
-  mesh.scale.y = 0.65;
-  mesh.position.y = 0.08;
-  mesh.castShadow = true;
+  mesh.position.y = 0.04;
+  mesh.rotation.set(rand(i, 10), rand(i, 11), 0);
   return mesh;
 }
 
@@ -114,81 +71,88 @@ export function createOuterTerrain() {
   const group = new THREE.Group();
   group.name = 'OuterTerrain';
 
-  // Deep base far past the frustum
   const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(Math.max(260, SLAB_HALF_W * 8), Math.max(260, SLAB_HALF_D * 8)),
-    new THREE.MeshStandardMaterial({ color: MAP_COLORS.terrainBase, roughness: 0.9 })
+    new THREE.PlaneGeometry(Math.max(280, SLAB_HALF_W * 9), Math.max(280, SLAB_HALF_D * 9)),
+    new THREE.MeshStandardMaterial({ color: FOREST.floor, roughness: 0.95 })
   );
   ground.rotation.x = -Math.PI / 2;
-  ground.position.y = -1.05;
+  ground.position.y = -0.92;
   ground.receiveShadow = true;
   group.add(ground);
 
-  // Carved strata stepping down and outward (extrude grows +y after rotation)
-  const L1 = strataLayer(SLAB_HALF_W + 2.4, SLAB_HALF_D + 2.4, 0.7, 0.3, MAP_COLORS.terrainL1);
-  L1.position.y = -0.62;
-  group.add(L1);
-  const L2 = strataLayer(SLAB_HALF_W + 4.6, SLAB_HALF_D + 4.6, 2.1, 0.28, MAP_COLORS.terrainL2);
-  L2.position.y = -0.85;
-  group.add(L2);
-  const L3 = strataLayer(SLAB_HALF_W + 7.2, SLAB_HALF_D + 7.2, 4.4, 0.26, MAP_COLORS.terrainL3);
-  L3.position.y = -1.05;
-  group.add(L3);
+  const moss = new THREE.Mesh(
+    new THREE.CircleGeometry(Math.max(SLAB_HALF_W, SLAB_HALF_D) + 9, 24),
+    new THREE.MeshStandardMaterial({ color: FOREST.moss, roughness: 0.92 })
+  );
+  moss.rotation.x = -Math.PI / 2;
+  moss.position.y = -0.78;
+  moss.receiveShadow = true;
+  group.add(moss);
 
-  // Clay flora scattered on the strata ring — denser on large maps
-  const floraCount = LARGE_MAP ? 140 : 42;
-  for (let i = 0; i < floraCount; i++) {
-    const angle = (i / floraCount) * Math.PI * 2 + rand(i, 10) * 0.32;
-    const c = Math.cos(angle);
-    const s = Math.sin(angle);
-    const edgeX = SLAB_HALF_W + 0.8;
-    const edgeZ = SLAB_HALF_D + 0.8;
-    const n = 4.2;
-    const ringBase = 1 / Math.pow(Math.pow(Math.abs(c) / edgeX, n) + Math.pow(Math.abs(s) / edgeZ, n), 1 / n);
-    const dist = ringBase + rand(i, 11) * (LARGE_MAP ? 4.5 : 2.4);
-    const x = c * dist;
-    const z = s * dist;
-    if (Math.abs(x) < SLAB_HALF_W + 0.35 && Math.abs(z) < SLAB_HALF_D + 0.35) continue; // off the board
-    if (Math.abs(x) < 2.6 && z > SLAB_HALF_D - 0.5) continue; // keep gate path clear
+  const sea = new THREE.Mesh(
+    new THREE.PlaneGeometry(42, 28),
+    new THREE.MeshStandardMaterial({
+      color: FOREST.sea,
+      roughness: 0.35,
+      metalness: 0.18,
+    })
+  );
+  sea.rotation.x = -Math.PI / 2;
+  sea.position.set(SLAB_HALF_W + 16, -0.88, 0);
+  group.add(sea);
+  const seaDeep = new THREE.Mesh(
+    new THREE.PlaneGeometry(70, 40),
+    new THREE.MeshStandardMaterial({ color: FOREST.seaDeep, roughness: 0.45 })
+  );
+  seaDeep.rotation.x = -Math.PI / 2;
+  seaDeep.position.set(SLAB_HALF_W + 28, -0.94, 0);
+  group.add(seaDeep);
 
-    const roll = rand(i, 12);
-    const item = roll < 0.34 ? blobTree(i) : roll < 0.55 ? pineTree(i) : roll < 0.78 ? bush(i) : rock(i);
-    item.position.set(x, -0.18, z);
-    item.rotation.y = rand(i, 13) * Math.PI * 2;
-    const sc = 0.75 + rand(i, 14) * 0.7;
-    item.scale.multiplyScalar(sc);
-    if (LARGE_MAP) {
-      item.traverse((ch) => {
-        if (ch.isMesh) ch.castShadow = false;
-      });
-    }
-    group.add(item);
+  const mountainCount = LARGE_MAP ? 11 : 7;
+  for (let i = 0; i < mountainCount; i++) {
+    const t = (i / mountainCount - 0.5) * 0.9;
+    const chunk = mountainChunk(i, 1.1 + rand(i, 12) * 0.5);
+    chunk.position.set(-SLAB_HALF_W - 8 - rand(i, 13) * 6, -0.4, t * (SLAB_HALF_D + 10));
+    group.add(chunk);
+  }
+  for (let i = 0; i < 5; i++) {
+    const chunk = mountainChunk(i + 40, 0.85 + rand(i, 14) * 0.4);
+    chunk.position.set((i - 2) * 4.5, -0.35, -SLAB_HALF_D - 7 - rand(i, 15) * 3);
+    group.add(chunk);
   }
 
-  // Extra scattered rock fields outside for a wilder world ring
-  if (LARGE_MAP) {
-    for (let i = 0; i < 60; i++) {
-      const angle = rand(i, 20) * Math.PI * 2;
-      const dist = SLAB_HALF_W + 3 + rand(i, 21) * 8;
-      const x = Math.cos(angle) * dist;
-      const z = Math.sin(angle) * dist * (SLAB_HALF_D / SLAB_HALF_W);
-      if (Math.abs(x) < SLAB_HALF_W + 0.5 && Math.abs(z) < SLAB_HALF_D + 0.5) continue;
-      const item = rand(i, 22) > 0.45 ? rock(i + 200) : bush(i + 200);
-      item.position.set(x, -0.2, z);
-      item.scale.multiplyScalar(0.7 + rand(i, 23) * 0.9);
-      item.traverse((ch) => {
-        if (ch.isMesh) ch.castShadow = false;
-      });
-      group.add(item);
-    }
+  const treeCount = LARGE_MAP ? 72 : 36;
+  for (let i = 0; i < treeCount; i++) {
+    const angle = (i / treeCount) * Math.PI * 2 + rand(i, 16) * 0.2;
+    const c = Math.cos(angle);
+    const s = Math.sin(angle);
+    if (c > 0.35) continue;
+    const dist = Math.max(SLAB_HALF_W, SLAB_HALF_D) + 1.6 + rand(i, 17) * 6;
+    const x = c * dist;
+    const z = s * dist * (SLAB_HALF_D / SLAB_HALF_W);
+    if (Math.abs(x) < SLAB_HALF_W + 0.4 && Math.abs(z) < SLAB_HALF_D + 0.4) continue;
+    if (Math.abs(x) < 2.8 && z > SLAB_HALF_D - 0.6) continue;
+    const tree = darkTree(i);
+    tree.position.set(x, -0.55, z);
+    tree.scale.multiplyScalar(0.85 + rand(i, 18) * 0.7);
+    tree.traverse((ch) => {
+      if (ch.isMesh) ch.castShadow = false;
+    });
+    group.add(tree);
+  }
+
+  const foamCount = LARGE_MAP ? 18 : 10;
+  for (let i = 0; i < foamCount; i++) {
+    const rock = seaRock(i);
+    rock.position.set(SLAB_HALF_W + 3.2 + rand(i, 19) * 8, -0.82, (rand(i, 20) - 0.5) * 18);
+    group.add(rock);
   }
 
   return group;
 }
 
-/** Purple backdrop and gentle fog so the strata melt out at the edges. */
 export function applyMapAtmosphere(scene) {
-  scene.background = new THREE.Color(MAP_COLORS.sky);
+  scene.background = new THREE.Color(FOREST.sky);
   const { near, far } = boardFogRange();
-  scene.fog = new THREE.Fog(MAP_COLORS.sky, near, far);
+  scene.fog = new THREE.Fog(FOREST.sky, near * 0.85, far * 1.05);
 }

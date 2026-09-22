@@ -4,7 +4,7 @@ import { GAME_COLORS } from '../colors.js';
 import { TILE_PITCH } from './mapConfig.js';
 
 /** Bump when house geometry changes so GameMap drops cached meshes. */
-export const HOUSE_MESH_REV = 12;
+export const HOUSE_MESH_REV = 13;
 
 /** Visual height vs the 3×3 pad — concept cottages read as tall clay buildings. */
 export const HOUSE_HEIGHT_SCALE = 3;
@@ -17,25 +17,26 @@ export const KIT = {
   stone: '#C4B89A',
   stoneDk: '#9A917C',
   stoneLt: '#E8DCC8',
-  shingleBlue: '#2F62E4',
-  shingleBlueDk: '#1E48C0',
-  shingleBlueMid: '#3D74F0',
+  shingleBlue: GAME_COLORS.BLUE,
+  shingleBlueDk: '#3A4EAE',
+  shingleBlueMid: '#6B82E8',
   purple: GAME_COLORS.PURPLE,
   purpleDk: '#6A3FA0',
-  gold: '#E5B93D',
+  gold: GAME_COLORS.YELLOW,
   goldDk: '#C9A227',
   iron: '#3A3630',
   ironLt: '#5A5550',
   cream: '#EDE4D4',
   plaster: '#F3E6D0',
-  grass: '#4A7A32',
-  bannerBlue: '#2F5BD4',
-  bannerGold: '#F4C245',
+  grass: GAME_COLORS.GREEN,
+  bannerBlue: GAME_COLORS.BLUE,
+  bannerGold: GAME_COLORS.YELLOW,
   lamp: '#FFB25A',
   pillow: '#F1FAEE',
-  bedding: '#3A5FD4',
+  bedding: GAME_COLORS.BLUE,
   steel: '#5A6570',
   steelDk: '#3E4850',
+  red: GAME_COLORS.RED,
 };
 
 export function clay(color, extras = {}) {
@@ -90,6 +91,38 @@ export function clothColor(hexColor, fallback) {
     return fallback;
   }
   return hexColor;
+}
+
+export function roofPair(hex) {
+  const c = new THREE.Color(hex || GAME_COLORS.BLUE);
+  const dark = c.clone().multiplyScalar(0.72);
+  return { color: `#${c.getHexString()}`, dark: `#${dark.getHexString()}` };
+}
+
+/** Shared cottage body so every rebuilt building reads as a house. */
+export function addCottageFrame(group, { bw, bd, smashed = false, wall = KIT.cream, roofHex = GAME_COLORS.BLUE } = {}) {
+  addPlinth(group, bw, bd);
+  const bodyW = bw * 0.78;
+  const bodyD = bd * 0.7;
+  const bodyH = smashed ? 0.5 : 0.84;
+  const hall = box(bodyW, bodyH, bodyD, wall, 0.06);
+  hall.position.set(0, bodyH / 2 + 0.1, 0);
+  add(group, hall);
+  const roof = roofPair(roofHex);
+  addGableRoof(group, {
+    w: bw * 0.94,
+    d: bd * 0.84,
+    y: smashed ? 0.64 : 1.04,
+    color: roof.color,
+    dark: roof.dark,
+    broken: smashed,
+  });
+  addTimberGable(group, 0, smashed ? 0.86 : 1.22, bodyD * 0.36, { w: bodyW * 0.9, h: 0.42, smashed });
+  addDoor(group, 0, smashed ? 0.32 : 0.42, bodyD * 0.51, { smashed });
+  addGlowWindow(group, -bodyW * 0.22, smashed ? 0.54 : 0.74, bodyD * 0.51, { smashed, planter: true });
+  addGlowWindow(group, bodyW * 0.22, smashed ? 0.54 : 0.74, bodyD * 0.51, { smashed, planter: false });
+  addChimney(group, bodyW * 0.28, smashed ? 0.8 : 1.2, -bodyD * 0.1, { h: 0.48, broken: smashed, fire: !smashed });
+  return { bodyW, bodyD, bodyH };
 }
 
 export function add(group, mesh) {

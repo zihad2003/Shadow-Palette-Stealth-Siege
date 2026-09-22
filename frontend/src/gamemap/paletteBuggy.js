@@ -51,7 +51,7 @@ export function isGarageTile(column, row) {
   );
 }
 
-export function isNearGarage(column, row, radius = 2) {
+export function isNearGarage(column, row, radius = 3) {
   const cx = GARAGE_ORIGIN.column + (GARAGE_SIZE - 1) / 2;
   const cy = GARAGE_ORIGIN.row + (GARAGE_SIZE - 1) / 2;
   return isGarageTile(column, row) || Math.hypot(column - cx, row - cy) <= radius;
@@ -62,6 +62,20 @@ export function garageCenterWorld() {
   const cy = GARAGE_ORIGIN.row + (GARAGE_SIZE - 1) / 2;
   return tileWorldPos(cx, cy);
 }
+
+export function garageCenterTile() {
+  return {
+    column: Math.round(GARAGE_ORIGIN.column + (GARAGE_SIZE - 1) / 2),
+    row: Math.round(GARAGE_ORIGIN.row + (GARAGE_SIZE - 1) / 2),
+  };
+}
+
+/** Matches GameMap `buggyMesh.scale`. Hips sit on the cushion, not the feet. */
+export const BUGGY_WORLD_SCALE = 1.48 * 0.75;
+export const SEATED_CHAR_SCALE = 0.78;
+const HIP_Y = 0.72;
+const CUSHION_TOP = 0.63;
+const SEAT_Y = CUSHION_TOP - (HIP_Y * SEATED_CHAR_SCALE) / BUGGY_WORLD_SCALE;
 
 export function garageTileKeys() {
   const keys = [];
@@ -131,7 +145,7 @@ export function scatterCartParts(buildings = []) {
   });
 }
 
-export function findPartNear(spawns, column, row, radius = 1.7) {
+export function findPartNear(spawns, column, row, radius = 2.2) {
   let best = null;
   let bestD = radius;
   (spawns || []).forEach((p) => {
@@ -562,8 +576,8 @@ export function buildPaletteBuggy(mountedParts = []) {
   addCage(root, mounted.has('CAGE_YELLOW'));
   addRear(root, mounted.has('REAR_PURPLE'));
 
-  root.userData.driverSeat = new THREE.Vector3(-0.2, 0.76, -0.02);
-  root.userData.passengerSeat = new THREE.Vector3(0.2, 0.76, -0.02);
+  root.userData.driverSeat = new THREE.Vector3(-0.2, SEAT_Y, -0.02);
+  root.userData.passengerSeat = new THREE.Vector3(0.2, SEAT_Y, -0.02);
   return root;
 }
 

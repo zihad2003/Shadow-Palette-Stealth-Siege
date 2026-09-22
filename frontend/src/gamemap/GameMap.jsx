@@ -12,13 +12,18 @@ import { createSearchlight } from './Searchlight.js';
 import { createMakeupHouse } from './MakeupHouse.js';
 import { createWallBreakFX } from './WallBreakFX.js';
 import { buildGameHouse, buildRuinedHouse, placeHouseOnTile, createGamePatrolRobot, tickBuildingMotion, buildHouseBlueprint, tintBlueprint, createGuideMarker, tickGuideMarker, createRebuildFX, tickRebuildFX } from './buildStructure.js';
-import { createAttacker, tickCharacter } from '../character/buildCharacter.js';
+import { createAttacker, tickCharacter, CHAR_MESH_REV } from '../character/buildCharacter.js';
+import { canEnterTile } from './occupancy.js';
 import {
   buildPaletteBuggy,
   buildPartPickup,
   buildGaragePad,
   buggyTrackPose,
   garageCenterWorld,
+  garageCenterTile,
+  isGarageTile,
+  BUGGY_WORLD_SCALE,
+  SEATED_CHAR_SCALE,
 } from './paletteBuggy.js';
 import {
   CAMERA,
@@ -404,6 +409,42 @@ export default function GameMap({
     let lastPatrolHit = { caught: false, hitting: false };
     let garagePad = null;
     let buggyMesh = null;
+    const carTile = garageCenterTile();
+    let carYaw = 0;
+    const buggyGlide = { x: 0, z: 0, primed: false };
+    let driveInput = { driving: false, forward: 0, sprintMul: 1, solids: null };
+    let exitSnap = null;
+    const worldToTile = (x, z) => ({
+      column: THREE.MathUtils.clamp(
+        Math.round((x - (-GRID_WIDTH / 2 + TILE_SIZE / 2)) / TILE_PITCH),
+        0,
+        MAP_COLS - 1
+      ),
+      row: THREE.MathUtils.clamp(
+        Math.round((z - (-GRID_DEPTH / 2 + TILE_SIZE / 2)) / TILE_PITCH),
+        0,
+        MAP_ROWS - 1
+      ),
+    });
+    const carFits = (x, z, yaw, solids) => {
+      if (!solids) return true;
+      const s = Math.sin(yaw);
+      const c = Math.cos(yaw);
+      const samples = [
+        [0, 0],
+        [0.62, 0.36],
+        [0.62, -0.36],
+        [-0.55, 0.36],
+        [-0.55, -0.36],
+      ];
+      for (let i = 0; i < samples.length; i += 1) {
+        const f = samples[i][0];
+        const r = samples[i][1];
+        const tile = worldToTile(x + s * f + c * r, z + c * f - s * r);
+        if (!canEnterTile(tile.column, tile.row, solids)) return false;
+      }
+      return true;
+    };
     let cartPartsGroup = null;
     let rideOtherMesh = null;
     let lastPartSig = '';
@@ -440,22 +481,58 @@ export default function GameMap({
         }
         buggyMesh = buildPaletteBuggy(parts);
         lastPartSig = sig;
-        buggyMesh.scale.setScalar(1.48);
+        buggyMesh.scale.setScalar(BUGGY_WORLD_SCALE);
         scene.add(buggyMesh);
       }
       buggyMesh.visible = true;
-      const anyoneSeated = !!(ride.seated || ride.otherSeated);
-      const pose = anyoneSeated || (ride.gear || 0) > 0
-        ? buggyTrackPose(ride.trackT || 0)
-        : (() => {
-            const c = garageCenterWorld();
-            return { x: c.x, z: c.z, y: TILE_HEIGHT, yaw: 0 };
-          })();
-      buggyMesh.position.set(pose.x, pose.y, pose.z);
-      buggyMesh.rotation.y = pose.yaw;
-      if ((ride.gear || 0) > 0) {
+      const driving = !!(ride.seated && ride.role !== 'passenger');
+      const passenger = ride.role === 'passenger' && (!!ride.seated || (ride.gear || 0) > 0);
+      let rolling = false;
+      if (passenger) {
+        const pose = buggyTrackPose(ride.trackT || 0);
+        buggyMesh.position.set(pose.x, pose.y, pose.z);
+        buggyMesh.rotation.y = pose.yaw;
+        rolling = (ride.gear || 0) > 0;
+      } else {
+        if (!buggyGlide.primed) {
+          const p = tileWorldPos(carTile.column, carTile.row);
+          buggyGlide.x = p.x;
+          buggyGlide.z = p.z;
+          buggyGlide.primed = true;
+        }
+        if (driving) {
+          carYaw = chase.lookYaw;
+          const fwd = driveInput.forward || 0;
+          if (fwd && driveInput.solids) {
+            const speed =
+              (TILE_PITCH / WALK_TILE_SECONDS) * (driveInput.sprintMul || 1) * (fwd < 0 ? 0.68 : 1);
+            const dist = speed * dt * Math.sign(fwd);
+            const dx = Math.sin(carYaw) * dist;
+            const dz = Math.cos(carYaw) * dist;
+            const nx = buggyGlide.x + dx;
+            const nz = buggyGlide.z + dz;
+            if (carFits(nx, nz, carYaw, driveInput.solids)) {
+              buggyGlide.x = nx;
+              buggyGlide.z = nz;
+              rolling = true;
+            } else if (carFits(buggyGlide.x + dx, buggyGlide.z, carYaw, driveInput.solids)) {
+              buggyGlide.x += dx;
+              rolling = true;
+            } else if (carFits(buggyGlide.x, buggyGlide.z + dz, carYaw, driveInput.solids)) {
+              buggyGlide.z += dz;
+              rolling = true;
+            }
+          }
+          const t = worldToTile(buggyGlide.x, buggyGlide.z);
+          carTile.column = t.column;
+          carTile.row = t.row;
+        }
+        buggyMesh.position.set(buggyGlide.x, TILE_HEIGHT, buggyGlide.z);
+        buggyMesh.rotation.y = carYaw;
+      }
+      if (rolling) {
         buggyMesh.traverse((n) => {
-          if (n.userData?.isWheel) n.rotation.x += (ride.gear || 1) * dt * 9;
+          if (n.userData?.isWheel) n.rotation.x += dt * 9;
         });
       }
 
@@ -501,7 +578,7 @@ export default function GameMap({
         rideOtherMesh = createAttacker({
           camoColor: other.camoColor || 'BLUE',
           characterModel: other.characterModel || 1,
-          scale: cameraModeRef.current === 'chase' ? 0.7 : 0.4,
+          scale: SEATED_CHAR_SCALE,
         });
         rideOtherMesh.userData.keepColor = true;
         rideOtherMesh.traverse((n) => {
@@ -513,11 +590,13 @@ export default function GameMap({
       if (rideOtherMesh) {
         rideOtherMesh.visible = otherOn && !!buggyMesh;
         if (otherOn && buggyMesh) {
-          const seat = (other.role === 'passenger' ? buggyMesh.userData.passengerSeat : buggyMesh.userData.driverSeat).clone();
-          buggyMesh.updateMatrixWorld(true);
-          buggyMesh.localToWorld(seat);
+          const seat = other.role === 'passenger' ? buggyMesh.userData.passengerSeat : buggyMesh.userData.driverSeat;
+          if (rideOtherMesh.parent !== buggyMesh) buggyMesh.attach(rideOtherMesh);
           rideOtherMesh.position.copy(seat);
-          rideOtherMesh.rotation.y = buggyMesh.rotation.y;
+          rideOtherMesh.rotation.set(0, 0, 0);
+          rideOtherMesh.scale.setScalar(SEATED_CHAR_SCALE / BUGGY_WORLD_SCALE);
+        } else if (rideOtherMesh.parent && rideOtherMesh.parent !== scene) {
+          scene.attach(rideOtherMesh);
         }
       }
     };
@@ -528,7 +607,7 @@ export default function GameMap({
         if (attackerMesh) attackerMesh.visible = false;
         return;
       }
-      const charSig = `${data.characterModel || 1}|${data.camoColor || 'BLUE'}|${cameraModeRef.current}`;
+      const charSig = `${data.characterModel || 1}|${data.camoColor || 'BLUE'}|${cameraModeRef.current}|${CHAR_MESH_REV}`;
       if (attackerMesh && attackerMesh.userData.charSig !== charSig) {
         scene.remove(attackerMesh);
         disposeObject(attackerMesh);
@@ -551,20 +630,31 @@ export default function GameMap({
       attackerMesh.visible = true;
       const ride = vehicleRef.current?.ride;
       if (ride?.seated && buggyMesh) {
-        const seatLocal = (
-          ride.role === 'passenger' ? buggyMesh.userData.passengerSeat : buggyMesh.userData.driverSeat
-        ).clone();
+        const seatLocal =
+          ride.role === 'passenger' ? buggyMesh.userData.passengerSeat : buggyMesh.userData.driverSeat;
+        if (attackerMesh.parent !== buggyMesh) buggyMesh.attach(attackerMesh);
+        attackerMesh.position.copy(seatLocal);
+        attackerMesh.rotation.set(0, 0, 0);
+        attackerMesh.scale.setScalar(SEATED_CHAR_SCALE / BUGGY_WORLD_SCALE);
         buggyMesh.updateMatrixWorld(true);
-        const world = seatLocal.clone();
-        buggyMesh.localToWorld(world);
+        const world = new THREE.Vector3();
+        attackerMesh.getWorldPosition(world);
         attackerSmooth.x = world.x;
         attackerSmooth.z = world.z;
         attackerSmooth.yaw = buggyMesh.rotation.y;
-        attackerSmooth.speed = 0;
         attackerSmooth.primed = true;
-        attackerMesh.position.copy(world);
-        attackerMesh.rotation.y = buggyMesh.rotation.y;
+        attackerSmooth.speed = 0;
         return;
+      }
+      if (attackerMesh.parent && attackerMesh.parent !== scene) scene.attach(attackerMesh);
+      if (exitSnap) {
+        const snap = tileWorldPos(exitSnap.column, exitSnap.row);
+        attackerSmooth.x = snap.x;
+        attackerSmooth.z = snap.z;
+        attackerSmooth.yaw = chase.lookYaw;
+        attackerSmooth.primed = true;
+        attackerSmooth.speed = 0;
+        exitSnap = null;
       }
       const col = THREE.MathUtils.clamp(data.column, 0, MAP_COLS - 1);
       const row = THREE.MathUtils.clamp(data.row, 0, MAP_ROWS - 1);
@@ -593,7 +683,7 @@ export default function GameMap({
         attackerSmooth.x = p.x;
         attackerSmooth.z = p.z;
       }
-      // Gait speed in walk units (1 = walking, ~1.9 = sprint) — smoothed for the animator
+      // Walk-units for the gait (1 = walking, ~1.9 = sprint). Tile glide speed is unchanged.
       const instSpeed = moved / safeDt / walkSpeed;
       attackerSmooth.speed += (instSpeed - attackerSmooth.speed) * (1 - Math.exp(-10 * dt));
       // Body faces the direction of travel while moving, the camera look when idle (GTA feel)
@@ -902,6 +992,58 @@ export default function GameMap({
         },
         onCameraModeChange: (mode) => {
           worldRef.current?.onCameraModeChange?.(mode);
+        },
+        getCarTile: () => ({ column: carTile.column, row: carTile.row }),
+        getDismountTile: (solids) => {
+          const x = buggyMesh ? buggyMesh.position.x : buggyGlide.x;
+          const z = buggyMesh ? buggyMesh.position.z : buggyGlide.z;
+          const yaw = buggyMesh ? buggyMesh.rotation.y : carYaw;
+          const s = Math.sin(yaw);
+          const c = Math.cos(yaw);
+          const occupied = new Set();
+          for (let f = -0.9; f <= 0.95; f += 0.3) {
+            for (let r = -0.6; r <= 0.6; r += 0.3) {
+              const tile = worldToTile(x + s * f + c * r, z + c * f - s * r);
+              occupied.add(`${tile.column},${tile.row}`);
+            }
+          }
+          const center = worldToTile(x, z);
+          let best = null;
+          let bestScore = Infinity;
+          for (let dCol = -3; dCol <= 3; dCol += 1) {
+            for (let dRow = -3; dRow <= 3; dRow += 1) {
+              if (!dCol && !dRow) continue;
+              const column = center.column + dCol;
+              const row = center.row + dRow;
+              if (column < 0 || row < 0 || column >= MAP_COLS || row >= MAP_ROWS) continue;
+              if (occupied.has(`${column},${row}`)) continue;
+              if (isGarageTile(column, row)) continue;
+              if (solids && !canEnterTile(column, row, solids)) continue;
+              const p = tileWorldPos(column, row);
+              const dx = p.x - x;
+              const dz = p.z - z;
+              const forward = dx * s + dz * c;
+              const right = dx * c - dz * s;
+              const dist = Math.hypot(dCol, dRow);
+              const score = dist * 10 + Math.abs(forward) * 3 - Math.abs(right) * 2;
+              if (score < bestScore) {
+                bestScore = score;
+                best = { column, row };
+              }
+            }
+          }
+          return best;
+        },
+        placeOnTile: (column, row) => {
+          exitSnap = { column, row };
+        },
+        setDriveInput: (next) => {
+          driveInput = {
+            driving: !!next?.driving,
+            forward: Number(next?.forward) || 0,
+            sprintMul: Math.max(0.5, Number(next?.sprintMul) || 1),
+            solids: next?.solids || null,
+          };
         },
         getFacingYaw: () => chase.lookYaw,
         addLookYaw: (delta) => {
@@ -1243,19 +1385,33 @@ export default function GameMap({
       if (attackerMesh) {
         const vehNow = vehicleRef.current || {};
         const picking = !!(vehNow.pickupAnim && vehNow.pickupAnim.t < 1);
-        const carrying = !!vehNow.carriedPart && !vehNow.ride?.seated;
-        tickCharacter(attackerMesh, elapsed, { dt, speed: picking ? 0 : attackerSmooth.speed, carrying, picking });
         const seated = !!vehNow.ride?.seated;
-        const baseScale = seated ? 0.52 : cameraModeRef.current === 'chase' ? 0.78 : 0.42;
+        const carrying = !!vehNow.carriedPart && !seated;
+        tickCharacter(attackerMesh, elapsed, {
+          dt,
+          speed: picking || seated ? 0 : attackerSmooth.speed,
+          carrying,
+          picking,
+          seated,
+        });
+        const baseScale = seated ? SEATED_CHAR_SCALE : cameraModeRef.current === 'chase' ? 0.78 : 0.42;
+        if (attackerSmooth.scale == null) attackerSmooth.scale = baseScale;
+        attackerSmooth.scale += (baseScale - attackerSmooth.scale) * (1 - Math.exp(-4.8 * dt));
         const punch = wallBreakFX.punch;
-        if (punch > 0.01 && !seated) {
-          attackerMesh.scale.setScalar(baseScale * (1 + punch * 0.08));
+        if (seated && buggyMesh && attackerMesh.parent === buggyMesh) {
+          attackerMesh.position.copy(
+            vehNow.ride?.role === 'passenger' ? buggyMesh.userData.passengerSeat : buggyMesh.userData.driverSeat
+          );
+          attackerMesh.rotation.set(0, 0, 0);
+          attackerMesh.scale.setScalar(SEATED_CHAR_SCALE / BUGGY_WORLD_SCALE);
+        } else if (punch > 0.01 && !seated) {
+          attackerMesh.scale.setScalar(attackerSmooth.scale * (1 + punch * 0.08));
           attackerMesh.position.y = TILE_HEIGHT + punch * 0.12;
         } else {
-          attackerMesh.scale.setScalar(baseScale);
+          attackerMesh.scale.setScalar(attackerSmooth.scale);
         }
         if (rideOtherMesh && rideOtherMesh.visible) {
-          tickCharacter(rideOtherMesh, elapsed, { dt, speed: 0 });
+          tickCharacter(rideOtherMesh, elapsed, { dt, speed: 0, seated: true });
         }
 
         const anim = vehNow.pickupAnim;
@@ -1313,21 +1469,24 @@ export default function GameMap({
         const pitch = chase.lookPitch;
         const sin = Math.sin(yaw);
         const cos = Math.cos(yaw);
+        const inCar = !!vehicleRef.current?.ride?.seated;
+        const shoulder = inCar ? 1.35 : chase.shoulder;
+        const lookH = inCar ? 1.05 : CHASE_CAM.lookAtHeight;
         // Looking up drops the camera toward shoulder height; looking down lifts it
         const lift = -Math.sin(pitch) * chase.distance * 0.8;
-        const camHeight = Math.max(CHASE_CAM.minCamHeight, chase.height + lift);
+        const camHeight = Math.max(CHASE_CAM.minCamHeight, chase.height + (inCar ? 0.45 : 0) + lift);
         const distFlat = chase.distance * (0.78 + 0.22 * Math.cos(pitch));
         chaseDesired.set(
-          attackerSmooth.x - sin * distFlat + cos * chase.shoulder,
+          attackerSmooth.x - sin * distFlat + cos * shoulder,
           TILE_HEIGHT + camHeight,
-          attackerSmooth.z - cos * distFlat - sin * chase.shoulder
+          attackerSmooth.z - cos * distFlat - sin * shoulder
         );
         // Aim point rises with pitch so the sky comes into frame when looking up
         const up = pitch > 0 ? pitch * 3.6 : pitch * 1.1;
         const ahead = chase.lookAhead + Math.max(0, pitch) * 1.5;
         chaseLook.set(
           attackerSmooth.x + sin * ahead,
-          TILE_HEIGHT + CHASE_CAM.lookAtHeight + up,
+          TILE_HEIGHT + lookH + up,
           attackerSmooth.z + cos * ahead
         );
 

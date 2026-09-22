@@ -18,7 +18,8 @@ import { RAID_DURATION_SECONDS, DETECTION_STATES } from '../raid/stealthConstant
 import { chipsForOutcome, resolveRaidOutcome } from '../raid/RaidSession.js';
 import { GATE_SPAWN_TILE, SEARCHLIGHT_TILE, WALK_TILE_SECONDS } from '../gamemap/mapConfig.js';
 import { collectSolidTiles, isWallBreakSpot } from '../gamemap/occupancy.js';
-import { stepDirection, attemptStep, TURN_RATE } from '../character/gridMover.js';
+import { stepDirection, attemptStep, nudgeOffSolid, TURN_RATE } from '../character/gridMover.js';
+import { noteKeyDown, noteKeyUp, walkAxes, shiftHeld, bindKeyReleaseGuards } from '../character/walkInput.js';
 import { listDecorOccupiedTiles } from '../gamemap/MapDecor.js';
 import { GAME_COLORS } from '../colors.js';
 import { RAID_TARGETS } from '../data/raidTargets.js';
@@ -144,6 +145,7 @@ export default function StealthRaidView() {
     let last = performance.now();
     let tickN = 0;
     let moveCooldown = 0;
+    let bumpCooldown = 0;
     let lastSprintMul = 1;
     let lastHud = { stamina: 1, sprinting: false, exhausted: false };
 
@@ -151,19 +153,13 @@ export default function StealthRaidView() {
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
       moveCooldown = Math.max(0, moveCooldown - dt);
+      bumpCooldown = Math.max(0, bumpCooldown - dt);
 
       const canMove = !hudRef.current.outcome && !hudRef.current.breaking;
-      let forward = 0;
-      let turn = 0;
-      if (canMove) {
-        if (keys.current.has('ArrowUp') || keys.current.has('w') || keys.current.has('W')) forward += 1;
-        if (keys.current.has('ArrowDown') || keys.current.has('s') || keys.current.has('S')) forward -= 1;
-        if (keys.current.has('ArrowLeft') || keys.current.has('a') || keys.current.has('A')) turn += 1;
-        if (keys.current.has('ArrowRight') || keys.current.has('d') || keys.current.has('D')) turn -= 1;
-      }
+      const { forward, turn } = canMove ? walkAxes(keys.current) : { forward: 0, turn: 0 };
 
       // Shift = limited sprint; meter drains while moving, refills after a short pause
-      const sp = sprintMeter.current.tick(dt, keys.current.has('Shift'), forward !== 0);
+      const sp = sprintMeter.current.tick(dt, shiftHeld(keys.current), forward !== 0);
       const sprintMul = sp.sprinting ? SPRINT_SPEED_MULT : 1;
       if (sprintMul !== lastSprintMul) {
         lastSprintMul = sprintMul;
@@ -192,10 +188,22 @@ export default function StealthRaidView() {
         if (step.ok) {
           moveCooldown = WALK_TILE_SECONDS * (step.diagonal ? Math.SQRT2 : 1) / sprintMul;
           soundEngine.playFootstepSound(sp.sprinting);
-          setAttacker((prev) => ({ ...prev, column: step.column, row: step.row }));
-        } else if (step.blocked) {
-          moveCooldown = 0.1;
+          const next = { ...attackerRef.current, column: step.column, row: step.row };
+          attackerRef.current = next;
+          setAttacker(next);
+        } else if (step.blocked && bumpCooldown <= 0) {
+          bumpCooldown = 0.2;
           sceneApi.current?.playBump?.();
+        }
+      } else if (canMove && moveCooldown <= 0) {
+        const pair = solidsPairRef.current;
+        solidRef.current = gateLockedRef.current || hudRef.current.gateLocked ? pair.locked : pair.open;
+        const escape = nudgeOffSolid(attackerRef.current, solidRef.current);
+        if (escape?.ok) {
+          moveCooldown = WALK_TILE_SECONDS * (escape.diagonal ? Math.SQRT2 : 1);
+          const next = { ...attackerRef.current, column: escape.column, row: escape.row };
+          attackerRef.current = next;
+          setAttacker(next);
         }
       }
 
@@ -299,24 +307,20 @@ export default function StealthRaidView() {
 
   useEffect(() => {
     const down = (e) => {
-      keys.current.add(e.key);
-      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'w', 'a', 's', 'd', 'W', 'A', 'S', 'D', 'Shift'].includes(e.key)) {
-        e.preventDefault();
-      }
-      if ((e.key === 'f' || e.key === 'F') && !e.repeat) {
+      noteKeyDown(keys.current, e);
+      if (e.code === 'KeyF' && !e.repeat) {
         e.preventDefault();
         actionRef.current?.();
       }
     };
-    const up = (e) => keys.current.delete(e.key);
-    const blur = () => keys.current.clear();
+    const up = (e) => noteKeyUp(keys.current, e);
     window.addEventListener('keydown', down);
     window.addEventListener('keyup', up);
-    window.addEventListener('blur', blur);
+    const unguard = bindKeyReleaseGuards(keys);
     return () => {
       window.removeEventListener('keydown', down);
       window.removeEventListener('keyup', up);
-      window.removeEventListener('blur', blur);
+      unguard();
     };
   }, []);
 
