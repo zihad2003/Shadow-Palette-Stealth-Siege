@@ -51,6 +51,7 @@ export function generateDefenderTiles(seed = 34) {
 
 /**
  * Houses spread across the larger fortress — same 3×3 footprints as the base builder.
+ * Always includes a Coin Generator and Ink House so raiders can steal resources in-world.
  */
 export function generateDefenderBuildings(seed = 34, count = 4) {
   const slots = [
@@ -63,11 +64,17 @@ export function generateDefenderBuildings(seed = 34, count = 4) {
     { x: 4, y: Math.floor(MAP_ROWS * 0.45) },
     { x: MAP_COLS - 6, y: Math.floor(MAP_ROWS * 0.45) },
   ];
-  const n = Math.max(1, Math.min(slots.length, count));
+  const n = Math.max(2, Math.min(slots.length, count));
   const buildings = [];
   for (let i = 0; i < n; i++) {
     const slot = slots[i];
-    const type = HOUSE_TYPES[Math.floor(hashSeed(seed + i * 17) * HOUSE_TYPES.length)];
+    // First two houses are always steal targets.
+    const type =
+      i === 0
+        ? 'COIN_GENERATOR'
+        : i === 1
+          ? 'INK_HOUSE'
+          : HOUSE_TYPES[Math.floor(hashSeed(seed + i * 17) * HOUSE_TYPES.length)];
     buildings.push({
       id: `def-b-${seed}-${i}`,
       buildingType: type,

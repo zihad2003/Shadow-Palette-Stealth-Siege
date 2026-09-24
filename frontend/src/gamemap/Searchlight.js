@@ -453,6 +453,7 @@ export function createSearchlight({ level = DEFAULT_SEARCHLIGHT_LEVEL } = {}) {
 
   let yaw = 180;
   let lastAlarm = false;
+  let detectFlash = 0;
 
   const applyBeamRange = (tiles) => {
     const range = tiles * TILE_PITCH;
@@ -481,30 +482,41 @@ export function createSearchlight({ level = DEFAULT_SEARCHLIGHT_LEVEL } = {}) {
     get rangeTiles() {
       return spec.rangeTiles;
     },
+    /** Brief red flash when the beam catches a mismatched player. */
+    flashDetect(strength = 1) {
+      detectFlash = Math.max(detectFlash, 0.55 * strength);
+    },
     update(dt, { alarm = false } = {}) {
       const extra = alarm ? spec.alarmRangeBonus : 0;
       if (alarm !== lastAlarm) {
         applyBeamRange(spec.rangeTiles + extra);
         lastAlarm = alarm;
       }
-      yaw = (yaw + spec.sweepDegPerSec * (alarm ? 1.28 : 1) * dt) % 360;
+      const sweepMult = alarm ? 1.28 : 1;
+      yaw = (yaw + spec.sweepDegPerSec * sweepMult * dt) % 360;
       yawGroup.rotation.y = THREE.MathUtils.degToRad(yaw);
 
-      const hot = alarm ? 0xff6b5a : 0xffe08a;
+      detectFlash = Math.max(0, detectFlash - dt * 2.4);
+      const flashing = detectFlash > 0.02;
+      const hot = flashing ? 0xff3b2e : alarm ? 0xff6b5a : 0xffe08a;
+      const flashBoost = flashing ? 1 + detectFlash * 2.2 : 1;
+
       inner.mat.color.set(hot);
       outer.mat.color.set(hot);
-      inner.mat.opacity = alarm ? 0.34 : 0.2;
-      outer.mat.opacity = alarm ? 0.16 : 0.09;
+      inner.mat.opacity = (alarm ? 0.34 : 0.2) * (flashing ? 1.35 : 1);
+      outer.mat.opacity = (alarm ? 0.16 : 0.09) * (flashing ? 1.4 : 1);
       wedge.mat.color.set(hot);
-      wedge.mat.opacity = alarm ? 0.55 : 0.38;
+      wedge.mat.opacity = (alarm ? 0.55 : 0.38) * (flashing ? 1.25 : 1);
       lenses.forEach((lens) => {
-        lens.material.emissive.set(alarm ? '#E74C3C' : '#FFC85A');
-        lens.material.emissiveIntensity = alarm ? 3.0 : spec.level >= 3 ? 2.7 : 2.1;
+        lens.material.emissive.set(flashing ? '#FF2A1A' : alarm ? '#E74C3C' : '#FFC85A');
+        lens.material.emissiveIntensity =
+          (alarm ? 3.0 : spec.level >= 3 ? 2.7 : 2.1) * flashBoost;
       });
       spot.color.set(hot);
-      spot.intensity = alarm ? spec.spotIntensity * 8 : spec.spotIntensity * 6;
+      spot.intensity = (alarm ? spec.spotIntensity * 8 : spec.spotIntensity * 6) * flashBoost;
       lampGlow.color.set(hot);
-      lampGlow.intensity = alarm ? spec.spotIntensity * 3.2 : spec.spotIntensity * 2.2;
+      lampGlow.intensity =
+        (alarm ? spec.spotIntensity * 3.2 : spec.spotIntensity * 2.2) * flashBoost;
     },
   };
 }

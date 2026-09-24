@@ -1,6 +1,6 @@
 import { MAP_COLS, MAP_ROWS } from '../gamemap/mapConfig.js';
 
-/** Configurable stealth / searchlight numbers. Do not scatter these as literals. */
+/** Configurable stealth / searchlight numbers. Keep in sync with backend StealthConstants.java. */
 export const STEALTH_CONSTANTS = {
   baseVisibility: 100,
   colorMatchBonus: 40,
@@ -15,10 +15,13 @@ export const STEALTH_CONSTANTS = {
 
 export const RAID_DURATION_SECONDS = 150;
 
+/** Fraction of defender coins/ink that can be stolen from houses during a raid. */
+export const RAID_LOOT_FRACTION = 0.2;
+
 export const RAID_OUTCOMES = {
-  SILENT: { id: 'SILENT', label: 'Silent Extraction', chipMultiplier: 1.0 },
-  ESCAPED: { id: 'ESCAPED', label: 'Detected but Escaped', chipMultiplier: 1.5 },
-  CAUGHT: { id: 'CAUGHT', label: 'Detected and Caught', chipMultiplier: 0 },
+  SILENT: { id: 'SILENT', label: 'Silent Extraction', chipMultiplier: 1.0, lootMultiplier: 1.0 },
+  ESCAPED: { id: 'ESCAPED', label: 'Detected but Escaped', chipMultiplier: 1.5, lootMultiplier: 1.5 },
+  CAUGHT: { id: 'CAUGHT', label: 'Detected and Caught', chipMultiplier: 0, lootMultiplier: 0 },
 };
 
 export const DETECTION_STATES = {

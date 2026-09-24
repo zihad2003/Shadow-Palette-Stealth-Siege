@@ -75,6 +75,7 @@ export default function RaidTargetCard({ target, onRaid }) {
 
       <ClayButton
         variant="danger"
+        magnetic
         onClick={() => {
           soundEngine.playClickSound();
           onRaid(target);

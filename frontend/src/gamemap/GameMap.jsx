@@ -1069,6 +1069,14 @@ export default function GameMap({
         playWallBreak: (column, row, opts = {}) => {
           wallBreakFX.play(column, row, opts);
         },
+        pulseBuilding: (buildingId) => {
+          const id = String(buildingId || '');
+          buildingsGroup.children.forEach((house) => {
+            if (String(house.userData.buildingId) === id) {
+              house.userData.lootPulse = 1;
+            }
+          });
+        },
         lockGate: () => lockFortressGate(fortressBorder),
         paintTile: (row, column, colorKey) => {
           const tile = grid.getTile(row, column);
@@ -1100,6 +1108,9 @@ export default function GameMap({
           alarm = !!value;
           if (value && patrol) patrol.setMode('chase', { column: patrolCmd.column, row: patrolCmd.row });
         },
+        flashSearchlightDetect: (strength = 1) => {
+          searchlight?.flashDetect?.(strength);
+        },
         setPatrolChase: (chasing, target) => {
           patrolCmd.chasing = !!chasing;
           if (target) {
@@ -1111,6 +1122,17 @@ export default function GameMap({
               column: patrolCmd.column,
               row: patrolCmd.row,
             });
+          }
+        },
+        setPatrolMode: (mode, target) => {
+          const key = String(mode || 'patrol').toLowerCase();
+          patrolCmd.chasing = key === 'chase' || key === 'chasing' || key === 'hit' || key === 'alert';
+          if (target) {
+            patrolCmd.column = target.column;
+            patrolCmd.row = target.row;
+          }
+          if (patrol) {
+            patrol.setMode(key, { column: patrolCmd.column, row: patrolCmd.row });
           }
         },
         getPatrolState: () => ({
@@ -1220,7 +1242,18 @@ export default function GameMap({
       });
       buildingsGroup.children.forEach((house) => {
         tickBuildingMotion(house, elapsed);
-        if (house.userData.slideTo && house.userData.slideFrom) {
+        if (house.userData.lootPulse > 0) {
+          house.userData.lootPulse = Math.max(0, house.userData.lootPulse - dt * 2.4);
+          const p = house.userData.lootPulse;
+          const bounce = 1 + Math.sin((1 - p) * Math.PI) * 0.18 * Math.max(p, 0.15);
+          house.scale.setScalar(bounce);
+          house.position.y = TILE_HEIGHT + p * 0.35;
+          house.userData._wasLootPulse = true;
+        } else if (house.userData._wasLootPulse) {
+          house.userData._wasLootPulse = false;
+          house.scale.setScalar(1);
+          if (!house.userData.slideTo) house.position.y = TILE_HEIGHT;
+        } else if (house.userData.slideTo && house.userData.slideFrom) {
           house.userData.slideT = Math.min(1, (house.userData.slideT || 0) + dt / 0.42);
           const t = 1 - (1 - house.userData.slideT) ** 3;
           house.position.lerpVectors(house.userData.slideFrom, house.userData.slideTo, t);
@@ -1375,7 +1408,13 @@ export default function GameMap({
       }
       if (patrol) {
         if (patrolCmd.chasing) {
-          patrol.setMode('chase', { column: patrolCmd.column, row: patrolCmd.row });
+          // Keep chase target fresh; don't clobber alert/hit pose every frame.
+          const current = lastPatrolHit?.state;
+          if (current !== 'alert' && current !== 'hit') {
+            patrol.setMode('chase', { column: patrolCmd.column, row: patrolCmd.row });
+          } else if (current === 'alert') {
+            patrol.setMode('alert', { column: patrolCmd.column, row: patrolCmd.row });
+          }
         }
         lastPatrolHit = patrol.update(elapsed, dt) || lastPatrolHit;
       }

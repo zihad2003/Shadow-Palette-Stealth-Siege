@@ -120,7 +120,7 @@ export const GRID_SIZE = MAP_COLS * MAP_ROWS;
 export const PLACEABLE_BUILDINGS = ['CRAFT_HOUSE', 'INK_HOUSE', 'SLEEP_HOUSE', 'COIN_GENERATOR'];
 
 export function GameStateProvider({ children }) {
-  // FSM: SPLASH | STORY | INTRO_* | MAIN_MENU | PAINT_TUTORIAL | BASE_BUILDER | RAID_FINDER | STEALTH_RAID
+  // FSM: SPLASH | STORY | INTRO_* | MAIN_MENU | PAINT_TUTORIAL | BASE_BUILDER | RAID_FINDER | RAID_ENTER | STEALTH_RAID
   const initialView = new URLSearchParams(window.location.search).get('view');
   const allowedViews = [
     'SPLASH',
@@ -132,6 +132,7 @@ export function GameStateProvider({ children }) {
     'PAINT_TUTORIAL',
     'BASE_BUILDER',
     'RAID_FINDER',
+    'RAID_ENTER',
     'STEALTH_RAID',
     'ADMIN',
   ];
@@ -433,6 +434,19 @@ export function GameStateProvider({ children }) {
       triggerLoading('Raids', '', 400, () => {
         setGameState('RAID_FINDER');
       });
+    } else if (nextState === 'RAID_ENTER') {
+      if (Date.now() < raidCooldownUntil) {
+        const secs = Math.ceil((raidCooldownUntil - Date.now()) / 1000);
+        showToast(`Cooldown ${secs}s`, 'error');
+        return;
+      }
+      if (!isGameColor(camoColor)) {
+        showToast('Set camo', 'error');
+        return;
+      }
+      if (params.defenderId) setRaidTargetId(params.defenderId);
+      if (params.raidLoot) setRaidLoot(params.raidLoot);
+      setGameState('RAID_ENTER');
     } else if (nextState === 'STEALTH_RAID') {
       if (Date.now() < raidCooldownUntil) {
         const secs = Math.ceil((raidCooldownUntil - Date.now()) / 1000);
@@ -448,20 +462,21 @@ export function GameStateProvider({ children }) {
       if (params.raidLoot) setRaidLoot(params.raidLoot);
       const session = createRaidSession({ attackerId: userId, defenderId: defender, camoColor });
       setRaidSession(session);
-      triggerLoading(
-        'Raid',
-        '',
-        400,
-        async () => {
-          try {
-            const res = await fetchRaidTarget(defender);
-            setRaidData(res);
-          } catch (e) {
-            setRaidData(null);
-          }
-          setGameState('STEALTH_RAID');
+      const mountRaid = async () => {
+        try {
+          const res = await fetchRaidTarget(defender);
+          setRaidData(res);
+        } catch (e) {
+          setRaidData(null);
         }
-      );
+        setGameState('STEALTH_RAID');
+      };
+      // After RaidEnterView cinematic, mount raid immediately — no second loading wipe.
+      if (params.skipEnterCinematic) {
+        void mountRaid();
+      } else {
+        triggerLoading('Raid', '', 400, mountRaid);
+      }
     } else if (nextState === 'MAIN_MENU') {
       setGameState('MAIN_MENU');
     } else {
@@ -1011,7 +1026,6 @@ export function GameStateProvider({ children }) {
     }
     if (outcome === 'SILENT' || outcome === 'ESCAPED') {
       setSuccessfulRaids((n) => n + 1);
-      setCoins((v) => v + (outcome === 'SILENT' ? 80 : 50));
     }
   };
 
@@ -1635,6 +1649,7 @@ export function GameStateProvider({ children }) {
   useEffect(() => {
     if (
       gameState === 'STEALTH_RAID' ||
+      gameState === 'RAID_ENTER' ||
       gameState === 'SPLASH' ||
       gameState === 'STORY' ||
       gameState === 'INTRO_FORTRESS' ||
@@ -1661,6 +1676,7 @@ export function GameStateProvider({ children }) {
   useEffect(() => {
     if (
       gameState === 'STEALTH_RAID' ||
+      gameState === 'RAID_ENTER' ||
       gameState === 'SPLASH' ||
       gameState === 'STORY' ||
       gameState === 'INTRO_FORTRESS' ||

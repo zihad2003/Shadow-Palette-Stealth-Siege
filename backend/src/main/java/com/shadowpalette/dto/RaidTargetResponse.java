@@ -15,4 +15,6 @@ public class RaidTargetResponse {
     private Long defenderId;
     private Map<String, Object> layout;
     private int chipsAvailable;
+    private int coinsAvailable;
+    private int inkAvailable;
 }

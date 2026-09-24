@@ -2,9 +2,14 @@ import assert from 'node:assert/strict';
 import { isMatch } from './ColorMatchSystem.js';
 import { evaluateBeam } from './SearchlightSensor.js';
 import { evaluateDetectionTick } from './DetectionSystem.js';
-import { createRaidSession, rejectColorChange } from './RaidSession.js';
+import { createRaidSession, rejectColorChange, lootForOutcome } from './RaidSession.js';
 import { createAlarmSystem } from './AlarmSystem.js';
-import { STEALTH_CONSTANTS } from './stealthConstants.js';
+import {
+  STEALTH_CONSTANTS,
+  RAID_LOOT_FRACTION,
+  RAID_DURATION_SECONDS,
+  SEARCHLIGHT_LEVELS,
+} from './stealthConstants.js';
 
 const light = {
   x: 5.5,
@@ -33,7 +38,7 @@ function playerOnBeam(dist = 2) {
   assert.ok(tick.meter < STEALTH_CONSTANTS.suspiciousAt, 'match must not raise detection');
 }
 
-// Test 2 — mismatch in beam: detection begins
+// Test 2 — mismatch in beam: detection begins (gradual rise)
 {
   const tick = evaluateDetectionTick({
     light,
@@ -45,6 +50,7 @@ function playerOnBeam(dist = 2) {
   assert.equal(tick.colorMatch, false);
   assert.equal(tick.exposed, true);
   assert.ok(tick.meter > 0, 'mismatch in beam must increase the meter');
+  assert.ok(tick.meter < STEALTH_CONSTANTS.alarmAt, 'brief hit must not instantly alarm');
 }
 
 // Test 3 — mismatch but not in beam: no searchlight detection
@@ -61,19 +67,28 @@ function playerOnBeam(dist = 2) {
   assert.equal(tick.meter, 0);
 }
 
-// Test 4 — mismatch under the beam is an instant siren
+// Test 4 — sustained mismatch under the beam reaches alarm (synced with backend)
 {
-  const tick = evaluateDetectionTick({
-    light,
-    player: playerOnBeam(),
-    attackerColor: 'GREEN',
-    tileColor: 'RED',
-    dt: 0.2,
-  });
-  assert.equal(tick.exposed, true);
-  assert.equal(tick.state, 'ALARM');
-  assert.equal(tick.justAlarmed, true);
-  assert.equal(tick.meter, STEALTH_CONSTANTS.alarmAt);
+  let meter = 0;
+  let alarm = false;
+  let last = null;
+  for (let i = 0; i < 40 && !alarm; i++) {
+    last = evaluateDetectionTick({
+      light,
+      player: playerOnBeam(),
+      attackerColor: 'GREEN',
+      tileColor: 'RED',
+      dt: 0.2,
+      meter,
+      alarmLatched: alarm,
+    });
+    meter = last.meter;
+    alarm = last.alarmLatched;
+  }
+  assert.equal(last.exposed, true);
+  assert.equal(last.state, 'ALARM');
+  assert.equal(last.alarmLatched, true);
+  assert.equal(last.meter, STEALTH_CONSTANTS.alarmAt);
 }
 
 // Test 5 — camo lock rejects mid-raid color change
@@ -110,6 +125,27 @@ function playerOnBeam(dist = 2) {
   assert.equal(robotGotEvent, true);
 }
 
+// Test 8 — loot math: 20% of pool × outcome multiplier
+{
+  const silent = lootForOutcome('SILENT', { coins: 500, ink: 100 });
+  assert.equal(silent.coins, Math.round(Math.floor(500 * RAID_LOOT_FRACTION) * 1.0));
+  assert.equal(silent.ink, Math.round(Math.floor(100 * RAID_LOOT_FRACTION) * 1.0));
+  const escaped = lootForOutcome('ESCAPED', { coins: 500, ink: 100 });
+  assert.equal(escaped.coins, Math.round(Math.floor(500 * RAID_LOOT_FRACTION) * 1.5));
+  assert.equal(escaped.ink, Math.round(Math.floor(100 * RAID_LOOT_FRACTION) * 1.5));
+  const caught = lootForOutcome('CAUGHT', { coins: 500, ink: 100 });
+  assert.equal(caught.coins, 0);
+  assert.equal(caught.ink, 0);
+}
+
+// Test 9 — baseline constants stay synced with backend StealthConstants
+{
+  assert.equal(RAID_DURATION_SECONDS, 150);
+  assert.equal(STEALTH_CONSTANTS.colorMatchBonus, 40);
+  assert.equal(STEALTH_CONSTANTS.meterRisePerSec, 36);
+  assert.ok(SEARCHLIGHT_LEVELS[3].cover > SEARCHLIGHT_LEVELS[1].cover);
+}
+
 // Beam helper sanity
 {
   const hit = evaluateBeam(light, playerOnBeam(2));
@@ -118,4 +154,4 @@ function playerOnBeam(dist = 2) {
   assert.equal(miss.canSee, false);
 }
 
-console.log('color camouflage tests: 7/7 passed');
+console.log('color camouflage tests: 9/9 passed');

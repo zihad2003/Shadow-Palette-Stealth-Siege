@@ -27,7 +27,6 @@ public class RaidService {
 
     @Transactional(readOnly = true)
     public RaidTargetResponse getRaidTarget(Long defenderId, Long attackerId) {
-        // Cooldown enforcement on attacker
         if (attackerId != null) {
             userRepository.findById(attackerId).ifPresent(attacker -> {
                 if (attacker.getRaidCooldownUntil() != null && attacker.getRaidCooldownUntil().isAfter(LocalDateTime.now())) {
@@ -36,10 +35,11 @@ public class RaidService {
             });
         }
 
-        User defender = userRepository.findById(defenderId)
-                .orElse(null);
+        User defender = userRepository.findById(defenderId).orElse(null);
 
         int chipsAvailable = (defender != null && defender.getChips() > 0) ? defender.getChips() : 200;
+        int coinsAvailable = (defender != null && defender.getCoins() > 0) ? defender.getCoins() : 200;
+        int inkAvailable = (defender != null && defender.getInkEnergy() > 0) ? defender.getInkEnergy() : 50;
 
         List<Plot> plots = plotRepository.findByOwnerId(defenderId);
         Plot plot = (plots != null && !plots.isEmpty()) ? plots.get(0) : null;
@@ -67,23 +67,36 @@ public class RaidService {
                 .defenderId(defenderId)
                 .layout(layout)
                 .chipsAvailable(chipsAvailable)
+                .coinsAvailable(coinsAvailable)
+                .inkAvailable(inkAvailable)
                 .build();
     }
 
     @Transactional
     public RaidCompleteResponse completeRaid(RaidCompleteRequest request) {
         User attacker = userRepository.findById(request.getAttackerId())
-                .orElseGet(() -> User.builder().id(request.getAttackerId()).username("Player" + request.getAttackerId()).camoColor("BLUE").chips(200).build());
+                .orElseGet(() -> User.builder()
+                        .id(request.getAttackerId())
+                        .username("Player" + request.getAttackerId())
+                        .camoColor("BLUE")
+                        .coins(500)
+                        .inkEnergy(100)
+                        .chips(200)
+                        .build());
 
         User defender = userRepository.findById(request.getDefenderId())
-                .orElseGet(() -> User.builder().id(request.getDefenderId()).username("Defender" + request.getDefenderId()).chips(200).build());
+                .orElseGet(() -> User.builder()
+                        .id(request.getDefenderId())
+                        .username("Defender" + request.getDefenderId())
+                        .coins(200)
+                        .inkEnergy(50)
+                        .chips(200)
+                        .build());
 
-        // Validate session log
         ValidatedOutcomeDto validated = raidValidator.validateSession(
-                request, attacker.getCamoColor(), defender.getChips()
+                request, attacker.getCamoColor(), defender.getCoins(), defender.getInkEnergy()
         );
 
-        // Outcome Match Check
         if (request.getClientReportedOutcome() != null) {
             String clientOutcome = request.getClientReportedOutcome().getOutcome();
             if (clientOutcome != null && !clientOutcome.equalsIgnoreCase(validated.getOutcome())) {
@@ -91,12 +104,10 @@ public class RaidService {
             }
         }
 
-        // Handle CAUGHT penalty (5-minute cooldown per GDD Section 11)
         if ("CAUGHT".equalsIgnoreCase(validated.getOutcome())) {
             attacker.setRaidCooldownUntil(LocalDateTime.now().plusMinutes(5));
         }
 
-        // Persist WallBlock breakProgress in DB
         if (request.getWallBreakEvents() != null) {
             for (WallBreakEventDto event : request.getWallBreakEvents()) {
                 if (event.getWallBlockId() != null) {
@@ -108,16 +119,37 @@ public class RaidService {
             }
         }
 
-        // Award chips to attacker
-        attacker.setChips(attacker.getChips() + validated.getChipsAwarded());
-        userRepository.save(attacker);
+        int coinsLooted = Math.max(0, validated.getCoinsLooted());
+        int inkLooted = Math.max(0, validated.getInkLooted());
 
-        // Persist RaidLog
+        // Cap steal to what the defender actually holds right now.
+        coinsLooted = Math.min(coinsLooted, Math.max(0, defender.getCoins()));
+        inkLooted = Math.min(inkLooted, Math.max(0, defender.getInkEnergy()));
+
+        defender.setCoins(Math.max(0, defender.getCoins() - coinsLooted));
+        defender.setInkEnergy(Math.max(0, defender.getInkEnergy() - inkLooted));
+        attacker.setCoins(attacker.getCoins() + coinsLooted);
+        attacker.setInkEnergy(attacker.getInkEnergy() + inkLooted);
+        if (validated.getChipsAwarded() > 0) {
+            attacker.setChips(attacker.getChips() + validated.getChipsAwarded());
+        }
+
+        validated.setCoinsLooted(coinsLooted);
+        validated.setInkLooted(inkLooted);
+
+        userRepository.save(attacker);
+        userRepository.save(defender);
+
         RaidLog raidLog = RaidLog.builder()
                 .attackerId(attacker.getId())
                 .defenderId(defender.getId())
                 .outcome(validated.getOutcome())
+                .isDetected(validated.isDetected())
+                .stolenChips(validated.getChipsAwarded())
+                .stolenCoins(coinsLooted)
+                .stolenInk(inkLooted)
                 .durationSeconds(request.getDurationSeconds())
+                .timestamp(LocalDateTime.now())
                 .sessionLogJson(request.getSessionLog() != null ? request.getSessionLog().toString() : "[]")
                 .build();
 
@@ -127,6 +159,8 @@ public class RaidService {
                 .success(true)
                 .validatedOutcome(validated)
                 .raidLogId(savedLog.getId())
+                .attackerCoins(attacker.getCoins())
+                .attackerInk(attacker.getInkEnergy())
                 .build();
     }
 }

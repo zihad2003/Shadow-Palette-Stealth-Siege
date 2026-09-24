@@ -3,7 +3,6 @@ import { DoorOpen } from 'lucide-react';
 import { useGameState } from '../../state/GameStateContext.jsx';
 import { completeRaid } from '../../api.js';
 import { soundEngine } from '../../soundEngine.js';
-import { DEFAULT_SEARCHLIGHT_LEVEL } from '../../raid/stealthConstants.js';
 import ClayButton from '../ui/ClayButton.jsx';
 
 export default function SideRaidPanel({
@@ -12,6 +11,7 @@ export default function SideRaidPanel({
   isAlarmTriggered,
   sessionLog,
   paintedTiles,
+  searchlightLevel = 1,
   onExtract,
 }) {
   const { raidTargetId, userId, raidSession, showToast } = useGameState();
@@ -24,22 +24,17 @@ export default function SideRaidPanel({
       const payload = {
         attackerId: userId,
         defenderId: raidTargetId,
-        durationSeconds: Math.round(90 - (remaining || 0)),
+        durationSeconds: Math.round(120 - (remaining || 0)),
         lockedCamoColor: raidSession?.camoColor || lockedCamo,
         tileColors: paintedTiles,
-        searchlightLevel: DEFAULT_SEARCHLIGHT_LEVEL,
+        searchlightLevel,
         sessionLog: sessionLog?.current || [],
         clientReportedOutcome: {
           isDetected: !!isAlarmTriggered,
           outcome: isAlarmTriggered ? 'ESCAPED' : 'SILENT',
-          chipsRequested: 200,
         },
       };
-      const res = await completeRaid(payload);
-      if (res.success && res.validatedOutcome) {
-        soundEngine.playSuccessSound();
-        showToast(res.validatedOutcome.outcome, 'success');
-      }
+      await completeRaid(payload);
     } catch (e) {
       showToast('Saved locally', 'info');
     } finally {

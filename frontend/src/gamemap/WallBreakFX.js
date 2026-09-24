@@ -272,16 +272,35 @@ export function createWallBreakFX(scene, border) {
 
   function spawnBurst(column, row, { final = false, hits = 1, gate = false } = {}) {
     const a = wallAnchor(column, row);
-    punch = final ? 1 : 0.62 + hits * 0.1;
-    cameraShake = final ? 0.72 : 0.28 + hits * 0.07;
-    if (border) border.userData.shake = Math.max(border.userData.shake || 0, final ? 0.85 : 0.35);
+    // Stronger punch/shake as breakProgress climbs — each F-hit must read on camera.
+    punch = final ? 1.15 : 0.55 + hits * 0.14;
+    cameraShake = final ? 0.95 : 0.32 + hits * 0.1;
+    if (border) border.userData.shake = Math.max(border.userData.shake || 0, final ? 1.0 : 0.3 + hits * 0.12);
 
-    const flying = final ? 26 : 12 + hits * 3;
+    // Persistent fissure that grows with hits so the wall visibly crumbles.
+    const crackScale = 0.35 + hits * 0.28;
+    const fissure = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.08 + hits * 0.12, 0.55 + hits * 0.35),
+      new THREE.MeshBasicMaterial({
+        color: 0x1a1210,
+        transparent: true,
+        opacity: 0.85,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      })
+    );
+    fissure.position.set(a.x - a.nx * 0.02, a.y, a.z - a.nz * 0.02);
+    if (Math.abs(a.nx) > 0.5) fissure.rotation.y = Math.PI / 2;
+    fissure.scale.setScalar(crackScale);
+    root.add(fissure);
+    cracks.push({ mesh: fissure, age: 0, life: final ? 0.01 : 12, final: false, persist: !final });
+
+    const flying = final ? 34 : 14 + hits * 4;
     for (let i = 0; i < flying; i++) {
       spawnShard({ x: a.x, y: a.y, z: a.z, nx: a.nx, nz: a.nz, wood: gate && i % 3 === 0, final });
     }
     spawnDust(a, final);
-    spawnSparks(a, final ? 18 : 6 + hits * 2);
+    spawnSparks(a, final ? 22 : 8 + hits * 3);
     spawnShock(a, final);
     spawnFlash(a);
 
@@ -292,8 +311,8 @@ export function createWallBreakFX(scene, border) {
   }
 
   function tick(dt, camera) {
-    cameraShake = Math.max(0, cameraShake - dt * 1.45);
-    punch = Math.max(0, punch - dt * 2.05);
+    cameraShake = Math.max(0, cameraShake - dt * 1.2);
+    punch = Math.max(0, punch - dt * 1.85);
 
     for (let i = shards.length - 1; i >= 0; i--) {
       const s = shards[i];
@@ -334,6 +353,13 @@ export function createWallBreakFX(scene, border) {
     for (let i = cracks.length - 1; i >= 0; i--) {
       const c = cracks[i];
       c.age += dt;
+      if (c.persist) {
+        // Keep fissure visible; gentle opacity breathe so it reads as damage.
+        if (c.mesh.material) {
+          c.mesh.material.opacity = 0.72 + Math.sin(c.age * 3) * 0.08;
+        }
+        continue;
+      }
       const t = c.age / c.life;
       c.mesh.scale.setScalar(1 + t * (c.final ? 3.2 : 1.8));
       c.mesh.material.opacity = Math.max(0, 0.95 * (1 - t) * (1 - t));
@@ -348,7 +374,7 @@ export function createWallBreakFX(scene, border) {
     for (let i = flashes.length - 1; i >= 0; i--) {
       const f = flashes[i];
       f.age += dt;
-      f.light.intensity = 2.8 * Math.max(0, 1 - f.age / f.life);
+      f.light.intensity = 3.4 * Math.max(0, 1 - f.age / f.life);
       if (f.age >= f.life) {
         root.remove(f.light);
         flashes.splice(i, 1);
@@ -356,9 +382,9 @@ export function createWallBreakFX(scene, border) {
     }
 
     if (camera && cameraShake > 0.001) {
-      const mag = cameraShake * 0.16;
+      const mag = cameraShake * 0.22;
       camera.position.x += (Math.random() - 0.5) * mag;
-      camera.position.y += (Math.random() - 0.5) * mag * 0.7;
+      camera.position.y += (Math.random() - 0.5) * mag * 0.75;
       camera.position.z += (Math.random() - 0.5) * mag;
     }
 
