@@ -11,6 +11,7 @@ import MainMenuView from './views/MainMenuView.jsx';
 import PaintTutorialView from './views/PaintTutorialView.jsx';
 import BaseBuilderView from './views/BaseBuilderView.jsx';
 import RaidFinderView from './views/RaidFinderView.jsx';
+import RaidEnterView from './views/RaidEnterView.jsx';
 import StealthRaidView from './views/StealthRaidView.jsx';
 import AdminDashboardView from './views/AdminDashboardView.jsx';
 import OptionsModal from './components/hud/OptionsModal.jsx';
@@ -57,6 +58,8 @@ function GameViewRouter() {
       <PaintTutorialView />
     ) : gameState === 'RAID_FINDER' ? (
       <RaidFinderView />
+    ) : gameState === 'RAID_ENTER' ? (
+      <RaidEnterView />
     ) : gameState === 'STEALTH_RAID' ? (
       <StealthRaidView />
     ) : gameState === 'ADMIN' ? (

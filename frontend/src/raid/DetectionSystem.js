@@ -17,7 +17,7 @@ export function stateFromMeter(meter, alarmLatched) {
   return DETECTION_STATES.NORMAL;
 }
 
-/** Instant alarm on color mismatch under the beam; match stays invisible. */
+/** Gradual meter under the beam; match stays invisible. Synced with backend SearchlightColorEngine. */
 export function evaluateDetectionTick({
   light,
   player,
@@ -40,16 +40,20 @@ export function evaluateDetectionTick({
   if (alarmLatched) {
     nextMeter = Math.max(meter, STEALTH_CONSTANTS.alarmAt);
   } else if (exposed) {
-    // Instant siren when beam hits a mismatched tile
-    nextMeter = STEALTH_CONSTANTS.alarmAt;
-    nextAlarm = true;
-    justAlarmed = true;
+    // Gradual rise — must match backend SearchlightColorEngine / RaidValidator.
+    const visibility = stealthScore / STEALTH_CONSTANTS.baseVisibility;
+    nextMeter =
+      meter + STEALTH_CONSTANTS.meterRisePerSec * visibility * dt;
   } else if (beam.canSee && colorMatch) {
     nextMeter = meter - STEALTH_CONSTANTS.matchMeterFallPerSec * dt;
   } else {
     nextMeter = meter - STEALTH_CONSTANTS.meterFallPerSec * dt;
   }
   nextMeter = Math.max(0, Math.min(STEALTH_CONSTANTS.alarmAt, nextMeter));
+  if (!alarmLatched && nextMeter >= STEALTH_CONSTANTS.alarmAt) {
+    nextAlarm = true;
+    justAlarmed = true;
+  }
 
   const state = stateFromMeter(nextMeter, nextAlarm);
 

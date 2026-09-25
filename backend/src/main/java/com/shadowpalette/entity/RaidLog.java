@@ -26,6 +26,10 @@ public class RaidLog {
 
     private int stolenChips;
 
+    private int stolenCoins;
+
+    private int stolenInk;
+
     private boolean isDetected;
 
     private String outcome;

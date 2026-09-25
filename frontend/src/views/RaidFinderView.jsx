@@ -9,7 +9,7 @@ import { RAID_TARGETS } from '../data/raidTargets.js';
 import { useGameState } from '../state/GameStateContext.jsx';
 
 export default function RaidFinderView() {
-  const { transitionTo, setRaidTargetId, camoColor, raidCooldownUntil } = useGameState();
+  const { transitionTo, setRaidTargetId, camoColor, raidCooldownUntil, showToast } = useGameState();
   const [cooldownLeft, setCooldownLeft] = useState(0);
 
   useEffect(() => {
@@ -20,8 +20,16 @@ export default function RaidFinderView() {
   }, [raidCooldownUntil]);
 
   const handleRaid = (target) => {
+    if (cooldownLeft > 0) {
+      showToast(`Cooldown ${cooldownLeft}s`, 'error');
+      return;
+    }
     setRaidTargetId(target.ownerId);
-    transitionTo('STEALTH_RAID', { defenderId: target.ownerId, raidLoot: target });
+    // Full animation screen, then the live raid.
+    transitionTo('RAID_ENTER', {
+      defenderId: target.ownerId,
+      raidLoot: target,
+    });
   };
 
   return (

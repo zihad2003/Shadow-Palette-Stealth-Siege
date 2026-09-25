@@ -16,4 +16,7 @@ public class RaidCompleteResponse {
     private ValidatedOutcomeDto validatedOutcome;
     private Long raidLogId;
     private String error;
+    /** Attacker balances after loot transfer — frontend refreshes TopResourceBar. */
+    private Integer attackerCoins;
+    private Integer attackerInk;
 }

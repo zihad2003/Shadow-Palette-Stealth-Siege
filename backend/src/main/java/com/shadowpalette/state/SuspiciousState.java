@@ -16,7 +16,7 @@ public class SuspiciousState implements RobotState {
         if ("EDGE_ZONE_MISMATCH".equals(event.getReason())) {
             int currentTicks = context.getSuspiciousTicks() + 1;
             context.setSuspiciousTicks(currentTicks);
-            if (currentTicks >= 3) { // 3 sustained ticks per GDD 8
+            if (currentTicks >= com.shadowpalette.util.StealthConstants.SUSPICIOUS_TICKS_TO_ALERT) {
                 context.setLastSeenPlayerX(event.getPlayerX());
                 context.setLastSeenPlayerY(event.getPlayerY());
                 context.setState(new AlertState());

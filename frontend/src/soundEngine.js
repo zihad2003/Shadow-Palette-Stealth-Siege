@@ -366,6 +366,80 @@ class SoundEngine {
       osc.stop(now + 0.2);
     });
   }
+
+  /** Cinematic: enter raid — low whoosh, gate clang, soft footsteps. */
+  playRaidEnterSound() {
+    this.ensureContext();
+    if (!this.ctx || this.muted) return;
+    const now = this.ctx.currentTime;
+
+    const whooshLen = Math.floor(this.ctx.sampleRate * 0.55);
+    const whooshBuf = this.ctx.createBuffer(1, whooshLen, this.ctx.sampleRate);
+    const wd = whooshBuf.getChannelData(0);
+    for (let i = 0; i < whooshLen; i++) wd[i] = (Math.random() * 2 - 1) * (1 - i / whooshLen);
+    const whoosh = this.ctx.createBufferSource();
+    whoosh.buffer = whooshBuf;
+    const wf = this.ctx.createBiquadFilter();
+    wf.type = 'bandpass';
+    wf.frequency.setValueAtTime(280, now);
+    wf.frequency.exponentialRampToValueAtTime(1400, now + 0.45);
+    const wg = this.ctx.createGain();
+    wg.gain.setValueAtTime(0.01, now);
+    wg.gain.linearRampToValueAtTime(0.32, now + 0.08);
+    wg.gain.exponentialRampToValueAtTime(0.01, now + 0.55);
+    whoosh.connect(wf);
+    wf.connect(wg);
+    wg.connect(this.masterGain);
+    whoosh.start(now);
+    whoosh.stop(now + 0.55);
+
+    const drone = this.ctx.createOscillator();
+    drone.type = 'sine';
+    drone.frequency.setValueAtTime(90, now);
+    drone.frequency.linearRampToValueAtTime(140, now + 0.7);
+    const dg = this.ctx.createGain();
+    dg.gain.setValueAtTime(0.22, now);
+    dg.gain.exponentialRampToValueAtTime(0.01, now + 0.85);
+    drone.connect(dg);
+    dg.connect(this.masterGain);
+    drone.start(now);
+    drone.stop(now + 0.85);
+
+    window.setTimeout(() => this.playGateSlamSound(), 380);
+    window.setTimeout(() => this.playFootstepSound(false), 700);
+    window.setTimeout(() => this.playFootstepSound(false), 920);
+    window.setTimeout(() => this.playFootstepSound(true), 1140);
+  }
+
+  /** Cinematic: leave raid successfully — rising whoosh + victory. */
+  playRaidExitSound() {
+    this.ensureContext();
+    if (!this.ctx || this.muted) return;
+    const now = this.ctx.currentTime;
+
+    const osc = this.ctx.createOscillator();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(160, now);
+    osc.frequency.exponentialRampToValueAtTime(520, now + 0.55);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.28, now);
+    g.gain.exponentialRampToValueAtTime(0.01, now + 0.65);
+    osc.connect(g);
+    g.connect(this.masterGain);
+    osc.start(now);
+    osc.stop(now + 0.65);
+
+    window.setTimeout(() => this.playSuccessSound(), 420);
+  }
+
+  /** Cinematic: caught — alarm sting + low thud. */
+  playRaidCaughtSound() {
+    this.ensureContext();
+    if (!this.ctx || this.muted) return;
+    this.playAlarmSound();
+    window.setTimeout(() => this.playBuildSound(), 220);
+    window.setTimeout(() => this.playAlarmSound(), 480);
+  }
 }
 
 export const soundEngine = new SoundEngine();

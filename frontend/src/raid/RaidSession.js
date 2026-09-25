@@ -1,4 +1,5 @@
 import { isGameColor } from '../colors.js';
+import { RAID_LOOT_FRACTION, RAID_OUTCOMES } from './stealthConstants.js';
 
 export function createRaidSession({ attackerId, defenderId, camoColor }) {
   const locked = String(camoColor || '').trim().toUpperCase();
@@ -37,4 +38,18 @@ export function chipsForOutcome(outcome, baseChips) {
   if (outcome === 'CAUGHT') return 0;
   if (outcome === 'ESCAPED') return Math.round(n * 1.5);
   return n;
+}
+
+/**
+ * Client-side estimate of stealable loot (server recomputes from defender balances).
+ * Uses up to {@link RAID_LOOT_FRACTION} of the target's shown coins/ink pools.
+ */
+export function lootForOutcome(outcome, { coins = 0, ink = 0 } = {}) {
+  const mult = RAID_OUTCOMES[outcome]?.lootMultiplier ?? 0;
+  const baseCoins = Math.floor(Math.max(0, coins) * RAID_LOOT_FRACTION);
+  const baseInk = Math.floor(Math.max(0, ink) * RAID_LOOT_FRACTION);
+  return {
+    coins: Math.round(baseCoins * mult),
+    ink: Math.round(baseInk * mult),
+  };
 }

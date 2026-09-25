@@ -180,6 +180,44 @@ body,
   cursor: not-allowed;
 }
 
+/* Magnetic pull — springy cursor attraction + idle pulse/sheen. */
+.magnetic {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  will-change: transform;
+}
+
+.magnetic .magnetic-sheen {
+  position: absolute;
+  inset: -20% auto -20% 0;
+  width: 45%;
+  pointer-events: none;
+  background: linear-gradient(
+    105deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.28) 45%,
+    transparent 70%
+  );
+  transform: skewX(-18deg);
+  z-index: 0;
+}
+
+.magnetic.is-magnetic-active {
+  filter: brightness(1.08);
+}
+
+.magnetic:disabled,
+.magnetic[aria-disabled='true'] {
+  filter: none;
+}
+
+.magnetic-label {
+  pointer-events: none;
+}
+
 /* Back-compat aliases so leftover glass classes still look clay */
 .glass-panel {
   background: linear-gradient(160deg, #223c42 0%, #152428 52%, #101c20 100%);

@@ -15,6 +15,8 @@ public class AdminRaidDto {
     private Long defenderId;
     private String outcome;
     private int stolenChips;
+    private int stolenCoins;
+    private int stolenInk;
     private boolean detected;
     private int durationSeconds;
     private String timestamp;

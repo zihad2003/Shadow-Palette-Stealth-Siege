@@ -279,6 +279,8 @@ public class AdminService {
                 .defenderId(log.getDefenderId())
                 .outcome(log.getOutcome())
                 .stolenChips(log.getStolenChips())
+                .stolenCoins(log.getStolenCoins())
+                .stolenInk(log.getStolenInk())
                 .detected(log.isDetected())
                 .durationSeconds(log.getDurationSeconds())
                 .timestamp(log.getTimestamp() == null ? null : log.getTimestamp().toString())

@@ -235,7 +235,7 @@ export function tickGuideMarker(marker, elapsed, camera) {
   if (camera) marker.pin.quaternion.copy(camera.quaternion);
 }
 
-/** Detailed patrol robot with chase + patrol modes. */
+/** Detailed patrol robot with chase + patrol modes and state-tinted poses. */
 export function createGamePatrolRobot() {
   const bot = new THREE.Group();
   bot.name = 'PatrolRobot';
@@ -252,9 +252,9 @@ export function createGamePatrolRobot() {
   const eye = new THREE.Mesh(
     new THREE.SphereGeometry(0.08, 12, 10),
     new THREE.MeshStandardMaterial({
-      color: GAME_COLORS.RED,
-      emissive: new THREE.Color(GAME_COLORS.RED),
-      emissiveIntensity: 0.85,
+      color: GAME_COLORS.YELLOW,
+      emissive: new THREE.Color(GAME_COLORS.YELLOW),
+      emissiveIntensity: 0.55,
     })
   );
   eye.position.set(0, 0.72, 0.18);
@@ -279,13 +279,55 @@ export function createGamePatrolRobot() {
     bot.add(tread);
   });
 
+  const STATE_TINT = {
+    patrol: { eye: GAME_COLORS.YELLOW, body: '#6E6B66', lean: 0, bob: 0.02 },
+    suspicious: { eye: '#F4A261', body: '#7A6E5E', lean: 0.06, bob: 0.04 },
+    alert: { eye: '#E76F51', body: '#7A5550', lean: 0.1, bob: 0.05 },
+    chase: { eye: GAME_COLORS.RED, body: '#8A4545', lean: 0.14, bob: 0.08 },
+    searching: { eye: '#5B8DEF', body: '#5A6570', lean: 0.04, bob: 0.06 },
+    hit: { eye: GAME_COLORS.RED, body: '#A03030', lean: 0.18, bob: 0.12 },
+  };
+
   const radius = TILE_SIZE * 2.4;
+  const waypoints = [
+    { column: SEARCHLIGHT_TILE.column + 2.2, row: SEARCHLIGHT_TILE.row },
+    { column: SEARCHLIGHT_TILE.column, row: SEARCHLIGHT_TILE.row + 2.2 },
+    { column: SEARCHLIGHT_TILE.column - 2.2, row: SEARCHLIGHT_TILE.row },
+    { column: SEARCHLIGHT_TILE.column, row: SEARCHLIGHT_TILE.row - 2.2 },
+  ];
   let mode = 'patrol';
   let targetCol = SEARCHLIGHT_TILE.column;
   let targetRow = SEARCHLIGHT_TILE.row;
-  let col = SEARCHLIGHT_TILE.column + 2;
-  let row = SEARCHLIGHT_TILE.row;
+  let col = waypoints[0].column;
+  let row = waypoints[0].row;
   let catchProgress = 0;
+  let wpIndex = 0;
+  let worldX = 0;
+  let worldZ = 0;
+  let yaw = 0;
+  let primed = false;
+
+  const applyTint = (key) => {
+    const tint = STATE_TINT[key] || STATE_TINT.patrol;
+    if (eye.material) {
+      eye.material.color.set(tint.eye);
+      eye.material.emissive.set(tint.eye);
+      eye.material.emissiveIntensity = key === 'chase' || key === 'hit' ? 1.35 : key === 'alert' ? 1.0 : 0.55;
+    }
+    if (tip.material) {
+      tip.material.color.set(tint.eye);
+      tip.material.emissive.set(tint.eye);
+    }
+    if (body.material) body.material.color.set(tint.body);
+    body.rotation.x = tint.lean;
+    chest.rotation.x = tint.lean * 0.6;
+  };
+
+  const lerpAngle = (a, b, t) => {
+    let d = ((b - a + Math.PI) % (Math.PI * 2)) - Math.PI;
+    if (d < -Math.PI) d += Math.PI * 2;
+    return a + d * t;
+  };
 
   return {
     object: bot,
@@ -293,29 +335,59 @@ export function createGamePatrolRobot() {
       return { column: col, row };
     },
     setMode(next, target) {
-      mode = next;
+      const key = String(next || 'patrol').toLowerCase();
+      mode = key === 'chasing' ? 'chase' : key;
       if (target) {
         targetCol = target.column;
         targetRow = target.row;
       }
-      if (eye.material) {
-        const hot = mode === 'chase' || mode === 'hit';
-        eye.material.color.set(hot ? GAME_COLORS.RED : GAME_COLORS.YELLOW);
-        eye.material.emissive.set(hot ? GAME_COLORS.RED : GAME_COLORS.YELLOW);
-        eye.material.emissiveIntensity = hot ? 1.2 : 0.5;
-      }
+      applyTint(mode);
     },
     update(elapsed, dt = 0.016) {
       tickBuildingMotion(bot, elapsed);
-      if (mode === 'patrol') {
-        const a = elapsed * 0.45;
-        const p = tileWorldPos(SEARCHLIGHT_TILE.column, SEARCHLIGHT_TILE.row);
-        bot.position.set(p.x + Math.cos(a) * radius, TILE_HEIGHT, p.z + Math.sin(a) * radius);
-        bot.rotation.y = -a - Math.PI / 2;
-        col = SEARCHLIGHT_TILE.column + Math.cos(a) * 2;
-        row = SEARCHLIGHT_TILE.row + Math.sin(a) * 2;
+      const tint = STATE_TINT[mode] || STATE_TINT.patrol;
+
+      if (mode === 'patrol' || mode === 'searching' || mode === 'suspicious') {
+        const speed = mode === 'searching' ? 1.6 : mode === 'suspicious' ? 1.1 : 0.85;
+        const dest = waypoints[wpIndex];
+        const dx = dest.column - col;
+        const dy = dest.row - row;
+        const dist = Math.hypot(dx, dy);
+        if (dist < 0.08) {
+          wpIndex = (wpIndex + 1) % waypoints.length;
+        } else {
+          const step = speed * dt;
+          col += (dx / dist) * Math.min(step, dist);
+          row += (dy / dist) * Math.min(step, dist);
+        }
+        const p = tileWorldPos(col, row);
+        if (!primed) {
+          worldX = p.x;
+          worldZ = p.z;
+          primed = true;
+        }
+        const follow = 1 - Math.exp(-(mode === 'searching' ? 8 : 5) * dt);
+        worldX += (p.x - worldX) * follow;
+        worldZ += (p.z - worldZ) * follow;
+        const face = Math.atan2(dx, dy);
+        yaw = lerpAngle(yaw, face, follow);
+        bot.position.set(worldX, TILE_HEIGHT + Math.sin(elapsed * 6) * tint.bob, worldZ);
+        bot.rotation.y = yaw;
         catchProgress = 0;
-        return { caught: false, hitting: false };
+        return { caught: false, hitting: false, state: mode };
+      }
+
+      if (mode === 'alert') {
+        // Pause briefly, crane toward last-seen before chase engages.
+        const p = tileWorldPos(col, row);
+        worldX += (p.x - worldX) * 0.2;
+        worldZ += (p.z - worldZ) * 0.2;
+        const face = Math.atan2(targetCol - col, targetRow - row);
+        yaw = lerpAngle(yaw, face, 1 - Math.exp(-6 * dt));
+        bot.position.set(worldX, TILE_HEIGHT + Math.sin(elapsed * 14) * 0.04, worldZ);
+        bot.rotation.y = yaw;
+        body.rotation.x = 0.12 + Math.sin(elapsed * 10) * 0.04;
+        return { caught: false, hitting: false, state: mode };
       }
 
       const speed = mode === 'hit' ? 3.2 : 2.4;
@@ -328,16 +400,30 @@ export function createGamePatrolRobot() {
         row += (dy / dist) * Math.min(step, dist);
       }
       const p = tileWorldPos(col, row);
-      bot.position.set(p.x, TILE_HEIGHT + (mode === 'hit' ? Math.sin(elapsed * 18) * 0.05 : 0), p.z);
-      bot.rotation.y = Math.atan2(dx, dy);
+      const follow = 1 - Math.exp(-10 * dt);
+      if (!primed) {
+        worldX = p.x;
+        worldZ = p.z;
+        primed = true;
+      }
+      worldX += (p.x - worldX) * follow;
+      worldZ += (p.z - worldZ) * follow;
+      const face = dist > 0.02 ? Math.atan2(dx, dy) : yaw;
+      yaw = lerpAngle(yaw, face, follow);
+      bot.position.set(
+        worldX,
+        TILE_HEIGHT + (mode === 'hit' ? Math.sin(elapsed * 18) * 0.05 : Math.sin(elapsed * 10) * tint.bob),
+        worldZ
+      );
+      bot.rotation.y = yaw;
 
       if (dist < 0.55) {
         catchProgress += dt;
         this.setMode('hit', { column: targetCol, row: targetRow });
-        return { caught: catchProgress > 0.35, hitting: true };
+        return { caught: catchProgress > 0.35, hitting: true, state: 'hit' };
       }
       catchProgress = Math.max(0, catchProgress - dt * 0.5);
-      return { caught: false, hitting: false };
+      return { caught: false, hitting: false, state: mode };
     },
   };
 }

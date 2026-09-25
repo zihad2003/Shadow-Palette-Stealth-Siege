@@ -25,14 +25,22 @@ public class RaidValidator {
     /**
      * Replays the client's session log ticks against the server-side detection rules,
      * Lighthouse beam rotation, and PatrolRobot state machine.
-     * Applies GDD Section 9 Alarm Escalation (+25% Lighthouse sweep speed, +1 tile cone range).
+     * Alarm escalation (sweep + range) scales with defender Searchlight level (GDD §9).
      */
-    public ValidatedOutcomeDto validateSession(RaidCompleteRequest request, String attackerCamoColor, int defenderChipsAvailable) {
+    public ValidatedOutcomeDto validateSession(
+            RaidCompleteRequest request,
+            String attackerCamoColor,
+            int defenderCoins,
+            int defenderInk
+    ) {
         if (request.getLockedCamoColor() != null && request.getTileColors() != null) {
-            return validateColorCamoSession(request, attackerCamoColor, defenderChipsAvailable);
+            return validateColorCamoSession(request, attackerCamoColor, defenderCoins, defenderInk);
         }
         int playerBand = strategyFactory.getLuminanceBandForColor(attackerCamoColor);
         int surroundingBand = 3; // Default ground luminance band
+        int lightLevel = StealthConstants.clampLevel(
+                request.getSearchlightLevel() == null ? 1 : request.getSearchlightLevel()
+        );
 
         List<SessionLogTickDto> ticks = request.getSessionLog();
         boolean isDetected = false;
@@ -40,11 +48,10 @@ public class RaidValidator {
 
         PatrolRobotContext robotContext = new PatrolRobotContext();
 
-        // Base Lighthouse configuration
         double lhX = 10.0;
         double lhY = 2.0;
         double coneAngle = 60.0;
-        double coneRange = 7.0; // Base 7 tiles range
+        double coneRange = 7.0;
         double sweepSpeedMult = 1.0;
 
         if (ticks != null && !ticks.isEmpty()) {
@@ -53,16 +60,13 @@ public class RaidValidator {
                 double px = tickDto.getXPos();
                 double py = tickDto.getYPos();
 
-                // Alarm Escalation Buff per GDD Section 9
                 if (isDetected) {
-                    coneRange = 8.0; // +1 tile range on alarm
-                    sweepSpeedMult = 1.25; // +25% sweep speed on alarm
+                    coneRange = 7.0 + StealthConstants.alarmRangeBonus(lightLevel);
+                    sweepSpeedMult = StealthConstants.alarmSweepMult(lightLevel);
                 }
 
-                // 1. Calculate Lighthouse beam sweep angle
                 double beamAngleDeg = (tick * (360.0 / 240.0) * sweepSpeedMult) % 360.0;
 
-                // 2. Evaluate Lighthouse stealth detection
                 DetectionResult result = LighthouseDetectionEngine.evaluateDetection(
                         lhX, lhY, beamAngleDeg, coneAngle, coneRange, px, py, playerBand, surroundingBand
                 );
@@ -79,10 +83,10 @@ public class RaidValidator {
                         .build();
                 robotContext.processDetection(event);
 
-                // 3. Check Robot Chase distance (Player speed is 1.25x robot speed)
                 if ("CHASING".equals(robotContext.getCurrentStateName())) {
                     double robotDist = Math.hypot(px - robotContext.getX(), py - robotContext.getY());
-                    if (robotDist <= 0.5) { // Caught by robot!
+                    // Catch radius left at 0.5 — tightening raised Caught-rate too harshly in playtests.
+                    if (robotDist <= 0.5) {
                         isCaught = true;
                         break;
                     }
@@ -90,17 +94,18 @@ public class RaidValidator {
             }
         }
 
-        return award(isCaught, isDetected, request, defenderChipsAvailable);
+        return award(isCaught, isDetected, defenderCoins, defenderInk);
     }
 
     /**
      * Replays movement against stored defender tile colors and the locked raid camo.
-     * Client isDetected / stolen chips are ignored.
+     * Client loot amounts are ignored — server computes steal from defender balances.
      */
     private ValidatedOutcomeDto validateColorCamoSession(
             RaidCompleteRequest request,
             String attackerCamoColor,
-            int defenderChipsAvailable
+            int defenderCoins,
+            int defenderInk
     ) {
         String locked = request.getLockedCamoColor() != null
                 ? request.getLockedCamoColor().trim().toUpperCase()
@@ -108,6 +113,10 @@ public class RaidValidator {
         if (!Colors.ALLOWED_CAMO_COLORS.contains(locked)) {
             locked = "BLUE";
         }
+
+        int lightLevel = StealthConstants.clampLevel(
+                request.getSearchlightLevel() == null ? 1 : request.getSearchlightLevel()
+        );
 
         boolean alarm = false;
         boolean caught = false;
@@ -119,9 +128,11 @@ public class RaidValidator {
                 SessionLogTickDto tick = ticks.get(i);
                 double px = tick.getXPos();
                 double py = tick.getYPos();
-                double sweep = StealthConstants.SEARCHLIGHT_SWEEP_DEG * (alarm ? 1.25 : 1.0);
+                double sweep = StealthConstants.SEARCHLIGHT_SWEEP_DEG
+                        * (alarm ? StealthConstants.alarmSweepMult(lightLevel) : 1.0);
                 double beam = (tick.getTick() * sweep / 8.0) % 360.0;
-                double range = StealthConstants.SEARCHLIGHT_RANGE + (alarm ? 1.0 : 0.0);
+                double range = StealthConstants.SEARCHLIGHT_RANGE
+                        + (alarm ? StealthConstants.alarmRangeBonus(lightLevel) : 0.0);
 
                 SearchlightColorEngine.BeamResult beamHit = SearchlightColorEngine.evaluateBeam(
                         StealthConstants.SEARCHLIGHT_X,
@@ -154,23 +165,43 @@ public class RaidValidator {
             }
         }
 
-        return award(caught, alarm, request, defenderChipsAvailable);
+        return award(caught, alarm, defenderCoins, defenderInk);
     }
 
-    private ValidatedOutcomeDto award(boolean caught, boolean detected, RaidCompleteRequest request, int defenderChipsAvailable) {
-        int requestedChips = request.getClientReportedOutcome() != null ? request.getClientReportedOutcome().getChipsRequested() : 0;
-        int baseChips = Math.min(requestedChips, defenderChipsAvailable > 0 ? defenderChipsAvailable : 200);
+    /**
+     * Steals up to {@link StealthConstants#RAID_LOOT_FRACTION} of defender coins/ink,
+     * scaled by outcome multiplier (SILENT 1.0×, ESCAPED 1.5×, CAUGHT 0×).
+     */
+    ValidatedOutcomeDto award(boolean caught, boolean detected, int defenderCoins, int defenderInk) {
+        int coinPool = defenderCoins > 0 ? defenderCoins : StealthConstants.DEFENDER_COINS_FALLBACK;
+        int inkPool = defenderInk > 0 ? defenderInk : StealthConstants.DEFENDER_INK_FALLBACK;
+        int baseCoins = (int) Math.floor(coinPool * StealthConstants.RAID_LOOT_FRACTION);
+        int baseInk = (int) Math.floor(inkPool * StealthConstants.RAID_LOOT_FRACTION);
 
         if (caught) {
-            return ValidatedOutcomeDto.builder().isDetected(true).outcome("CAUGHT").chipsAwarded(0).build();
+            return ValidatedOutcomeDto.builder()
+                    .isDetected(true)
+                    .outcome("CAUGHT")
+                    .chipsAwarded(0)
+                    .coinsLooted(0)
+                    .inkLooted(0)
+                    .build();
         }
         if (detected) {
             return ValidatedOutcomeDto.builder()
                     .isDetected(true)
                     .outcome("ESCAPED")
-                    .chipsAwarded((int) Math.round(baseChips * 1.5))
+                    .chipsAwarded(0)
+                    .coinsLooted((int) Math.round(baseCoins * 1.5))
+                    .inkLooted((int) Math.round(baseInk * 1.5))
                     .build();
         }
-        return ValidatedOutcomeDto.builder().isDetected(false).outcome("SILENT").chipsAwarded(baseChips).build();
+        return ValidatedOutcomeDto.builder()
+                .isDetected(false)
+                .outcome("SILENT")
+                .chipsAwarded(0)
+                .coinsLooted(baseCoins)
+                .inkLooted(baseInk)
+                .build();
     }
 }
