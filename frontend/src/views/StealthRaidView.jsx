@@ -28,6 +28,7 @@ import { RAID_TARGETS } from '../data/raidTargets.js';
 import { createSprintMeter, SPRINT_SPEED_MULT } from '../character/sprint.js';
 import StaminaBar from '../components/hud/StaminaBar.jsx';
 import ActionPrompt from '../components/hud/ActionPrompt.jsx';
+import { ensureStompConnected, stompPublish, stompSubscribe, stompUnsubscribe } from '../live/stompClient.js';
 import LootFloatFX from '../components/raid/LootFloatFX.jsx';
 import RaidTransitionOverlay, { RAID_CINEMATIC_MS } from '../components/raid/RaidTransitionOverlay.jsx';
 import { findRepairedNear } from '../gamemap/starterRuins.js';
@@ -97,6 +98,7 @@ export default function StealthRaidView() {
     setInkEnergy,
     transitionTo,
     recordRaidResult,
+    userId,
   } = useGameState();
 
   const lockedCamo = raidSession?.camoColor || camoColor;
@@ -132,6 +134,9 @@ export default function StealthRaidView() {
   const robotTickAccumRef = useRef(0);
   /** Once the beam hits the player even once, chase stays on for the rest of the raid. */
   const chaseLatchedRef = useRef(false);
+  /** Live defender is driving the robot — skip local AI chase. */
+  const liveDefenderRef = useRef(false);
+  const liveCaughtRef = useRef(false);
   const sessionLog = useRef([]);
   const wallHitsRef = useRef(0);
   const gateLockedRef = useRef(false);
@@ -339,7 +344,7 @@ export default function StealthRaidView() {
         chaseLatchedRef.current = true;
       }
 
-      if (chaseLatchedRef.current) {
+      if (chaseLatchedRef.current && !liveDefenderRef.current) {
         robotContext.current.setState(ROBOT_STATES.CHASING);
         robotContext.current.lastSeenPlayerX = pos.column;
         robotContext.current.lastSeenPlayerY = pos.row;
@@ -387,7 +392,7 @@ export default function StealthRaidView() {
         ? DETECTION_STATES.ALARM
         : hudStateFromRobot(robotState);
 
-      if (!chaseLatchedRef.current && raidDefenses.length > 0) {
+      if (!chaseLatchedRef.current && !liveDefenderRef.current && raidDefenses.length > 0) {
         const lastSeen = {
           column: robotContext.current.lastSeenPlayerX ?? pos.column,
           row: robotContext.current.lastSeenPlayerY ?? pos.row,
@@ -412,11 +417,21 @@ export default function StealthRaidView() {
           ? Math.hypot(pos.column - robotPos.column, pos.row - robotPos.row)
           : Infinity;
       // Must be on top of the player (catch radius) — distant chase never auto-CAUGHT.
-      const robotTagged = !!patrolState.hitting && robotDist <= ROBOT_CATCH_DISTANCE + 0.2;
+      // Live takeover: server is source of truth for CAUGHT (liveCaughtRef).
+      const robotTagged =
+        !liveDefenderRef.current &&
+        !!patrolState.hitting &&
+        robotDist <= ROBOT_CATCH_DISTANCE + 0.2;
       const robotCaught =
         !hudRef.current.outcome &&
-        (!!patrolState.caught || (!!patrolState.tagged && robotDist <= ROBOT_CATCH_DISTANCE + 0.2));
-      const robotChasing = chaseLatchedRef.current || robotState === ROBOT_STATES.CHASING || !!patrolState.chasing;
+        (liveCaughtRef.current ||
+          (!liveDefenderRef.current &&
+            (!!patrolState.caught || (!!patrolState.tagged && robotDist <= ROBOT_CATCH_DISTANCE + 0.2))));
+      const robotChasing =
+        chaseLatchedRef.current ||
+        liveDefenderRef.current ||
+        robotState === ROBOT_STATES.CHASING ||
+        !!patrolState.chasing;
 
       // Arm extraction only after the attacker has left the gate zone once
       // (prevents spawn/nudge onto the corridor from auto-completing a Silent extract).
@@ -582,6 +597,59 @@ export default function StealthRaidView() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lockedCamo, raidDefenses.length]);
+
+  // Optional live-defender takeover over STOMP (AI resumes if they disconnect).
+  useEffect(() => {
+    const raidId = raidSession?.raidId;
+    if (!raidId || !userId) return undefined;
+    let cancelled = false;
+    let pubTimer = 0;
+
+    (async () => {
+      try {
+        await ensureStompConnected();
+        if (cancelled) return;
+        await stompSubscribe(`/topic/live-raid/${raidId}/state`, (state) => {
+          if (!state || cancelled) return;
+          if (state.joined && !liveDefenderRef.current) {
+            liveDefenderRef.current = true;
+            chaseLatchedRef.current = true;
+            showToastRef.current('A live defender has joined!', 'info');
+          }
+          if (state.message === 'DEFENDER_LEFT' || state.outcome === 'DEFENDER_LEFT') {
+            liveDefenderRef.current = false;
+            sceneApi.current?.clearLivePatrol?.();
+            showToastRef.current('Defender left — patrol AI resumed', 'info');
+          }
+          if (liveDefenderRef.current && state.robotX != null && state.robotY != null) {
+            sceneApi.current?.setLivePatrolPosition?.(state.robotX, state.robotY);
+          }
+          if (state.terminal && state.outcome === 'CAUGHT') {
+            liveCaughtRef.current = true;
+          }
+        });
+        pubTimer = window.setInterval(() => {
+          const pos = attackerRef.current;
+          stompPublish(`/app/live-raid/${raidId}/position`, {
+            userId,
+            role: 'ATTACKER',
+            x: pos.column,
+            y: pos.row,
+          }).catch(() => {});
+        }, 120);
+      } catch {
+        /* backend / ws down — stay on async AI path */
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(pubTimer);
+      stompUnsubscribe(`/topic/live-raid/${raidId}/state`);
+      liveDefenderRef.current = false;
+      sceneApi.current?.clearLivePatrol?.();
+    };
+  }, [raidSession?.raidId, userId]);
 
   useEffect(() => {
     const down = (e) => {

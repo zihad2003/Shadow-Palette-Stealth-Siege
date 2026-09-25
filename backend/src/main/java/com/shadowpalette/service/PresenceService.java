@@ -62,6 +62,13 @@ public class PresenceService {
         return PresenceOnlineResponse.builder().success(true).players(players).build();
     }
 
+    /** True if this user has a fresh heartbeat within PRESENCE_TTL_SECONDS. */
+    public boolean isOnline(Long userId) {
+        if (userId == null) return false;
+        prunePresence();
+        return presence.containsKey(userId);
+    }
+
     @Transactional
     public VisitInviteDto createInvite(VisitInviteRequest request) {
         if (request == null || request.getHostId() == null || request.getGuestId() == null) {

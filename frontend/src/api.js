@@ -77,6 +77,14 @@ export async function fetchRaidTarget(userId) {
   return request(`/api/raid/target/${userId}`);
 }
 
+/** Notify backend a raid is starting — may push a live invite if defender is online. */
+export async function startRaidSession(payload) {
+  return request('/api/raid/start', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function completeRaid(payload) {
   return request('/api/raid/complete', {
     method: 'POST',

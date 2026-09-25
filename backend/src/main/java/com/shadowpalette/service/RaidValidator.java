@@ -129,8 +129,7 @@ public class RaidValidator {
         }
 
         boolean wallEscape = hasCompletedWallBreak(request) && isDetected;
-        boolean survivedFullRaid = request.getDurationSeconds() != null
-                && request.getDurationSeconds() >= StealthConstants.RAID_DURATION_SECONDS;
+        boolean survivedFullRaid = request.getDurationSeconds() >= StealthConstants.RAID_DURATION_SECONDS;
         return award(isCaught, isDetected, extractionComplete || wallEscape || survivedFullRaid, defenderCoins, defenderInk,
                 request.getDurationSeconds());
     }
@@ -252,8 +251,7 @@ public class RaidValidator {
         }
 
         boolean wallEscape = hasCompletedWallBreak(request) && alarm;
-        boolean survivedFullRaid = request.getDurationSeconds() != null
-                && request.getDurationSeconds() >= StealthConstants.RAID_DURATION_SECONDS;
+        boolean survivedFullRaid = request.getDurationSeconds() >= StealthConstants.RAID_DURATION_SECONDS;
         return award(caught, alarm, extractionComplete || wallEscape || survivedFullRaid, defenderCoins, defenderInk,
                 request.getDurationSeconds());
     }

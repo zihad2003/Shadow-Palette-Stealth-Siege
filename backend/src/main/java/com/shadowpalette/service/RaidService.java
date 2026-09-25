@@ -163,4 +163,63 @@ public class RaidService {
                 .attackerInk(attacker.getInkEnergy())
                 .build();
     }
+
+    /**
+     * Server-authoritative CAUGHT from a live takeover. Loot is always 0 (same as async CAUGHT).
+     * Applies cooldown and writes a RaidLog so economy state matches a normal complete.
+     */
+    @Transactional
+    public RaidCompleteResponse completeLiveCaught(Long attackerId, Long defenderId, int durationSeconds) {
+        User attacker = userRepository.findById(attackerId)
+                .orElseGet(() -> User.builder()
+                        .id(attackerId)
+                        .username("Player" + attackerId)
+                        .camoColor("BLUE")
+                        .coins(500)
+                        .inkEnergy(100)
+                        .chips(200)
+                        .build());
+        User defender = userRepository.findById(defenderId)
+                .orElseGet(() -> User.builder()
+                        .id(defenderId)
+                        .username("Defender" + defenderId)
+                        .coins(200)
+                        .inkEnergy(50)
+                        .chips(200)
+                        .build());
+
+        attacker.setRaidCooldownUntil(LocalDateTime.now().plusMinutes(5));
+        userRepository.save(attacker);
+        userRepository.save(defender);
+
+        ValidatedOutcomeDto validated = ValidatedOutcomeDto.builder()
+                .isDetected(true)
+                .outcome("CAUGHT")
+                .chipsAwarded(0)
+                .coinsLooted(0)
+                .inkLooted(0)
+                .build();
+
+        RaidLog raidLog = RaidLog.builder()
+                .attackerId(attacker.getId())
+                .defenderId(defender.getId())
+                .outcome("CAUGHT")
+                .isDetected(true)
+                .stolenChips(0)
+                .stolenCoins(0)
+                .stolenInk(0)
+                .durationSeconds(Math.max(1, durationSeconds))
+                .timestamp(LocalDateTime.now())
+                .sessionLogJson("[\"live-raid\"]")
+                .build();
+        RaidLog saved = raidLogRepository.save(raidLog);
+
+        return RaidCompleteResponse.builder()
+                .success(true)
+                .validatedOutcome(validated)
+                .raidLogId(saved.getId())
+                .attackerCoins(attacker.getCoins())
+                .attackerInk(attacker.getInkEnergy())
+                .build();
+    }
 }
