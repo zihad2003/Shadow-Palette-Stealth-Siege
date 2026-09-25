@@ -9,8 +9,12 @@ export function createAlarmTriggeredEvent(payload = {}) {
 }
 
 /**
- * Observer hub: DetectionSystem raises alarm → siren / UI / patrol robot subscribe.
- * Searchlight never calls these directly.
+ * Observer hub for one-shot meter-full alarm: siren / alert light / gate lock.
+ *
+ * PatrolRobot chase is NOT registered here — StealthRaidView drives the robot via
+ * PatrolRobotContext.processDetection on each robot-tick so CORE_ZONE / EDGE_ZONE
+ * escalation owns chase. Registering PatrolRobotAlertListener here would
+ * double-trigger CHASING on justAlarmed.
  */
 export function createAlarmSystem({ onAlarmTriggered } = {}) {
   const subject = new SensorSubject();

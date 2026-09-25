@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
-import { DoorOpen } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
 import { useGameState } from '../../state/GameStateContext.jsx';
 import { completeRaid } from '../../api.js';
-import { soundEngine } from '../../soundEngine.js';
-import ClayButton from '../ui/ClayButton.jsx';
 
+/**
+ * Submits the raid log once an outcome is set. No one-click Escape —
+ * extraction is channeled at the south gate in StealthRaidView.
+ */
 export default function SideRaidPanel({
   lockedCamo,
   remaining,
@@ -12,47 +13,51 @@ export default function SideRaidPanel({
   sessionLog,
   paintedTiles,
   searchlightLevel = 1,
-  onExtract,
+  outcome,
+  wallHits = 0,
+  elapsedSeconds = 0,
 }) {
-  const { raidTargetId, userId, raidSession, showToast } = useGameState();
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const { raidTargetId, userId, raidSession, showToast, setCoins, setInkEnergy } = useGameState();
+  const [submitted, setSubmitted] = useState(false);
 
-  const handleSubmitRaid = async () => {
-    soundEngine.playClickSound();
-    setIsSubmitting(true);
-    try {
-      const payload = {
-        attackerId: userId,
-        defenderId: raidTargetId,
-        durationSeconds: Math.round(120 - (remaining || 0)),
-        lockedCamoColor: raidSession?.camoColor || lockedCamo,
-        tileColors: paintedTiles,
-        searchlightLevel,
-        sessionLog: sessionLog?.current || [],
-        clientReportedOutcome: {
-          isDetected: !!isAlarmTriggered,
-          outcome: isAlarmTriggered ? 'ESCAPED' : 'SILENT',
-        },
-      };
-      await completeRaid(payload);
-    } catch (e) {
-      showToast('Saved locally', 'info');
-    } finally {
-      setIsSubmitting(false);
-      if (onExtract) onExtract();
-    }
-  };
+  useEffect(() => {
+    if (!outcome || submitted) return;
+    let cancelled = false;
+    (async () => {
+      setSubmitted(true);
+      try {
+        const payload = {
+          attackerId: userId,
+          defenderId: raidTargetId,
+          durationSeconds: Math.max(1, Math.round(elapsedSeconds || 120 - (remaining || 0))),
+          lockedCamoColor: raidSession?.camoColor || lockedCamo,
+          tileColors: paintedTiles,
+          searchlightLevel,
+          sessionLog: sessionLog?.current || [],
+          wallBreakEvents:
+            wallHits > 0
+              ? [{ wallBlockId: null, hits: wallHits, gateWasLocked: !!isAlarmTriggered }]
+              : [],
+          clientReportedOutcome: {
+            isDetected: !!isAlarmTriggered || outcome === 'ESCAPED' || outcome === 'CAUGHT',
+            outcome,
+          },
+        };
+        const res = await completeRaid(payload);
+        if (cancelled) return;
+        const vo = res?.validatedOutcome;
+        if (vo) {
+          if (typeof res.attackerCoins === 'number') setCoins?.(res.attackerCoins);
+          if (typeof res.attackerInk === 'number') setInkEnergy?.(res.attackerInk);
+        }
+      } catch (e) {
+        if (!cancelled) showToast('Saved locally', 'info');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [outcome]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return (
-    <div className="absolute right-4 bottom-4 z-50 pointer-events-auto">
-      <ClayButton
-        variant="success"
-        disabled={isSubmitting}
-        onClick={handleSubmitRaid}
-        className="h-11 px-4 rounded-2xl text-[11px] flex items-center gap-1.5"
-      >
-        <DoorOpen size={14} /> Extract
-      </ClayButton>
-    </div>
-  );
+  return null;
 }

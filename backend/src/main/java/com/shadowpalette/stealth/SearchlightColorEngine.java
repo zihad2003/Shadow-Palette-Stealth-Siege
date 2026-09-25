@@ -40,16 +40,27 @@ public final class SearchlightColorEngine {
             double meter,
             boolean alarmLatched
     ) {
+        return evaluateTick(beam, attackerColor, tileColor, dt, meter, alarmLatched, 0);
+    }
+
+    public static TickResult evaluateTick(
+            BeamResult beam,
+            String attackerColor,
+            String tileColor,
+            double dt,
+            double meter,
+            boolean alarmLatched,
+            double elapsedSeconds
+    ) {
         boolean match = ColorMatchSystem.isMatch(attackerColor, tileColor);
-        boolean exposed = beam.inBeam() && !match;
+        // Any beam contact spots the attacker (synced with FE — chase latches on first hit).
+        boolean exposed = beam.inBeam();
         int stealthScore = computeStealthScore(match, false);
         double next = meter;
         if (alarmLatched) {
             next = Math.max(meter, StealthConstants.ALARM_AT);
         } else if (exposed) {
-            next = meter + StealthConstants.METER_RISE_PER_SEC * (stealthScore / (double) StealthConstants.BASE_VISIBILITY) * dt;
-        } else if (beam.inBeam() && match) {
-            next = meter - StealthConstants.MATCH_METER_FALL_PER_SEC * dt;
+            next = StealthConstants.ALARM_AT;
         } else {
             next = meter - StealthConstants.METER_FALL_PER_SEC * dt;
         }

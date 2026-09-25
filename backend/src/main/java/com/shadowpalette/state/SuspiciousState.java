@@ -9,7 +9,8 @@ public class SuspiciousState implements RobotState {
         if ("CORE_ZONE".equals(event.getReason())) {
             context.setLastSeenPlayerX(event.getPlayerX());
             context.setLastSeenPlayerY(event.getPlayerY());
-            context.setState(new AlertState());
+            // Direct core hit bypasses ALERT dwell → CHASING immediately.
+            context.setState(new ChasingState());
             return;
         }
 

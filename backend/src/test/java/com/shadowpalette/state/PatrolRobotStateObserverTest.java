@@ -63,10 +63,8 @@ class PatrolRobotStateObserverTest {
         robot.processDetection(edgeEvent);
         assertEquals("SUSPICIOUS", robot.getCurrentStateName());
 
-        // 2. Sustained edge-zone mismatch (tick 2 & tick 3) -> AlertState
-        robot.processDetection(edgeEvent); // tick 2
-        assertEquals("SUSPICIOUS", robot.getCurrentStateName());
-        robot.processDetection(edgeEvent); // tick 3 -> AlertState!
+        // 2. Sustained edge mismatch reaches SUSPICIOUS_TICKS_TO_ALERT (2) -> AlertState
+        robot.processDetection(edgeEvent);
         assertEquals("ALERT", robot.getCurrentStateName());
 
         // 3. Alert confirmed -> ChasingState

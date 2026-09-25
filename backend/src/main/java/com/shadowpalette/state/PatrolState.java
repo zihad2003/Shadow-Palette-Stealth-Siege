@@ -13,7 +13,8 @@ public class PatrolState implements RobotState {
         if ("CORE_ZONE".equals(event.getReason())) {
             context.setLastSeenPlayerX(event.getPlayerX());
             context.setLastSeenPlayerY(event.getPlayerY());
-            context.setState(new AlertState());
+            // Direct core hit: CHASING on this same event (no ALERT dwell).
+            context.setState(new ChasingState());
         } else if ("EDGE_ZONE_MISMATCH".equals(event.getReason())) {
             context.setSuspiciousTicks(1);
             context.setState(new SuspiciousState());
