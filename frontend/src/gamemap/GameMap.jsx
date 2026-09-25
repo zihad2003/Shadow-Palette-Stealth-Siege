@@ -1210,8 +1210,19 @@ export default function GameMap({
         getPatrolState: () => ({
           ...lastPatrolHit,
           chasing: patrolCmd.chasing || !!patrol?.chasing,
+          live: !!patrol?.liveDriven,
           position: patrol?.position || null,
         }),
+        /** Apply a live-defender robot pose (disables AI until clearLivePatrol). */
+        setLivePatrolPosition: (column, row, snap = false) => {
+          patrolCmd.chasing = true;
+          patrolCmd.column = column;
+          patrolCmd.row = row;
+          patrol?.setLivePosition?.(column, row, snap);
+        },
+        clearLivePatrol: () => {
+          patrol?.clearLiveControl?.();
+        },
       };
     }
 

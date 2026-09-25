@@ -315,6 +315,8 @@ export function createGamePatrolRobot() {
   let worldZ = 0;
   let yaw = 0;
   let primed = false;
+  /** When true, pose comes from live defender updates — skip waypoint/chase AI. */
+  let liveDriven = false;
 
   const applyTint = (key) => {
     const tint = STATE_TINT[key] || STATE_TINT.patrol;
@@ -344,10 +346,33 @@ export function createGamePatrolRobot() {
       return { column: col, row };
     },
     get chasing() {
-      return mode === 'chase' || mode === 'hit';
+      return mode === 'chase' || mode === 'hit' || liveDriven;
+    },
+    get liveDriven() {
+      return liveDriven;
+    },
+    /** Absolute pose from a live defender (lerp in update). */
+    setLivePosition(column, rowNum, snap = false) {
+      liveDriven = true;
+      mode = 'chase';
+      applyTint('chase');
+      if (column != null && Number.isFinite(Number(column))) targetCol = Number(column);
+      if (rowNum != null && Number.isFinite(Number(rowNum))) targetRow = Number(rowNum);
+      if (snap) {
+        col = targetCol;
+        row = targetRow;
+        const p = tileWorldPos(col, row);
+        worldX = p.x;
+        worldZ = p.z;
+        primed = true;
+      }
+    },
+    clearLiveControl() {
+      liveDriven = false;
     },
     /** Update chase destination without resetting mode / catch timers. */
     setChaseTarget(column, rowNum) {
+      if (liveDriven) return;
       if (column != null && Number.isFinite(Number(column))) targetCol = Number(column);
       if (rowNum != null && Number.isFinite(Number(rowNum))) targetRow = Number(rowNum);
     },
@@ -376,6 +401,33 @@ export function createGamePatrolRobot() {
     update(elapsed, dt = 0.016) {
       tickBuildingMotion(bot, elapsed);
       const tint = STATE_TINT[mode] || STATE_TINT.patrol;
+
+      // Live defender drives the mesh — smooth lerp toward last reported tile.
+      if (liveDriven) {
+        const dx = targetCol - col;
+        const dy = targetRow - row;
+        let dist = Math.hypot(dx, dy);
+        if (dist > 0.02) {
+          const step = Math.min(dist, ROBOT_HIT_SPEED * dt * 1.35);
+          col += (dx / dist) * step;
+          row += (dy / dist) * step;
+          dist = Math.hypot(targetCol - col, targetRow - row);
+        }
+        const p = tileWorldPos(col, row);
+        const follow = 1 - Math.exp(-14 * dt);
+        if (!primed) {
+          worldX = p.x;
+          worldZ = p.z;
+          primed = true;
+        }
+        worldX += (p.x - worldX) * follow;
+        worldZ += (p.z - worldZ) * follow;
+        const face = dist > 0.02 ? Math.atan2(dx, dy) : yaw;
+        yaw = lerpAngle(yaw, face, follow);
+        bot.position.set(worldX, TILE_HEIGHT + Math.sin(elapsed * 10) * tint.bob, worldZ);
+        bot.rotation.y = yaw;
+        return { caught: false, tagged: false, hitting: false, state: 'chase', chasing: true, live: true };
+      }
 
       // Idle orbits only — never while chasing.
       if (mode === 'patrol' || mode === 'searching' || mode === 'suspicious') {

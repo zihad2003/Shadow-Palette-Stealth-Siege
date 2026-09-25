@@ -5,6 +5,7 @@ import {
   placeBuilding,
   placeDefense,
   fetchRaidTarget,
+  startRaidSession,
   upgradeBuilding,
   postPresenceHeartbeat,
   fetchOnlinePlayers,
@@ -120,7 +121,7 @@ export const GRID_SIZE = MAP_COLS * MAP_ROWS;
 export const PLACEABLE_BUILDINGS = ['CRAFT_HOUSE', 'INK_HOUSE', 'SLEEP_HOUSE', 'COIN_GENERATOR'];
 
 export function GameStateProvider({ children }) {
-  // FSM: SPLASH | STORY | INTRO_* | MAIN_MENU | PAINT_TUTORIAL | BASE_BUILDER | RAID_FINDER | RAID_ENTER | STEALTH_RAID
+  // FSM: SPLASH | STORY | INTRO_* | MAIN_MENU | PAINT_TUTORIAL | BASE_BUILDER | RAID_FINDER | RAID_ENTER | STEALTH_RAID | LIVE_DEFENSE
   const initialView = new URLSearchParams(window.location.search).get('view');
   const allowedViews = [
     'SPLASH',
@@ -134,6 +135,7 @@ export function GameStateProvider({ children }) {
     'RAID_FINDER',
     'RAID_ENTER',
     'STEALTH_RAID',
+    'LIVE_DEFENSE',
     'ADMIN',
   ];
   const introDone = (() => {
@@ -158,7 +160,24 @@ export function GameStateProvider({ children }) {
 
   const forceFullHome = new URLSearchParams(window.location.search).get('full') === '1';
   const savedWorld = useRef(forceFullHome ? createMaxedHome() : readWorldSave()).current;
-  const [userId, setUserId] = useState(12);
+  const [userId, setUserId] = useState(() => {
+    try {
+      const q = Number(new URLSearchParams(window.location.search).get('userId'));
+      if (Number.isFinite(q) && q > 0) return q;
+      const saved = Number(window.localStorage.getItem('sp_userId'));
+      if (Number.isFinite(saved) && saved > 0) return saved;
+    } catch {
+      /* ignore */
+    }
+    return 12;
+  });
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('sp_userId', String(userId));
+    } catch {
+      /* ignore */
+    }
+  }, [userId]);
   const [coins, setCoins] = useState(() => (Number.isFinite(savedWorld?.coins) ? savedWorld.coins : 500));
   const [inkEnergy, setInkEnergy] = useState(() => (Number.isFinite(savedWorld?.inkEnergy) ? savedWorld.inkEnergy : 100));
   const [chips, setChips] = useState(() => (Number.isFinite(savedWorld?.chips) ? savedWorld.chips : 200));
@@ -166,6 +185,10 @@ export function GameStateProvider({ children }) {
   const [camoColor, setCamoColor] = useState(() => savedWorld?.camoColor || 'BLUE');
   const [camoReady, setCamoReady] = useState(false);
   const [raidSession, setRaidSession] = useState(null);
+  /** Pending STOMP raid-invite for this user (defender). */
+  const [liveRaidInvite, setLiveRaidInvite] = useState(null);
+  /** Active live-defense session after Join. */
+  const [liveDefense, setLiveDefense] = useState(null);
   const [prestigeLevel, setPrestigeLevel] = useState(() => savedWorld?.prestigeLevel || 0);
   const [successfulRaids, setSuccessfulRaids] = useState(() => savedWorld?.successfulRaids || 0);
   const [patrolUnlocked, setPatrolUnlocked] = useState(() =>
@@ -469,6 +492,29 @@ export function GameStateProvider({ children }) {
         } catch (e) {
           setRaidData(null);
         }
+        // Optional live invite — never blocks the async raid if backend is down.
+        try {
+          const live = await startRaidSession({
+            attackerId: userId,
+            defenderId: defender,
+            raidId: session.raidId,
+            attackerName: username,
+          });
+          if (live?.raidId) {
+            setRaidSession((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    raidId: live.raidId,
+                    liveInviteSent: !!live.liveInviteSent,
+                    joinDeadline: live.joinDeadline || null,
+                  }
+                : prev
+            );
+          }
+        } catch {
+          /* offline backend → pure async raid */
+        }
         setGameState('STEALTH_RAID');
       };
       // After RaidEnterView cinematic, mount raid immediately — no second loading wipe.
@@ -510,6 +556,22 @@ export function GameStateProvider({ children }) {
     showToast(`Camo ${gate.camoColor}`, 'success');
     return true;
   };
+
+  const dismissLiveRaidInvite = () => setLiveRaidInvite(null);
+
+  const acceptLiveRaidDefense = (invite) => {
+    const inv = invite || liveRaidInvite;
+    if (!inv?.raidId) return;
+    setLiveDefense({
+      raidId: inv.raidId,
+      attackerUserId: inv.attackerUserId,
+      attackerName: inv.attackerName,
+    });
+    setLiveRaidInvite(null);
+    setGameState('LIVE_DEFENSE');
+  };
+
+  const clearLiveDefense = () => setLiveDefense(null);
 
   const TOTAL_SURFACE = GRID_SIZE;
 
@@ -1516,6 +1578,12 @@ export function GameStateProvider({ children }) {
     setCamoReady,
     raidSession,
     setRaidSession,
+    liveRaidInvite,
+    setLiveRaidInvite,
+    liveDefense,
+    acceptLiveRaidDefense,
+    dismissLiveRaidInvite,
+    clearLiveDefense,
     hasMakeupHouse,
     prestigeLevel,
     setPrestigeLevel,

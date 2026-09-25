@@ -13,6 +13,8 @@ import BaseBuilderView from './views/BaseBuilderView.jsx';
 import RaidFinderView from './views/RaidFinderView.jsx';
 import RaidEnterView from './views/RaidEnterView.jsx';
 import StealthRaidView from './views/StealthRaidView.jsx';
+import LiveDefenseView from './live/LiveDefenseView.jsx';
+import LiveRaidInviteListener from './live/LiveRaidInviteListener.jsx';
 import AdminDashboardView from './views/AdminDashboardView.jsx';
 import OptionsModal from './components/hud/OptionsModal.jsx';
 import MetaEconomyPanel from './components/hud/MetaEconomyPanel.jsx';
@@ -62,6 +64,8 @@ function GameViewRouter() {
       <RaidEnterView />
     ) : gameState === 'STEALTH_RAID' ? (
       <StealthRaidView />
+    ) : gameState === 'LIVE_DEFENSE' ? (
+      <LiveDefenseView />
     ) : gameState === 'ADMIN' ? (
       <AdminDashboardView />
     ) : (
@@ -81,6 +85,7 @@ export default function App() {
           <MetaEconomyPanel />
           <LoadingOverlay />
           <VisitHud />
+          <LiveRaidInviteListener />
           <ToastContainer />
         </ScreenError>
       </div>

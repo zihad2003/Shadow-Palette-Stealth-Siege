@@ -22,9 +22,18 @@ public final class StealthConstants {
     public static final int DEFENDER_COINS_FALLBACK = 200;
     public static final int DEFENDER_INK_FALLBACK = 50;
 
+    /** Board size — keep in sync with frontend mapConfig MAP_COLS / MAP_ROWS. */
+    public static final int MAP_COLS = 48;
+    public static final int MAP_ROWS = 40;
+
     /** South-gate extraction (48×40 board GATE_SPAWN_TILE). */
     public static final double GATE_X = 24.0;
     public static final double GATE_Y = 39.0;
+
+    /** Live-raid join window (defender must accept before this elapses). */
+    public static final int LIVE_RAID_JOIN_SECONDS = 15;
+    /** Slack multiplier on speed checks for network jitter. */
+    public static final double LIVE_POSITION_SPEED_SLACK = 1.75;
     public static final double EXTRACTION_RADIUS = 1.75;
     public static final double CHANNEL_DURATION_SECONDS = 4.0;
     public static final double CHANNEL_MOVE_EPSILON = 0.22;
