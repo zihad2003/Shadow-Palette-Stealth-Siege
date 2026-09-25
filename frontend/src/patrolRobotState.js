@@ -30,7 +30,8 @@ export class PatrolRobotContext {
       if (event.reason === 'CORE_ZONE') {
         this.lastSeenPlayerX = event.playerX;
         this.lastSeenPlayerY = event.playerY;
-        this.setState(ROBOT_STATES.ALERT);
+        // Direct core hit: CHASING on this same event (no ALERT dwell).
+        this.setState(ROBOT_STATES.CHASING);
       } else if (event.reason === 'EDGE_ZONE_MISMATCH') {
         this.suspiciousTicks = 1;
         this.setState(ROBOT_STATES.SUSPICIOUS);
@@ -40,7 +41,7 @@ export class PatrolRobotContext {
       if (event.reason === 'CORE_ZONE') {
         this.lastSeenPlayerX = event.playerX;
         this.lastSeenPlayerY = event.playerY;
-        this.setState(ROBOT_STATES.ALERT);
+        this.setState(ROBOT_STATES.CHASING);
       } else if (event.reason === 'EDGE_ZONE_MISMATCH') {
         this.suspiciousTicks += 1;
         if (this.suspiciousTicks >= 3) {

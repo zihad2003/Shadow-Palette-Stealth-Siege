@@ -42,8 +42,9 @@ import {
   WALK_TILE_SECONDS,
   TILE_PITCH,
   SEARCHLIGHT_TILE,
+  GATE_SPAWN_TILE,
 } from './mapConfig.js';
-import { DEFAULT_SEARCHLIGHT_LEVEL } from '../raid/stealthConstants.js';
+import { DEFAULT_SEARCHLIGHT_LEVEL, effectiveBeamRangeTiles, beamRangeRatio } from '../raid/stealthConstants.js';
 import { isTileInBeam } from '../raid/SearchlightSensor.js';
 import { getGameFootprint } from './placeUtils.js';
 import { HOUSE_MESH_REV } from './houseKit.js';
@@ -213,6 +214,34 @@ export default function GameMap({
 
     const wallBreakFX = createWallBreakFX(scene, fortressBorder);
     let bumpShake = 0;
+
+    // Glowing south-gate extraction marker (raid mode)
+    const extractMarker = new THREE.Group();
+    extractMarker.name = 'ExtractionMarker';
+    extractMarker.visible = false;
+    const extractRing = new THREE.Mesh(
+      new THREE.TorusGeometry(TILE_SIZE * 1.15, 0.06, 10, 40),
+      new THREE.MeshBasicMaterial({ color: 0x2a9d8f, transparent: true, opacity: 0.75 })
+    );
+    extractRing.rotation.x = Math.PI / 2;
+    extractRing.position.y = TILE_HEIGHT + 0.06;
+    extractMarker.add(extractRing);
+    const extractGlow = new THREE.Mesh(
+      new THREE.CircleGeometry(TILE_SIZE * 1.05, 32),
+      new THREE.MeshBasicMaterial({
+        color: 0x2a9d8f,
+        transparent: true,
+        opacity: 0.22,
+        depthWrite: false,
+      })
+    );
+    extractGlow.rotation.x = -Math.PI / 2;
+    extractGlow.position.y = TILE_HEIGHT + 0.04;
+    extractMarker.add(extractGlow);
+    scene.add(extractMarker);
+    let extractIntensity = 0.3;
+    let extractChanneling = false;
+    let extractInterrupt = 0;
 
     const makeupHouse = showMakeupHouse ? createMakeupHouse() : null;
     if (makeupHouse) {
@@ -828,6 +857,7 @@ export default function GameMap({
     let selectedTile = null;
     let pointerDown = null;
     let alarm = false;
+    let raidElapsedSeconds = 0;
 
     const pick = (e) => {
       const rect = canvas.getBoundingClientRect();
@@ -1077,6 +1107,18 @@ export default function GameMap({
             }
           });
         },
+        setExtractionMarker: (opts = {}) => {
+          const active = opts.active !== false;
+          extractMarker.visible = active;
+          if (!active) return;
+          const col = opts.column ?? GATE_SPAWN_TILE.column;
+          const row = opts.row ?? GATE_SPAWN_TILE.row;
+          const p = tileWorldPos(col, row);
+          extractMarker.position.set(p.x, 0, p.z);
+          extractIntensity = Math.max(0.2, Number(opts.intensity) || 0.35);
+          extractChanneling = !!opts.channeling;
+          if (opts.interrupted) extractInterrupt = 0.55;
+        },
         lockGate: () => lockFortressGate(fortressBorder),
         paintTile: (row, column, colorKey) => {
           const tile = grid.getTile(row, column);
@@ -1100,44 +1142,74 @@ export default function GameMap({
                 y: SEARCHLIGHT_TILE.row,
                 beamAngleDeg: searchlight.beamAngleDeg,
                 coneAngleDeg: searchlight.coneAngleDeg,
-                coneRangeTiles: searchlight.rangeTiles + (alarm ? searchlight.spec.alarmRangeBonus : 0),
+                coneRangeTiles: effectiveBeamRangeTiles(
+                  searchlight.rangeTiles,
+                  raidElapsedSeconds,
+                  alarm ? searchlight.spec.alarmRangeBonus : 0
+                ),
                 level: searchlight.level,
+                rangeRatio: beamRangeRatio(raidElapsedSeconds),
               }
             : null,
+        setRaidElapsed: (seconds) => {
+          raidElapsedSeconds = Math.max(0, Number(seconds) || 0);
+        },
         setAlarm: (value) => {
           alarm = !!value;
-          if (value && patrol) patrol.setMode('chase', { column: patrolCmd.column, row: patrolCmd.row });
+          if (value && patrol) {
+            patrolCmd.chasing = true;
+            patrol.setMode('chase', { column: patrolCmd.column, row: patrolCmd.row });
+          }
         },
         flashSearchlightDetect: (strength = 1) => {
           searchlight?.flashDetect?.(strength);
         },
         setPatrolChase: (chasing, target) => {
+          const was = patrolCmd.chasing;
           patrolCmd.chasing = !!chasing;
           if (target) {
             patrolCmd.column = target.column;
             patrolCmd.row = target.row;
           }
-          if (patrol) {
-            patrol.setMode(patrolCmd.chasing ? 'chase' : 'patrol', {
-              column: patrolCmd.column,
-              row: patrolCmd.row,
-            });
+          if (!patrol) return;
+          if (patrolCmd.chasing) {
+            patrol.setChaseTarget?.(patrolCmd.column, patrolCmd.row);
+            if (!was || !patrol.chasing) {
+              patrol.setMode('chase', { column: patrolCmd.column, row: patrolCmd.row });
+            }
+          } else {
+            patrol.setMode('patrol');
           }
         },
         setPatrolMode: (mode, target) => {
+          // Once hunting, never drop back to waypoint idle via mode tweaks.
+          if (patrolCmd.chasing) {
+            if (target) {
+              patrolCmd.column = target.column;
+              patrolCmd.row = target.row;
+            }
+            if (patrol) {
+              patrol.setChaseTarget?.(patrolCmd.column, patrolCmd.row);
+              if (!patrol.chasing) {
+                patrol.setMode('chase', { column: patrolCmd.column, row: patrolCmd.row });
+              }
+            }
+            return;
+          }
           const key = String(mode || 'patrol').toLowerCase();
-          patrolCmd.chasing = key === 'chase' || key === 'chasing' || key === 'hit' || key === 'alert';
+          patrolCmd.chasing = key === 'chase' || key === 'chasing' || key === 'hit';
           if (target) {
             patrolCmd.column = target.column;
             patrolCmd.row = target.row;
           }
           if (patrol) {
+            if (patrolCmd.chasing) patrol.setChaseTarget?.(patrolCmd.column, patrolCmd.row);
             patrol.setMode(key, { column: patrolCmd.column, row: patrolCmd.row });
           }
         },
         getPatrolState: () => ({
           ...lastPatrolHit,
-          chasing: patrolCmd.chasing,
+          chasing: patrolCmd.chasing || !!patrol?.chasing,
           position: patrol?.position || null,
         }),
       };
@@ -1384,14 +1456,19 @@ export default function GameMap({
         }
       }
       if (searchlight) {
-        searchlight.update(dt, { alarm });
+        const grownBase = searchlight.rangeTiles * beamRangeRatio(raidElapsedSeconds);
+        searchlight.update(dt, { alarm, effectiveBaseRangeTiles: grownBase });
         if (grayscale) {
           const lightState = {
             x: SEARCHLIGHT_TILE.column,
             y: SEARCHLIGHT_TILE.row,
             beamAngleDeg: searchlight.beamAngleDeg,
             coneAngleDeg: searchlight.coneAngleDeg,
-            coneRangeTiles: searchlight.rangeTiles + (alarm ? searchlight.spec.alarmRangeBonus : 0),
+            coneRangeTiles: effectiveBeamRangeTiles(
+              searchlight.rangeTiles,
+              raidElapsedSeconds,
+              alarm ? searchlight.spec.alarmRangeBonus : 0
+            ),
           };
           const range = Math.ceil(lightState.coneRangeTiles) + 1;
           const cx = Math.floor(SEARCHLIGHT_TILE.column);
@@ -1408,12 +1485,10 @@ export default function GameMap({
       }
       if (patrol) {
         if (patrolCmd.chasing) {
-          // Keep chase target fresh; don't clobber alert/hit pose every frame.
-          const current = lastPatrolHit?.state;
-          if (current !== 'alert' && current !== 'hit') {
+          // Keep destination fresh; do not flip back to patrol while hunting.
+          patrol.setChaseTarget?.(patrolCmd.column, patrolCmd.row);
+          if (!patrol.chasing) {
             patrol.setMode('chase', { column: patrolCmd.column, row: patrolCmd.row });
-          } else if (current === 'alert') {
-            patrol.setMode('alert', { column: patrolCmd.column, row: patrolCmd.row });
           }
         }
         lastPatrolHit = patrol.update(elapsed, dt) || lastPatrolHit;
@@ -1545,6 +1620,19 @@ export default function GameMap({
 
       wallBreakFX.tick(dt, camera);
       tickFortressBorder(fortressBorder, dt, elapsed);
+      if (extractMarker.visible) {
+        extractInterrupt = Math.max(0, extractInterrupt - dt * 2.5);
+        const pulse = extractChanneling
+          ? 0.55 + Math.sin(elapsed * 8) * 0.25
+          : 0.35 + Math.sin(elapsed * 3) * 0.12;
+        const hot = extractInterrupt > 0.02;
+        extractRing.material.color.set(hot ? 0xe63946 : extractChanneling ? 0xf4a261 : 0x2a9d8f);
+        extractRing.material.opacity = Math.min(1, (extractIntensity + pulse) * (hot ? 1.2 : 1));
+        extractGlow.material.color.set(hot ? 0xe63946 : 0x2a9d8f);
+        extractGlow.material.opacity = hot ? 0.4 : 0.15 + extractIntensity * 0.35;
+        extractRing.scale.setScalar(1 + (extractChanneling ? 0.08 * Math.sin(elapsed * 10) : 0));
+        if (hot) bumpShake = Math.max(bumpShake, 0.22);
+      }
       if (bumpShake > 0.001) {
         const mag = bumpShake * 0.08;
         camera.position.x += (Math.random() - 0.5) * mag;

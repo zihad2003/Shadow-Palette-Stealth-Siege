@@ -1,6 +1,9 @@
-import { DETECTION_STATES, STEALTH_CONSTANTS } from './stealthConstants.js';
+import {
+  DETECTION_STATES,
+  STEALTH_CONSTANTS,
+} from './stealthConstants.js';
 import { isMatch } from './ColorMatchSystem.js';
-import { evaluateBeam } from './SearchlightSensor.js';
+import { evaluateBeam, robotDetectionReason } from './SearchlightSensor.js';
 
 export function computeStealthScore({ colorMatch, shadowTile = false }) {
   const { baseVisibility, colorMatchBonus, shadowTileBonus } = STEALTH_CONSTANTS;
@@ -17,7 +20,9 @@ export function stateFromMeter(meter, alarmLatched) {
   return DETECTION_STATES.NORMAL;
 }
 
-/** Gradual meter under the beam; match stays invisible. Synced with backend SearchlightColorEngine. */
+/** Meter + beam contact. Synced with backend SearchlightColorEngine.
+ * Any beam hit (canSee) latches alarm immediately — camo does not hide you from the cone.
+ */
 export function evaluateDetectionTick({
   light,
   player,
@@ -27,11 +32,14 @@ export function evaluateDetectionTick({
   dt = 1 / 60,
   meter = 0,
   alarmLatched = false,
+  elapsedSeconds = 0,
 }) {
   const beam = evaluateBeam(light, player);
   const colorMatch = isMatch(attackerColor, tileColor);
   const stealthScore = computeStealthScore({ colorMatch, shadowTile });
-  const exposed = beam.canSee && !colorMatch;
+  // Spotted = under the light at all. Chase latches on first contact in StealthRaidView.
+  const exposed = !!beam.canSee;
+  const robotReason = robotDetectionReason(beam, colorMatch);
 
   let nextMeter = meter;
   let nextAlarm = alarmLatched;
@@ -40,17 +48,14 @@ export function evaluateDetectionTick({
   if (alarmLatched) {
     nextMeter = Math.max(meter, STEALTH_CONSTANTS.alarmAt);
   } else if (exposed) {
-    // Gradual rise — must match backend SearchlightColorEngine / RaidValidator.
-    const visibility = stealthScore / STEALTH_CONSTANTS.baseVisibility;
-    nextMeter =
-      meter + STEALTH_CONSTANTS.meterRisePerSec * visibility * dt;
-  } else if (beam.canSee && colorMatch) {
-    nextMeter = meter - STEALTH_CONSTANTS.matchMeterFallPerSec * dt;
+    nextMeter = STEALTH_CONSTANTS.alarmAt;
+    nextAlarm = true;
+    justAlarmed = true;
   } else {
     nextMeter = meter - STEALTH_CONSTANTS.meterFallPerSec * dt;
   }
   nextMeter = Math.max(0, Math.min(STEALTH_CONSTANTS.alarmAt, nextMeter));
-  if (!alarmLatched && nextMeter >= STEALTH_CONSTANTS.alarmAt) {
+  if (!alarmLatched && !justAlarmed && nextMeter >= STEALTH_CONSTANTS.alarmAt) {
     nextAlarm = true;
     justAlarmed = true;
   }
@@ -66,6 +71,7 @@ export function evaluateDetectionTick({
     state,
     alarmLatched: nextAlarm,
     justAlarmed,
+    robotReason,
     reason: !beam.canSee
       ? beam.reason
       : colorMatch

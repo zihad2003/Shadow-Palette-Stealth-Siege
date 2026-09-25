@@ -13,9 +13,11 @@ import { useGameState } from '../state/GameStateContext.jsx';
 import { soundEngine } from '../soundEngine.js';
 import { DetectionSystem } from '../raid/DetectionSystem.js';
 import { createAlarmSystem } from '../raid/AlarmSystem.js';
+import { PatrolRobotContext, ROBOT_STATES } from '../patrolRobotState.js';
 import { generateDefenderBase, tileColorAt } from '../raid/defenderLayouts.js';
-import { RAID_DURATION_SECONDS, DETECTION_STATES, RAID_LOOT_FRACTION } from '../raid/stealthConstants.js';
-import { resolveRaidOutcome } from '../raid/RaidSession.js';
+import { RAID_DURATION_SECONDS, DETECTION_STATES, RAID_LOOT_FRACTION, GATE_X, GATE_Y, ROBOT_CATCH_DISTANCE } from '../raid/stealthConstants.js';
+import { resolveRaidOutcome, estimateLootPercent } from '../raid/RaidSession.js';
+import { tickExtractionChannel, estimateLootAmounts, inExtractionZone } from '../raid/extraction.js';
 import { GATE_SPAWN_TILE, SEARCHLIGHT_TILE, WALK_TILE_SECONDS } from '../gamemap/mapConfig.js';
 import { collectSolidTiles, isWallBreakSpot } from '../gamemap/occupancy.js';
 import { stepDirection, attemptStep, nudgeOffSolid, TURN_RATE } from '../character/gridMover.js';
@@ -32,6 +34,23 @@ import { findRepairedNear } from '../gamemap/starterRuins.js';
 
 const WALL_BREAK_HITS = 4;
 const RAID_DECOR_SEED = 41;
+/** Advance PatrolRobotContext on a fixed cadence (~session-log rate), not every rAF. */
+const ROBOT_TICK_HZ = 8;
+
+/** Map robot SM → HUD ladder labels used by vignettes / SideRaidPanel. */
+function hudStateFromRobot(robotState) {
+  switch (robotState) {
+    case ROBOT_STATES.SUSPICIOUS:
+      return DETECTION_STATES.SUSPICIOUS;
+    case ROBOT_STATES.ALERT:
+    case ROBOT_STATES.SEARCHING:
+      return DETECTION_STATES.ALERT;
+    case ROBOT_STATES.CHASING:
+      return DETECTION_STATES.ALARM;
+    default:
+      return DETECTION_STATES.NORMAL;
+  }
+}
 
 function isAtGate(column, row) {
   return column === GATE_SPAWN_TILE.column && row === GATE_SPAWN_TILE.row;
@@ -107,17 +126,31 @@ export default function StealthRaidView() {
   const [lootFloats, setLootFloats] = useState([]);
   const stealRef = useRef(null);
   const detection = useRef(new DetectionSystem());
+  /** Escalation SM shared with backend PatrolRobotContext — drives HUD label + chase. */
+  const robotContext = useRef(new PatrolRobotContext());
+  const lastRobotStateRef = useRef(ROBOT_STATES.PATROL);
+  const robotTickAccumRef = useRef(0);
+  /** Once the beam hits the player even once, chase stays on for the rest of the raid. */
+  const chaseLatchedRef = useRef(false);
   const sessionLog = useRef([]);
   const wallHitsRef = useRef(0);
   const gateLockedRef = useRef(false);
+  const channelProgressRef = useRef(0);
+  const extractionArmedRef = useRef(false); // must leave the gate zone once before channeling
+  const prevPosRef = useRef({
+    column: GATE_SPAWN_TILE.column,
+    row: Math.max(0, GATE_SPAWN_TILE.row - 3),
+  });
+  const raidStartedRef = useRef(Date.now());
   const keys = useRef(new Set());
   const actionRef = useRef(null);
   const sprintMeter = useRef(createSprintMeter());
   const [stamina, setStamina] = useState({ stamina: 1, sprinting: false, exhausted: false });
 
   const [attacker, setAttacker] = useState({
+    // Start just inside the fortress — not already standing in the extract zone.
     column: GATE_SPAWN_TILE.column,
-    row: GATE_SPAWN_TILE.row,
+    row: Math.max(0, GATE_SPAWN_TILE.row - 3),
     camoColor: lockedCamo,
     characterModel: characterModel || 1,
   });
@@ -141,6 +174,15 @@ export default function StealthRaidView() {
     robotHitting: false,
     breakFlash: false,
     statePulse: 0,
+    robotState: ROBOT_STATES.PATROL,
+    channelProgress: 0,
+    channelPercent: 0,
+    channeling: false,
+    channelInterrupt: false,
+    greedPercent: 0,
+    greedCoins: 0,
+    greedInk: 0,
+    elapsed: 0,
   });
   const hudRef = useRef(hud);
   hudRef.current = hud;
@@ -184,8 +226,25 @@ export default function StealthRaidView() {
     });
   }
 
+  // Toast helper from context is NOT referentially stable — never put it in this
+  // effect's deps or the siren toast restarts the raid loop (chase unlatch + greed → 0).
+  const showToastRef = useRef(showToast);
+  showToastRef.current = showToast;
+
   useEffect(() => {
     const started = Date.now();
+    raidStartedRef.current = started;
+    channelProgressRef.current = 0;
+    extractionArmedRef.current = false;
+    robotTickAccumRef.current = 0;
+    robotContext.current = new PatrolRobotContext();
+    lastRobotStateRef.current = ROBOT_STATES.PATROL;
+    chaseLatchedRef.current = false;
+    gateLockedRef.current = false;
+    detection.current.reset();
+    lastDetectState.current = DETECTION_STATES.NORMAL;
+    prevPosRef.current = { ...attackerRef.current };
+    sceneApi.current?.setExtractionMarker?.({ column: GATE_X, row: GATE_Y, active: true, intensity: 0.35 });
     let raf = 0;
     let last = performance.now();
     let tickN = 0;
@@ -253,6 +312,8 @@ export default function StealthRaidView() {
       }
 
       const pos = attackerRef.current;
+      const elapsed = (Date.now() - started) / 1000;
+      sceneApi.current?.setRaidElapsed?.(elapsed);
       const light = sceneApi.current?.getSearchlightState?.();
       const tileColor = tileColorAt(paintedTiles, pos.column, pos.row);
       const result = detection.current.tick({
@@ -267,13 +328,33 @@ export default function StealthRaidView() {
         attackerColor: lockedCamo,
         tileColor,
         dt,
+        elapsedSeconds: elapsed,
       });
 
-      if (result.justAlarmed) {
+      // Any beam contact (even once) latches chase for the rest of the raid.
+      // After that we do NOT care whether the player is still under the light.
+      // Also latch if detection already alarmed (survives rare tick edge cases).
+      const firstLightHit = !!result.beam?.canSee && !chaseLatchedRef.current;
+      if (result.beam?.canSee || result.alarmLatched) {
+        chaseLatchedRef.current = true;
+      }
+
+      if (chaseLatchedRef.current) {
+        robotContext.current.setState(ROBOT_STATES.CHASING);
+        robotContext.current.lastSeenPlayerX = pos.column;
+        robotContext.current.lastSeenPlayerY = pos.row;
+        lastRobotStateRef.current = ROBOT_STATES.CHASING;
+        sceneApi.current?.setPatrolChase?.(true, {
+          column: pos.column,
+          row: pos.row,
+        });
+      }
+
+      if (firstLightHit || result.justAlarmed) {
         alarmSystem.current.trigger({
           playerX: pos.column,
           playerY: pos.row,
-          reason: result.reason,
+          reason: result.reason || 'IN_BEAM',
           camoColor: lockedCamo,
           tileColor,
         });
@@ -282,31 +363,112 @@ export default function StealthRaidView() {
         sceneApi.current?.setAlarm?.(true);
         sceneApi.current?.lockGate?.();
         sceneApi.current?.flashSearchlightDetect?.(1.2);
-        sceneApi.current?.setPatrolChase?.(true, { column: pos.column, row: pos.row });
-        showToast('Siren · break wall', 'error');
-      } else if (result.exposed && result.beam?.canSee) {
+        showToastRef.current('Siren · break wall or hold gate', 'error');
+      } else if (result.beam?.canSee) {
         sceneApi.current?.flashSearchlightDetect?.(0.55);
       }
 
-      // Drive robot pose from detection ladder before full alarm chase.
-      if (!result.alarmLatched && raidDefenses.length > 0) {
-        const robotMode =
-          result.state === DETECTION_STATES.ALERT
-            ? 'alert'
-            : result.state === DETECTION_STATES.SUSPICIOUS
-              ? 'suspicious'
-              : 'patrol';
-        sceneApi.current?.setPatrolMode?.(robotMode, { column: pos.column, row: pos.row });
+      // Skip robot SM while chase is latched — never drop back to SEARCHING/PATROL.
+      robotTickAccumRef.current += dt;
+      const robotTickDue = robotTickAccumRef.current >= 1 / ROBOT_TICK_HZ;
+      if (robotTickDue) {
+        robotTickAccumRef.current = 0;
+        if (!chaseLatchedRef.current) {
+          robotContext.current.processDetection({
+            reason: result.robotReason || 'OUTSIDE_RANGE',
+            playerX: pos.column,
+            playerY: pos.row,
+          });
+        }
       }
 
-      if (result.alarmLatched) {
-        sceneApi.current?.setPatrolChase?.(true, { column: pos.column, row: pos.row });
+      const robotState = robotContext.current.state;
+      const robotHudState = chaseLatchedRef.current
+        ? DETECTION_STATES.ALARM
+        : hudStateFromRobot(robotState);
+
+      if (!chaseLatchedRef.current && raidDefenses.length > 0) {
+        const lastSeen = {
+          column: robotContext.current.lastSeenPlayerX ?? pos.column,
+          row: robotContext.current.lastSeenPlayerY ?? pos.row,
+        };
+        if (robotState === ROBOT_STATES.SEARCHING) {
+          sceneApi.current?.setPatrolMode?.('searching', lastSeen);
+        } else if (robotState === ROBOT_STATES.ALERT) {
+          sceneApi.current?.setPatrolMode?.('alert', lastSeen);
+        } else if (robotState === ROBOT_STATES.SUSPICIOUS) {
+          sceneApi.current?.setPatrolMode?.('suspicious', lastSeen);
+        } else if (robotState === ROBOT_STATES.CHASING) {
+          sceneApi.current?.setPatrolChase?.(true, lastSeen);
+        }
       }
+      const robotStateChanged = robotState !== lastRobotStateRef.current;
+      if (robotStateChanged) lastRobotStateRef.current = robotState;
 
       const patrolState = sceneApi.current?.getPatrolState?.() || {};
-      const robotCaught = !!patrolState.caught;
+      const robotPos = patrolState.position || null;
+      const robotDist =
+        robotPos != null
+          ? Math.hypot(pos.column - robotPos.column, pos.row - robotPos.row)
+          : Infinity;
+      // Must be on top of the player (catch radius) — distant chase never auto-CAUGHT.
+      const robotTagged = !!patrolState.hitting && robotDist <= ROBOT_CATCH_DISTANCE + 0.2;
+      const robotCaught =
+        !hudRef.current.outcome &&
+        (!!patrolState.caught || (!!patrolState.tagged && robotDist <= ROBOT_CATCH_DISTANCE + 0.2));
+      const robotChasing = chaseLatchedRef.current || robotState === ROBOT_STATES.CHASING || !!patrolState.chasing;
 
-      const remaining = Math.max(0, RAID_DURATION_SECONDS - (Date.now() - started) / 1000);
+      // Arm extraction only after the attacker has left the gate zone once
+      // (prevents spawn/nudge onto the corridor from auto-completing a Silent extract).
+      if (!inExtractionZone(pos.column, pos.row)) {
+        extractionArmedRef.current = true;
+      }
+
+      const channel = extractionArmedRef.current
+        ? tickExtractionChannel({
+            channelProgress: channelProgressRef.current,
+            x: pos.column,
+            y: pos.row,
+            prevX: prevPosRef.current.column,
+            prevY: prevPosRef.current.row,
+            dt,
+            robotX: robotPos?.column,
+            robotY: robotPos?.row,
+            beamHit:
+              !chaseLatchedRef.current &&
+              !result.alarmLatched &&
+              !!(result.exposed && result.beam?.canSee),
+            robotChasing,
+          })
+        : {
+            channelProgress: 0,
+            channeling: false,
+            complete: false,
+            interrupted: false,
+            inZone: inExtractionZone(pos.column, pos.row),
+            percent: 0,
+          };
+      channelProgressRef.current = channel.channelProgress;
+      prevPosRef.current = { column: pos.column, row: pos.row };
+
+      sceneApi.current?.setExtractionMarker?.({
+        column: GATE_X,
+        row: GATE_Y,
+        active: !hudRef.current.outcome,
+        intensity: channel.channeling ? 0.55 + channel.percent / 200 : inExtractionZone(pos.column, pos.row) ? 0.45 : 0.3,
+        channeling: channel.channeling,
+        interrupted: channel.interrupted,
+      });
+
+      const remaining = Math.max(0, RAID_DURATION_SECONDS - elapsed);
+      const poolCoins = Number(raidLoot?.coins ?? targetMeta?.coins ?? 200);
+      const poolInk = Number(raidLoot?.ink ?? targetMeta?.ink ?? 40);
+      const greedPct = estimateLootPercent(elapsed);
+      // Spotted ≠ loot lost — preview ESCAPED payout so greed stays visible after the siren.
+      const lootPreviewOutcome =
+        chaseLatchedRef.current || result.alarmLatched || gateLockedRef.current ? 'ESCAPED' : 'SILENT';
+      const greedPreview = estimateLootAmounts(elapsed, { coins: poolCoins, ink: poolInk }, lootPreviewOutcome);
+
       tickN += 1;
       if (tickN % 8 === 0) {
         sessionLog.current.push({
@@ -317,58 +479,109 @@ export default function StealthRaidView() {
         });
       }
 
-      const stateChanged = result.state !== lastDetectState.current;
-      if (stateChanged) lastDetectState.current = result.state;
+      const stateChanged = robotStateChanged;
+      // lastDetectState tracks robot HUD ladder for vignette pulses
+      if (stateChanged) lastDetectState.current = robotHudState;
+
+      if (robotCaught && !hudRef.current.outcome) {
+        setStolen((prev) => ({ coins: prev.coins, ink: prev.ink }));
+        hudRef.current = { ...hudRef.current, outcome: 'CAUGHT' };
+        setHud((prev) => ({
+          ...prev,
+          outcome: 'CAUGHT',
+          remaining: 0,
+          channeling: false,
+          greedPercent: 0,
+          greedCoins: 0,
+          greedInk: 0,
+          elapsed,
+          alarm: true,
+          robotHitting: true,
+        }));
+        showToastRef.current('Caught by patrol', 'error');
+      } else if (channel.complete && !hudRef.current.outcome) {
+        const outcome = resolveRaidOutcome({
+          alarmTriggered: result.alarmLatched || gateLockedRef.current || chaseLatchedRef.current,
+          caught: false,
+          extractionOk: true,
+        });
+        const greed = estimateLootAmounts(elapsed, { coins: poolCoins, ink: poolInk }, outcome);
+        setStolen((prev) => ({ coins: prev.coins + greed.coins, ink: prev.ink + greed.ink }));
+        hudRef.current = { ...hudRef.current, outcome };
+        setHud((prev) => ({
+          ...prev,
+          outcome,
+          remaining: 0,
+          channeling: false,
+          channelPercent: 100,
+          channelProgress: channel.channelProgress,
+          greedPercent: greed.percent,
+          greedCoins: greed.coins,
+          greedInk: greed.ink,
+          elapsed,
+        }));
+        showToastRef.current(outcome === 'ESCAPED' ? 'Escaped' : 'Silent extract', 'success');
+      } else if (remaining <= 0 && !hudRef.current.outcome) {
+        // Survived the full 150s — lock greed loot (spotted or not). Patrol never zeros this.
+        const outcome =
+          chaseLatchedRef.current || result.alarmLatched || gateLockedRef.current ? 'ESCAPED' : 'SILENT';
+        const greed = estimateLootAmounts(elapsed, { coins: poolCoins, ink: poolInk }, outcome);
+        setStolen((prev) => ({ coins: prev.coins + greed.coins, ink: prev.ink + greed.ink }));
+        hudRef.current = { ...hudRef.current, outcome };
+        setHud((prev) => ({
+          ...prev,
+          outcome,
+          remaining: 0,
+          channeling: false,
+          greedPercent: greed.percent,
+          greedCoins: greed.coins,
+          greedInk: greed.ink,
+          elapsed,
+          alarm: chaseLatchedRef.current || result.alarmLatched || prev.alarm,
+        }));
+        showToastRef.current(outcome === 'ESCAPED' ? 'Time up · escaped with loot' : 'Time up · loot secured', 'success');
+      }
 
       setHud((prev) => {
         if (prev.outcome) return prev;
-        if (robotCaught) {
-          return {
-            ...prev,
-            meter: result.meter,
-            state: DETECTION_STATES.ALARM,
-            alarm: true,
-            gateLocked: true,
-            remaining: 0,
-            outcome: 'CAUGHT',
-            robotEngaged: true,
-            robotHitting: true,
-            statePulse: prev.statePulse + 1,
-          };
-        }
-        if (remaining <= 0) {
-          return {
-            ...prev,
-            remaining: 0,
-            outcome: resolveRaidOutcome({ alarmTriggered: result.alarmLatched, caught: false }),
-          };
-        }
         return {
           meter: result.meter,
-          state: result.state,
+          state: robotHudState,
+          robotState,
           colorMatch: result.colorMatch,
           inBeam: result.beam.canSee,
           remaining,
-          alarm: result.alarmLatched,
+          alarm: chaseLatchedRef.current || result.alarmLatched || robotState === ROBOT_STATES.CHASING,
           shimmer: result.beam.canSee && result.colorMatch,
           exposed: result.exposed,
           outcome: null,
           wallHits: wallHitsRef.current,
-          gateLocked: gateLockedRef.current || result.alarmLatched,
+          gateLocked: gateLockedRef.current || result.alarmLatched || chaseLatchedRef.current,
           breaking: prev.breaking,
-          robotEngaged: !!patrolState.chasing,
-          robotHitting: !!patrolState.hitting,
+          robotEngaged: robotChasing,
+          robotHitting: robotTagged || !!patrolState.hitting,
           breakFlash: prev.breakFlash,
           statePulse: stateChanged ? prev.statePulse + 1 : prev.statePulse,
+          channelProgress: channel.channelProgress,
+          channelPercent: channel.percent,
+          channeling: channel.channeling,
+          channelInterrupt: channel.interrupted,
+          greedPercent: greedPct,
+          greedCoins: greedPreview.coins,
+          greedInk: greedPreview.ink,
+          elapsed,
         };
       });
 
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(raf);
+    return () => {
+      cancelAnimationFrame(raf);
+      sceneApi.current?.setExtractionMarker?.({ active: false });
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lockedCamo, paintedTiles, showToast, raidDefenses.length]);
+  }, [lockedCamo, raidDefenses.length]);
 
   useEffect(() => {
     const down = (e) => {
@@ -442,18 +655,33 @@ export default function StealthRaidView() {
   const endRaid = (forcedOutcome) => {
     if (hudRef.current.outcome || settled.current) return;
     if (document.pointerLockElement) document.exitPointerLock?.();
-    const outcome =
-      forcedOutcome ||
-      resolveRaidOutcome({ alarmTriggered: hudRef.current.alarm, caught: false });
+    const outcome = forcedOutcome || 'INCOMPLETE';
+    const elapsed = (Date.now() - raidStartedRef.current) / 1000;
+    const poolCoins = Number(raidLoot?.coins ?? targetMeta?.coins ?? 200);
+    const poolInk = Number(raidLoot?.ink ?? targetMeta?.ink ?? 40);
+    const greed = estimateLootAmounts(elapsed, { coins: poolCoins, ink: poolInk }, outcome);
+    setStolen((prev) => ({
+      coins: prev.coins + (outcome === 'CAUGHT' || outcome === 'INCOMPLETE' ? 0 : greed.coins),
+      ink: prev.ink + (outcome === 'CAUGHT' || outcome === 'INCOMPLETE' ? 0 : greed.ink),
+    }));
     setHud((prev) => ({
       ...prev,
       outcome,
       remaining: 0,
       breaking: false,
+      channeling: false,
+      greedCoins: greed.coins,
+      greedInk: greed.ink,
     }));
     showToast(
-      outcome === 'CAUGHT' ? 'Caught' : outcome === 'ESCAPED' ? 'Escaped' : 'Silent',
-      outcome === 'CAUGHT' ? 'error' : 'success'
+      outcome === 'CAUGHT'
+        ? 'Caught'
+        : outcome === 'INCOMPLETE'
+          ? 'Raid incomplete'
+          : outcome === 'ESCAPED'
+            ? 'Escaped'
+            : 'Silent',
+      outcome === 'CAUGHT' || outcome === 'INCOMPLETE' ? 'error' : 'success'
     );
   };
 
@@ -466,7 +694,7 @@ export default function StealthRaidView() {
     setLeaveFx(outcome === 'CAUGHT' ? 'caught' : 'exit');
     window.setTimeout(() => {
       transitionTo('BASE_BUILDER', {
-        loadingTitle: outcome === 'CAUGHT' ? 'Caught' : 'Extracted',
+        loadingTitle: outcome === 'CAUGHT' ? 'Caught' : outcome === 'INCOMPLETE' ? 'Incomplete' : 'Extracted',
         loadingSubtitle: outcome === 'CAUGHT' ? 'Cooldown applied' : 'Returning to base',
         loadingMs: 400,
       });
@@ -475,15 +703,15 @@ export default function StealthRaidView() {
 
   const climbGate = () => {
     if (hudRef.current.outcome) return;
-    if (!isAtGate(attackerRef.current.column, attackerRef.current.row)) {
-      showToast('South gate', 'info');
+    if (!inExtractionZone(attackerRef.current.column, attackerRef.current.row)) {
+      showToast('Reach the south gate', 'info');
       return;
     }
     if (hudRef.current.gateLocked || hudRef.current.alarm) {
-      showToast('Gate locked', 'error');
+      showToast('Gate locked — break a wall', 'error');
       return;
     }
-    endRaid('SILENT');
+    showToast('Hold still to extract', 'info');
   };
 
   const hitWall = () => {
@@ -517,12 +745,21 @@ export default function StealthRaidView() {
     window.setTimeout(() => {
       if (final) {
         showToast('Open', 'success');
+        const elapsed = (Date.now() - raidStartedRef.current) / 1000;
+        const poolCoins = Number(raidLoot?.coins ?? targetMeta?.coins ?? 200);
+        const poolInk = Number(raidLoot?.ink ?? targetMeta?.ink ?? 40);
+        const greed = estimateLootAmounts(elapsed, { coins: poolCoins, ink: poolInk }, 'ESCAPED');
+        setStolen((prev) => ({ coins: prev.coins + greed.coins, ink: prev.ink + greed.ink }));
         setHud((prev) => ({
           ...prev,
           outcome: 'ESCAPED',
           remaining: 0,
           breaking: false,
           breakFlash: false,
+          greedCoins: greed.coins,
+          greedInk: greed.ink,
+          greedPercent: greed.percent,
+          elapsed,
         }));
       } else {
         showToast(`${hits}/${WALL_BREAK_HITS}`, 'info');
@@ -549,11 +786,11 @@ export default function StealthRaidView() {
       hitWall();
       return;
     }
-    if (isAtGate(column, row)) {
-      showToast('Wall', 'error');
+    if (inExtractionZone(column, row)) {
+      showToast(hudRef.current.alarm ? 'Break wall to escape' : 'Hold still to extract', 'info');
       return;
     }
-    showToast('E · steal · F · gate/wall', 'info');
+    showToast('E · steal · hold gate to extract', 'info');
   };
   actionRef.current = tryAction;
   stealRef.current = () => {
@@ -565,7 +802,7 @@ export default function StealthRaidView() {
     }
   };
 
-  const atGate = isAtGate(attacker.column, attacker.row);
+  const atGate = inExtractionZone(attacker.column, attacker.row);
   const atWall = isWallBreakSpot(attacker.column, attacker.row);
   const canClimb = atGate && !hud.gateLocked && !hud.alarm && !hud.outcome;
   const canBreak = atWall && (hud.alarm || hud.gateLocked) && !hud.outcome;
@@ -628,7 +865,12 @@ export default function StealthRaidView() {
             <Bot size={13} className={hud.robotEngaged ? 'text-clay-danger' : 'text-clay-muted'} />
           )}
           <span className="text-[11px] font-semibold whitespace-nowrap">
-            {hud.alarm ? (hud.robotEngaged ? 'Chase' : 'Break wall') : hud.state} · {Math.ceil(hud.remaining)}s
+            {hud.alarm && hud.robotEngaged
+              ? 'Chase'
+              : hud.alarm
+                ? 'Break wall'
+                : hud.robotState || hud.state}{' '}
+            · {Math.ceil(hud.remaining)}s
           </span>
           <div className="w-16 h-1.5 rounded-full clay-inset overflow-hidden">
             <div
@@ -636,6 +878,12 @@ export default function StealthRaidView() {
               style={{ width: `${hud.meter}%` }}
             />
           </div>
+          <span className="flex items-center gap-1 text-[10px] text-clay-yellow whitespace-nowrap">
+            <Coins size={11} /> {hud.greedCoins}
+          </span>
+          <span className="flex items-center gap-1 text-[10px] text-clay-success whitespace-nowrap">
+            <Droplet size={11} /> {hud.greedInk}
+          </span>
           {hud.inBeam && (
             <span className={`text-[10px] ${hud.colorMatch ? 'text-clay-success' : 'text-clay-danger'}`}>
               {hud.colorMatch ? 'Hidden' : 'Exposed'}
@@ -702,19 +950,85 @@ export default function StealthRaidView() {
         {hud.state !== DETECTION_STATES.NORMAL && (
           <motion.div
             key={`flash-${hud.statePulse}`}
-            initial={{ opacity: 0.35 }}
-            animate={{ opacity: 0 }}
-            transition={{ duration: 0.45 }}
+            initial={{ opacity: 0.4 }}
+            animate={{ opacity: [0.4, 0.15, 0] }}
+            transition={{ duration: 0.7 }}
             className="absolute inset-0 z-25 pointer-events-none"
             style={{
               background:
                 hud.state === DETECTION_STATES.ALARM
-                  ? 'rgba(230,57,70,0.28)'
+                  ? 'radial-gradient(ellipse at center, rgba(230,57,70,0.42) 0%, transparent 70%)'
                   : hud.state === DETECTION_STATES.ALERT
-                    ? 'rgba(231,111,81,0.2)'
-                    : 'rgba(244,162,97,0.14)',
+                    ? 'radial-gradient(ellipse at center, rgba(231,111,81,0.28) 0%, transparent 68%)'
+                    : 'radial-gradient(ellipse at center, rgba(244,162,97,0.2) 0%, transparent 65%)',
+              boxShadow:
+                hud.state === DETECTION_STATES.ALARM
+                  ? 'inset 0 0 80px rgba(230,57,70,0.35)'
+                  : 'inset 0 0 60px rgba(244,162,97,0.18)',
             }}
           />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {hud.channelInterrupt && (
+          <motion.div
+            key="channel-interrupt"
+            initial={{ opacity: 0.45 }}
+            animate={{ opacity: 0 }}
+            transition={{ duration: 0.35 }}
+            className="absolute inset-0 z-30 pointer-events-none"
+            style={{
+              background: 'radial-gradient(circle at 50% 85%, rgba(230,57,70,0.35), transparent 55%)',
+            }}
+          />
+        )}
+      </AnimatePresence>
+
+      {!hud.outcome && (
+        <div className="absolute right-4 bottom-20 z-40 pointer-events-none flex flex-col gap-2">
+          <ClayPanel depth="deep" className="px-3 py-2 rounded-2xl min-w-[140px]">
+            <p className="text-[10px] uppercase tracking-wider text-clay-muted mb-1">Greed</p>
+            <div className="h-1.5 rounded-full clay-inset overflow-hidden mb-1.5">
+              <div
+                className="h-full rounded-full bg-clay-accent origin-left transition-[width] duration-300"
+                style={{ width: `${Math.min(100, (hud.greedPercent / 0.45) * 100)}%` }}
+              />
+            </div>
+            <div className="flex items-center gap-3 text-[11px]">
+              <span className="flex items-center gap-1 text-clay-yellow">
+                <Coins size={11} /> {hud.greedCoins}
+              </span>
+              <span className="flex items-center gap-1 text-clay-success">
+                <Droplet size={11} /> {hud.greedInk}
+              </span>
+            </div>
+            <p className="text-[9px] text-clay-muted mt-1">Stays after siren</p>
+          </ClayPanel>
+        </div>
+      )}
+
+      <AnimatePresence>
+        {hud.channeling && (
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 6 }}
+            className="absolute bottom-20 left-1/2 -translate-x-1/2 z-50 pointer-events-none"
+          >
+            <ClayPanel className="px-4 py-2.5 rounded-2xl flex flex-col items-center gap-1.5 min-w-[160px]">
+              <p className="text-[11px] font-heading font-semibold text-clay-text">
+                Extracting… {hud.channelPercent}%
+              </p>
+              <div className="w-36 h-1.5 rounded-full clay-inset overflow-hidden">
+                <motion.div
+                  className="h-full rounded-full bg-clay-success origin-left"
+                  animate={{ width: `${hud.channelPercent}%` }}
+                  transition={{ duration: 0.12 }}
+                />
+              </div>
+            </ClayPanel>
+          </motion.div>
         )}
       </AnimatePresence>
 
@@ -773,12 +1087,12 @@ export default function StealthRaidView() {
             </div>
           )}
           <ClayButton
-            variant={canClimb ? 'success' : 'ghost'}
-            disabled={!canClimb}
+            variant={canClimb || hud.channeling ? 'success' : 'ghost'}
+            disabled={!canClimb && !hud.channeling}
             onClick={climbGate}
             className="h-8 px-3 rounded-lg text-[11px] flex items-center gap-1"
           >
-            <DoorOpen size={12} /> Gate
+            <DoorOpen size={12} /> {hud.channeling ? `Extract ${hud.channelPercent}%` : 'Hold gate'}
           </ClayButton>
           <ClayButton
             variant={canBreak ? 'danger' : 'ghost'}
@@ -802,24 +1116,36 @@ export default function StealthRaidView() {
           >
             <ClayPanel depth="deep" className="p-5 rounded-3xl w-[300px] max-w-[88vw] flex flex-col gap-3 text-center">
               <h2 className="font-heading font-semibold text-sm text-clay-text">
-                {hud.outcome === 'SILENT' ? 'Silent' : hud.outcome === 'ESCAPED' ? 'Escaped' : 'Caught'}
+                {hud.outcome === 'SILENT'
+                  ? 'Silent'
+                  : hud.outcome === 'ESCAPED'
+                    ? 'Escaped'
+                    : hud.outcome === 'INCOMPLETE'
+                      ? 'Incomplete'
+                      : 'Caught'}
               </h2>
               <div className="clay-inset rounded-2xl px-3 py-3 flex items-center justify-center gap-4">
                 <span className="flex items-center gap-1.5 text-clay-yellow">
                   <Coins size={14} />
-                  <strong className="font-heading text-sm">+{stolen.coins}</strong>
+                  <strong className="font-heading text-sm">
+                    +{hud.outcome === 'CAUGHT' || hud.outcome === 'INCOMPLETE' ? stolen.coins : (hud.greedCoins ?? stolen.coins)}
+                  </strong>
                 </span>
                 <span className="flex items-center gap-1.5 text-clay-success">
                   <Droplet size={14} />
-                  <strong className="font-heading text-sm">+{stolen.ink}</strong>
+                  <strong className="font-heading text-sm">
+                    +{hud.outcome === 'CAUGHT' || hud.outcome === 'INCOMPLETE' ? stolen.ink : (hud.greedInk ?? stolen.ink)}
+                  </strong>
                 </span>
               </div>
               <p className="text-[11px] text-clay-muted">
                 {hud.outcome === 'CAUGHT'
-                  ? 'Loot lost'
-                  : stolen.coins || stolen.ink
-                    ? 'Stolen from enemy houses'
-                    : 'No houses looted'}
+                  ? stolen.coins + stolen.ink > 0
+                    ? 'Caught — only house steals kept'
+                    : 'Caught — no loot locked in'
+                  : hud.outcome === 'INCOMPLETE'
+                    ? 'No loot locked in'
+                    : 'Greed loot secured'}
               </p>
               <ClayButton variant="success" onClick={finishRaid} className="w-full py-2 rounded-xl text-xs">
                 Return to base
@@ -889,20 +1215,14 @@ export default function StealthRaidView() {
 
       <SideRaidPanel
         lockedCamo={lockedCamo}
-        detectionState={hud.state}
-        meter={hud.meter}
         remaining={hud.remaining}
         isAlarmTriggered={hud.alarm}
         sessionLog={sessionLog}
         paintedTiles={paintedTiles}
         searchlightLevel={targetMeta?.level || 1}
-        onExtract={() => {
-          if (hud.alarm || hud.gateLocked) {
-            showToast('Break wall', 'error');
-            return;
-          }
-          endRaid(resolveRaidOutcome({ alarmTriggered: hud.alarm, caught: false }));
-        }}
+        outcome={hud.outcome}
+        wallHits={hud.wallHits}
+        elapsedSeconds={hud.elapsed}
       />
     </div>
   );

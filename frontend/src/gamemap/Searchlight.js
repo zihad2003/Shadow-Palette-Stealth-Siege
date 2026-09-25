@@ -453,6 +453,7 @@ export function createSearchlight({ level = DEFAULT_SEARCHLIGHT_LEVEL } = {}) {
 
   let yaw = 180;
   let lastAlarm = false;
+  let lastAppliedRange = -1;
   let detectFlash = 0;
 
   const applyBeamRange = (tiles) => {
@@ -467,7 +468,11 @@ export function createSearchlight({ level = DEFAULT_SEARCHLIGHT_LEVEL } = {}) {
     wedge.mesh.geometry = wedgeGeometry(range, spec.coneAngleDeg);
     spot.distance = range + 4;
     spot.target.position.set(0, -range * 0.12, range);
+    lastAppliedRange = tiles;
   };
+
+  // Start at time-grown (or full) base — GameMap will shrink via START_RATIO on first update.
+  applyBeamRange(spec.rangeTiles);
 
   return {
     object: root,
@@ -486,13 +491,15 @@ export function createSearchlight({ level = DEFAULT_SEARCHLIGHT_LEVEL } = {}) {
     flashDetect(strength = 1) {
       detectFlash = Math.max(detectFlash, 0.55 * strength);
     },
-    update(dt, { alarm = false } = {}) {
+    update(dt, { alarm = false, effectiveBaseRangeTiles } = {}) {
+      const base = Number.isFinite(effectiveBaseRangeTiles) ? effectiveBaseRangeTiles : spec.rangeTiles;
       const extra = alarm ? spec.alarmRangeBonus : 0;
-      if (alarm !== lastAlarm) {
-        applyBeamRange(spec.rangeTiles + extra);
+      const tiles = base + extra;
+      if (alarm !== lastAlarm || Math.abs(tiles - lastAppliedRange) > 0.005) {
+        applyBeamRange(tiles);
         lastAlarm = alarm;
       }
-      const sweepMult = alarm ? 1.28 : 1;
+      const sweepMult = alarm ? (spec.alarmSweepMult || 1.28) : 1;
       yaw = (yaw + spec.sweepDegPerSec * sweepMult * dt) % 360;
       yawGroup.rotation.y = THREE.MathUtils.degToRad(yaw);
 

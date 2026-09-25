@@ -17,3 +17,4 @@ frontend/.vite/
 Thumbs.db
 *.log
 .vercel
+.jdk-17/

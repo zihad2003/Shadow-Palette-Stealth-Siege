@@ -1,7 +1,13 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { GAME_COLORS } from '../colors.js';
-import { TILE_SIZE, TILE_HEIGHT, TILE_PITCH, tileWorldPos, SEARCHLIGHT_TILE } from './mapConfig.js';
+import { TILE_SIZE, TILE_HEIGHT, TILE_PITCH, tileWorldPos, SEARCHLIGHT_TILE, MAP_COLS, MAP_ROWS } from './mapConfig.js';
+import {
+  ROBOT_CHASE_SPEED,
+  ROBOT_HIT_SPEED,
+  ROBOT_CATCH_DISTANCE,
+  ROBOT_CATCH_HOLD_SECONDS,
+} from '../raid/stealthConstants.js';
 import * as sleepHouse from './houses/sleepHouse.js';
 import * as craftHouse from './houses/craftHouse.js';
 import * as inkHouse from './houses/inkHouse.js';
@@ -288,16 +294,19 @@ export function createGamePatrolRobot() {
     hit: { eye: GAME_COLORS.RED, body: '#A03030', lean: 0.18, bob: 0.12 },
   };
 
-  const radius = TILE_SIZE * 2.4;
+  // Idle in front of the searchlight tower (toward the gate), far enough that
+  // stepping into the beam is not an instant catch.
+  const cx = SEARCHLIGHT_TILE.column;
+  const cy = SEARCHLIGHT_TILE.row;
   const waypoints = [
-    { column: SEARCHLIGHT_TILE.column + 2.2, row: SEARCHLIGHT_TILE.row },
-    { column: SEARCHLIGHT_TILE.column, row: SEARCHLIGHT_TILE.row + 2.2 },
-    { column: SEARCHLIGHT_TILE.column - 2.2, row: SEARCHLIGHT_TILE.row },
-    { column: SEARCHLIGHT_TILE.column, row: SEARCHLIGHT_TILE.row - 2.2 },
+    { column: cx - 1.8, row: cy + 5.5 },
+    { column: cx + 1.8, row: cy + 5.5 },
+    { column: cx + 1.8, row: cy + 4.2 },
+    { column: cx - 1.8, row: cy + 4.2 },
   ];
   let mode = 'patrol';
-  let targetCol = SEARCHLIGHT_TILE.column;
-  let targetRow = SEARCHLIGHT_TILE.row;
+  let targetCol = cx;
+  let targetRow = cy + 5.5;
   let col = waypoints[0].column;
   let row = waypoints[0].row;
   let catchProgress = 0;
@@ -334,12 +343,33 @@ export function createGamePatrolRobot() {
     get position() {
       return { column: col, row };
     },
+    get chasing() {
+      return mode === 'chase' || mode === 'hit';
+    },
+    /** Update chase destination without resetting mode / catch timers. */
+    setChaseTarget(column, rowNum) {
+      if (column != null && Number.isFinite(Number(column))) targetCol = Number(column);
+      if (rowNum != null && Number.isFinite(Number(rowNum))) targetRow = Number(rowNum);
+    },
     setMode(next, target) {
       const key = String(next || 'patrol').toLowerCase();
-      mode = key === 'chasing' ? 'chase' : key;
+      const nextMode = key === 'chasing' ? 'chase' : key;
       if (target) {
-        targetCol = target.column;
-        targetRow = target.row;
+        if (target.column != null) targetCol = target.column;
+        if (target.row != null) targetRow = target.row;
+      }
+      if (nextMode === mode) {
+        applyTint(mode);
+        return;
+      }
+      const prev = mode;
+      mode = nextMode;
+      if (mode !== 'hit' && prev === 'hit') catchProgress = 0;
+      if (
+        (mode === 'chase' || mode === 'hit') &&
+        (prev === 'patrol' || prev === 'searching' || prev === 'suspicious' || prev === 'alert')
+      ) {
+        catchProgress = 0;
       }
       applyTint(mode);
     },
@@ -347,6 +377,7 @@ export function createGamePatrolRobot() {
       tickBuildingMotion(bot, elapsed);
       const tint = STATE_TINT[mode] || STATE_TINT.patrol;
 
+      // Idle orbits only — never while chasing.
       if (mode === 'patrol' || mode === 'searching' || mode === 'suspicious') {
         const speed = mode === 'searching' ? 1.6 : mode === 'suspicious' ? 1.1 : 0.85;
         const dest = waypoints[wpIndex];
@@ -374,11 +405,10 @@ export function createGamePatrolRobot() {
         bot.position.set(worldX, TILE_HEIGHT + Math.sin(elapsed * 6) * tint.bob, worldZ);
         bot.rotation.y = yaw;
         catchProgress = 0;
-        return { caught: false, hitting: false, state: mode };
+        return { caught: false, hitting: false, state: mode, chasing: false };
       }
 
       if (mode === 'alert') {
-        // Pause briefly, crane toward last-seen before chase engages.
         const p = tileWorldPos(col, row);
         worldX += (p.x - worldX) * 0.2;
         worldZ += (p.z - worldZ) * 0.2;
@@ -387,20 +417,24 @@ export function createGamePatrolRobot() {
         bot.position.set(worldX, TILE_HEIGHT + Math.sin(elapsed * 14) * 0.04, worldZ);
         bot.rotation.y = yaw;
         body.rotation.x = 0.12 + Math.sin(elapsed * 10) * 0.04;
-        return { caught: false, hitting: false, state: mode };
+        return { caught: false, hitting: false, state: mode, chasing: false };
       }
 
-      const speed = mode === 'hit' ? 3.2 : 2.4;
+      // CHASE / HIT — full map, no beam-range limit.
+      const speed = mode === 'hit' ? ROBOT_HIT_SPEED : ROBOT_CHASE_SPEED;
       const dx = targetCol - col;
       const dy = targetRow - row;
-      const dist = Math.hypot(dx, dy);
-      if (dist > 0.05) {
+      let dist = Math.hypot(dx, dy);
+      if (dist > 0.04) {
         const step = speed * dt;
         col += (dx / dist) * Math.min(step, dist);
         row += (dy / dist) * Math.min(step, dist);
+        col = Math.max(0.5, Math.min(MAP_COLS - 1.5, col));
+        row = Math.max(0.5, Math.min(MAP_ROWS - 1.5, row));
+        dist = Math.hypot(targetCol - col, targetRow - row);
       }
       const p = tileWorldPos(col, row);
-      const follow = 1 - Math.exp(-10 * dt);
+      const follow = 1 - Math.exp(-16 * dt);
       if (!primed) {
         worldX = p.x;
         worldZ = p.z;
@@ -417,13 +451,28 @@ export function createGamePatrolRobot() {
       );
       bot.rotation.y = yaw;
 
-      if (dist < 0.55) {
+      const near = dist <= ROBOT_CATCH_DISTANCE;
+      if (near) {
         catchProgress += dt;
-        this.setMode('hit', { column: targetCol, row: targetRow });
-        return { caught: catchProgress > 0.35, hitting: true, state: 'hit' };
+        if (mode !== 'hit') {
+          mode = 'hit';
+          applyTint('hit');
+        }
+        const locked = catchProgress >= ROBOT_CATCH_HOLD_SECONDS;
+        return {
+          caught: locked,
+          tagged: locked,
+          hitting: true,
+          state: 'hit',
+          chasing: true,
+        };
       }
-      catchProgress = Math.max(0, catchProgress - dt * 0.5);
-      return { caught: false, hitting: false, state: mode };
+      if (mode === 'hit') {
+        mode = 'chase';
+        applyTint('chase');
+      }
+      catchProgress = Math.max(0, catchProgress - dt * 0.8);
+      return { caught: false, tagged: false, hitting: false, state: 'chase', chasing: true };
     },
   };
 }

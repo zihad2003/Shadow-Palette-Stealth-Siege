@@ -11,7 +11,8 @@ export const RAID_TARGETS = [
     camo: 'RED',
     buildings: 4,
     lighthouse: true,
-    patrol: false,
+    // Default StealthRaidView fallback (raidTargetId || 34) — must spawn PatrolRobot.
+    patrol: true,
   },
   {
     id: 55,
