@@ -6,6 +6,12 @@ import {
   placeDefense,
   fetchRaidTarget,
   startRaidSession,
+  duoInvite as postDuoInvite,
+  duoAccept,
+  duoDecline,
+  duoLeave,
+  duoStartRaid,
+  duoForUser,
   upgradeBuilding,
   postPresenceHeartbeat,
   fetchOnlinePlayers,
@@ -29,8 +35,17 @@ import {
 } from '../gamemap/paletteBuggy.js';
 import { soundEngine } from '../soundEngine.js';
 import { createRaidSession, rejectColorChange } from '../raid/RaidSession.js';
+import { ensureStompConnected, stompSubscribe, stompUnsubscribe } from '../live/stompClient.js';
 import { MAP_COLS, MAP_ROWS } from '../gamemap/mapConfig.js';
 import { canPlaceOnGameMap, getGameFootprint, migrateHouseFootprints } from '../gamemap/placeUtils.js';
+import {
+  readDailyState,
+  writeDailyState,
+  bumpProgress,
+  allTasksComplete,
+  DAILY_TASK_REWARD,
+  ensureToday,
+} from '../daily/dailyTasks.js';
 import { createStarterRuins, createMaxedHome, REPAIR_BUILDING_COST, findRuinNear, findRepairedNear, nextGuideRuin, STARTER_HOUSE_COUNT, REBUILD_SECONDS, houseLabel } from '../gamemap/starterRuins.js';
 import { GATE_SPAWN_TILE } from '../gamemap/mapConfig.js';
 import {
@@ -164,6 +179,9 @@ export function GameStateProvider({ children }) {
     try {
       const q = Number(new URLSearchParams(window.location.search).get('userId'));
       if (Number.isFinite(q) && q > 0) return q;
+      // sessionStorage is per-tab so two windows can be Player 12 and 34 without colliding.
+      const tab = Number(window.sessionStorage.getItem('sp_userId'));
+      if (Number.isFinite(tab) && tab > 0) return tab;
       const saved = Number(window.localStorage.getItem('sp_userId'));
       if (Number.isFinite(saved) && saved > 0) return saved;
     } catch {
@@ -173,6 +191,7 @@ export function GameStateProvider({ children }) {
   });
   useEffect(() => {
     try {
+      window.sessionStorage.setItem('sp_userId', String(userId));
       window.localStorage.setItem('sp_userId', String(userId));
     } catch {
       /* ignore */
@@ -189,6 +208,9 @@ export function GameStateProvider({ children }) {
   const [liveRaidInvite, setLiveRaidInvite] = useState(null);
   /** Active live-defense session after Join. */
   const [liveDefense, setLiveDefense] = useState(null);
+  /** Duo co-op party (voice + shared raid). */
+  const [duoParty, setDuoParty] = useState(null);
+  const [duoInvite, setDuoInvite] = useState(null);
   const [prestigeLevel, setPrestigeLevel] = useState(() => savedWorld?.prestigeLevel || 0);
   const [successfulRaids, setSuccessfulRaids] = useState(() => savedWorld?.successfulRaids || 0);
   const [patrolUnlocked, setPatrolUnlocked] = useState(() =>
@@ -202,6 +224,9 @@ export function GameStateProvider({ children }) {
       return '';
     }
   });
+  const [dailyTasks, setDailyTasks] = useState(() => readDailyState());
+  const dailyTasksRef = useRef(dailyTasks);
+  dailyTasksRef.current = dailyTasks;
   const [isMetaOpen, setIsMetaOpen] = useState(false);
 
   // New users receive this home base automatically — no world-map plot pick
@@ -343,6 +368,44 @@ export function GameStateProvider({ children }) {
     }
   };
 
+  const bumpDailyProgress = (id, amount = 1) => {
+    const prev = ensureToday(dailyTasksRef.current);
+    const next = bumpProgress(prev, id, amount);
+    if (
+      next.day === prev.day &&
+      next.claimed === prev.claimed &&
+      next.progress.paint === prev.progress.paint &&
+      next.progress.collect === prev.progress.collect &&
+      next.progress.raid === prev.progress.raid
+    ) {
+      return;
+    }
+    dailyTasksRef.current = next;
+    setDailyTasks(next);
+    writeDailyState(next);
+  };
+
+  const claimDailyTasks = () => {
+    const cur = ensureToday(dailyTasksRef.current);
+    if (cur.claimed) {
+      showToast('Claimed', 'info');
+      return false;
+    }
+    if (!allTasksComplete(cur)) {
+      showToast('Finish all dailies', 'info');
+      return false;
+    }
+    const next = { ...cur, claimed: true };
+    dailyTasksRef.current = next;
+    setDailyTasks(next);
+    writeDailyState(next);
+    setCoins((v) => v + DAILY_TASK_REWARD.coins);
+    setInkEnergy((v) => Math.min(INK_CAP, v + DAILY_TASK_REWARD.ink));
+    soundEngine.playSuccessSound();
+    showToast(`Daily +${DAILY_TASK_REWARD.coins}c / +${DAILY_TASK_REWARD.ink} ink`, 'success');
+    return true;
+  };
+
   const collectHouseCoins = (buildingId) => {
     const id = String(buildingId);
     const banks = { ...(worldRef.current.coinBanks || {}) };
@@ -356,6 +419,7 @@ export function GameStateProvider({ children }) {
     worldRef.current = { ...worldRef.current, coinBanks: banks, coins: nextCoins };
     setCoinBanks(banks);
     setCoins(nextCoins);
+    bumpDailyProgress('collect', 1);
     soundEngine.playSuccessSound();
     showToast(`Collected ${n} coins`, 'success');
     return true;
@@ -484,7 +548,14 @@ export function GameStateProvider({ children }) {
       setRaidTargetId(defender);
       if (params.raidLoot) setRaidLoot(params.raidLoot);
       const session = createRaidSession({ attackerId: userId, defenderId: defender, camoColor });
-      setRaidSession(session);
+      const raidSessionObj = duoParty?.partyId
+        ? Object.freeze({
+            ...session,
+            raidId: duoParty.raidId || session.raidId,
+            duoPartyId: duoParty.partyId,
+          })
+        : session;
+      setRaidSession(raidSessionObj);
       const mountRaid = async () => {
         try {
           const res = await fetchRaidTarget(defender);
@@ -492,28 +563,30 @@ export function GameStateProvider({ children }) {
         } catch (e) {
           setRaidData(null);
         }
-        // Optional live invite — never blocks the async raid if backend is down.
-        try {
-          const live = await startRaidSession({
-            attackerId: userId,
-            defenderId: defender,
-            raidId: session.raidId,
-            attackerName: username,
-          });
-          if (live?.raidId) {
-            setRaidSession((prev) =>
-              prev
-                ? {
-                    ...prev,
-                    raidId: live.raidId,
-                    liveInviteSent: !!live.liveInviteSent,
-                    joinDeadline: live.joinDeadline || null,
-                  }
-                : prev
-            );
+        // Solo live-defender invite only when not in a duo party.
+        if (!duoParty?.partyId) {
+          try {
+            const live = await startRaidSession({
+              attackerId: userId,
+              defenderId: defender,
+              raidId: raidSessionObj.raidId,
+              attackerName: username,
+            });
+            if (live?.raidId) {
+              setRaidSession((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      raidId: live.raidId,
+                      liveInviteSent: !!live.liveInviteSent,
+                      joinDeadline: live.joinDeadline || null,
+                    }
+                  : prev
+              );
+            }
+          } catch {
+            /* offline backend → pure async raid */
           }
-        } catch {
-          /* offline backend → pure async raid */
         }
         setGameState('STEALTH_RAID');
       };
@@ -573,6 +646,156 @@ export function GameStateProvider({ children }) {
 
   const clearLiveDefense = () => setLiveDefense(null);
 
+  const inviteDuoPlayer = async (guestId) => {
+    const gid = Number(guestId);
+    if (!Number.isFinite(gid) || gid <= 0) {
+      showToast('Invalid player', 'error');
+      return false;
+    }
+    if (Number(gid) === Number(userId)) {
+      showToast('Cannot duo yourself', 'error');
+      return false;
+    }
+    try {
+      // Lean heartbeat (no world snapshot) — snapshot can fail JSON and block invites.
+      try {
+        await postPresenceHeartbeat({
+          userId,
+          username,
+          characterModel,
+          camoColor,
+        });
+      } catch {
+        /* still try invite */
+      }
+      if (duoParty?.partyId && (duoParty.status === 'LOBBY' || duoParty.status === 'ENDED')) {
+        try {
+          await duoLeave({ partyId: duoParty.partyId, userId });
+        } catch {
+          /* ignore */
+        }
+        setDuoParty(null);
+      }
+      const res = await postDuoInvite({ hostId: userId, guestId: gid, hostName: username });
+      if (!res?.success) {
+        const msg = res?.message || 'Invite failed';
+        showToast(
+          msg === 'GUEST_OFFLINE'
+            ? 'Player offline — both must be on Raid Finder'
+            : msg === 'ALREADY_IN_PARTY'
+              ? 'Already in a duo — leave first'
+              : msg,
+          'error'
+        );
+        return false;
+      }
+      setDuoParty(res);
+      showToast(
+        res.message === 'INVITE_SENT_MAYBE_OFFLINE'
+          ? 'Invite sent — friend should see Accept shortly'
+          : 'Duo invite sent',
+        'success'
+      );
+      return true;
+    } catch (e) {
+      showToast(e?.data?.message || e?.message || 'Duo invite failed', 'error');
+      return false;
+    }
+  };
+
+  const refreshOnlinePlayers = async () => {
+    try {
+      try {
+        await postPresenceHeartbeat({
+          userId,
+          username,
+          characterModel,
+          camoColor,
+        });
+      } catch {
+        /* fetch list anyway */
+      }
+      const res = await fetchOnlinePlayers(userId);
+      const list = res?.players || [];
+      setOnlinePlayers(list);
+      return list;
+    } catch {
+      return [];
+    }
+  };
+
+  const acceptDuoInvite = async (invite) => {
+    const inv = invite || duoInvite;
+    if (!inv?.partyId) return;
+    try {
+      const res = await duoAccept({ partyId: inv.partyId, userId });
+      if (!res?.success) {
+        showToast(res?.message || 'Accept failed', 'error');
+        return;
+      }
+      setDuoParty(res);
+      setDuoInvite(null);
+      showToast('Duo ready — host picks a base', 'success');
+    } catch {
+      showToast('Accept failed', 'error');
+    }
+  };
+
+  const declineDuoInvite = async (invite) => {
+    const inv = invite || duoInvite;
+    if (!inv?.partyId) {
+      setDuoInvite(null);
+      return;
+    }
+    try {
+      await duoDecline({ partyId: inv.partyId, userId });
+    } catch {
+      /* ignore */
+    }
+    setDuoInvite(null);
+  };
+
+  const leaveDuoParty = async () => {
+    if (!duoParty?.partyId) {
+      setDuoParty(null);
+      return;
+    }
+    try {
+      await duoLeave({ partyId: duoParty.partyId, userId });
+    } catch {
+      /* ignore */
+    }
+    setDuoParty(null);
+    showToast('Left duo', 'info');
+  };
+
+  const startDuoRaidOnTarget = async (defenderId, raidLoot) => {
+    if (!duoParty?.partyId) return false;
+    const isHost = Number(duoParty.hostId) === Number(userId);
+    if (!isHost) {
+      showToast('Host picks the target', 'info');
+      return false;
+    }
+    try {
+      const res = await duoStartRaid({
+        partyId: duoParty.partyId,
+        hostId: userId,
+        defenderId,
+        raidId: `duo_${Date.now()}`,
+      });
+      if (!res?.success) {
+        showToast(res?.message || 'Could not start duo raid', 'error');
+        return false;
+      }
+      setDuoParty(res);
+      transitionTo('RAID_ENTER', { defenderId, raidLoot, duoPartyId: res.partyId, skipSoloOnly: true });
+      return true;
+    } catch {
+      showToast('Duo raid start failed', 'error');
+      return false;
+    }
+  };
+
   const TOTAL_SURFACE = GRID_SIZE;
 
   const computeColorUsage = (tiles = paintedTiles, blds = buildings) => {
@@ -619,6 +842,7 @@ export function GameStateProvider({ children }) {
     soundEngine.playPaintSound();
     setInkEnergy((v) => Math.max(0, v - PAINT_TILE_INK));
     setPaintedTiles((prev) => ({ ...prev, [key]: selectedColor }));
+    bumpDailyProgress('paint', 1);
     return true;
   };
 
@@ -659,7 +883,8 @@ export function GameStateProvider({ children }) {
     soundEngine.playPaintSound();
     setInkEnergy((v) => Math.max(0, v - PAINT_TILE_INK * batch.length));
     setPaintedTiles(nextTiles);
-    return { painted: batch.length, stop: batch.length < todo.length };
+    bumpDailyProgress('paint', batch.length);
+    return { painted: batch.length, stop: batch.length < todo.length, batch };
   };
 
   /** Walk-eraser: strip paint from a footprint (no ink refund). */
@@ -1088,6 +1313,7 @@ export function GameStateProvider({ children }) {
     }
     if (outcome === 'SILENT' || outcome === 'ESCAPED') {
       setSuccessfulRaids((n) => n + 1);
+      bumpDailyProgress('raid', 1);
     }
   };
 
@@ -1287,6 +1513,17 @@ export function GameStateProvider({ children }) {
     setRideInviteOpen(true);
     showToast('Car started', 'success');
     return true;
+  };
+
+  const sendVisitReaction = (kind) => {
+    if (!visitSession) return;
+    const rx = `${kind}|${Date.now()}`;
+    postVisitState({
+      visitId: visitSession.visitId,
+      userId,
+      reaction: rx,
+    }).catch(() => {});
+    window.dispatchEvent(new CustomEvent('visit-reaction', { detail: { kind } }));
   };
 
   const standFromBuggy = () => {
@@ -1584,6 +1821,16 @@ export function GameStateProvider({ children }) {
     acceptLiveRaidDefense,
     dismissLiveRaidInvite,
     clearLiveDefense,
+    duoParty,
+    setDuoParty,
+    duoInvite,
+    setDuoInvite,
+    inviteDuoPlayer,
+    refreshOnlinePlayers,
+    acceptDuoInvite,
+    declineDuoInvite,
+    leaveDuoParty,
+    startDuoRaidOnTarget,
     hasMakeupHouse,
     prestigeLevel,
     setPrestigeLevel,
@@ -1622,8 +1869,12 @@ export function GameStateProvider({ children }) {
     nextRobotCost,
     recordRaidResult,
     claimDailyLogin,
+    dailyTasks,
+    bumpDailyProgress,
+    claimDailyTasks,
     tradeChipsForCoins,
     performPrestige,
+    sendVisitReaction,
     raidTargetId,
     setRaidTargetId,
     raidData,
@@ -1689,6 +1940,115 @@ export function GameStateProvider({ children }) {
       scattered: cartScattered,
     });
   }, [mountedParts, carriedPart, partSpawns, cartScattered, visitRole]);
+
+  // Keep duo party state + pull guest into raid when host starts.
+  useEffect(() => {
+    const partyId = duoParty?.partyId;
+    if (!partyId) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        await ensureStompConnected();
+        if (cancelled) return;
+        await stompSubscribe(`/topic/duo/${partyId}/state`, (state) => {
+          if (!state || cancelled) return;
+          setDuoParty((prev) => ({ ...(prev || {}), ...state }));
+          if (state.status === 'ENDED') {
+            setDuoParty(null);
+            return;
+          }
+          if (
+            state.status === 'IN_RAID' &&
+            state.defenderId != null &&
+            Number(state.guestId) === Number(userId) &&
+            gameState !== 'STEALTH_RAID' &&
+            gameState !== 'RAID_ENTER'
+          ) {
+            transitionTo('RAID_ENTER', {
+              defenderId: state.defenderId,
+              duoPartyId: state.partyId,
+              skipSoloOnly: true,
+            });
+          }
+        });
+      } catch {
+        /* offline */
+      }
+    })();
+    return () => {
+      cancelled = true;
+      stompUnsubscribe(`/topic/duo/${partyId}/state`);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [duoParty?.partyId, userId, gameState]);
+
+  // REST fallback: discover pending duo invite / party when STOMP misses the push.
+  useEffect(() => {
+    if (!userId) return undefined;
+    if (
+      gameState === 'SPLASH' ||
+      gameState === 'STORY' ||
+      gameState === 'MAIN_MENU' ||
+      gameState === 'STEALTH_RAID' ||
+      gameState === 'LIVE_DEFENSE'
+    ) {
+      return undefined;
+    }
+    let cancelled = false;
+    const pull = async () => {
+      try {
+        const res = await duoForUser(userId);
+        if (cancelled || !res?.success || !res.partyId) return;
+        if (res.status === 'ENDED') return;
+        const iAmGuest = Number(res.guestId) === Number(userId);
+        const iAmHost = Number(res.hostId) === Number(userId);
+        if (!iAmGuest && !iAmHost) return;
+
+        // Guest has not accepted yet — show Accept banner only.
+        if (iAmGuest && res.status === 'LOBBY' && !duoParty?.partyId) {
+          setDuoInvite((prev) => (prev?.partyId === res.partyId ? prev : { ...res, type: 'DUO_INVITE' }));
+          return;
+        }
+
+        setDuoInvite(null);
+        setDuoParty((prev) => {
+          if (
+            prev?.partyId === res.partyId &&
+            prev?.status === res.status &&
+            prev?.alarmLatched === res.alarmLatched &&
+            prev?.hostX === res.hostX &&
+            prev?.guestX === res.guestX
+          ) {
+            return prev;
+          }
+          return { ...(prev || {}), ...res };
+        });
+
+        if (
+          res.status === 'IN_RAID' &&
+          res.defenderId != null &&
+          iAmGuest &&
+          gameState !== 'STEALTH_RAID' &&
+          gameState !== 'RAID_ENTER'
+        ) {
+          transitionTo('RAID_ENTER', {
+            defenderId: res.defenderId,
+            duoPartyId: res.partyId,
+            skipSoloOnly: true,
+          });
+        }
+      } catch {
+        /* backend optional */
+      }
+    };
+    pull();
+    const id = window.setInterval(pull, 1500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, gameState, duoParty?.partyId]);
 
   useEffect(() => {
     setGarageComplete(mountedParts.length >= CART_PART_IDS.length);
@@ -1781,7 +2141,7 @@ export function GameStateProvider({ children }) {
   }, [gameState, userId]);
 
   useEffect(() => {
-    if (!buggySeated) return undefined;
+    if (!buggySeated && gameState !== 'RAID_FINDER' && gameState !== 'BASE_BUILDER') return undefined;
     const poll = async () => {
       try {
         const res = await fetchOnlinePlayers(userId);
@@ -1793,7 +2153,7 @@ export function GameStateProvider({ children }) {
     poll();
     const id = window.setInterval(poll, 5000);
     return () => window.clearInterval(id);
-  }, [buggySeated, userId]);
+  }, [buggySeated, userId, gameState]);
 
   useEffect(() => {
     if (!visitSession?.visitId) return undefined;
@@ -1812,8 +2172,15 @@ export function GameStateProvider({ children }) {
           if (s.guestSeated !== undefined && s.guestSeated !== buggySeated) {
             /* guest seated is local authority; ignore */
           }
-        } else if (s.guestSeated !== visitSession.guestSeated) {
+        } else if (s.guestSeated !== visitSession.guestSeated || s.reaction !== visitSessionRef.current?.reaction) {
           setVisitSession(s);
+        }
+        if (s.reaction && s.reaction !== visitSessionRef.current?.reaction) {
+          const [kind] = s.reaction.split('|');
+          if (visitRoleRef.current === 'host') {
+            showToast(`Guest sent a ${kind}!`, 'info');
+            window.dispatchEvent(new CustomEvent('visit-reaction', { detail: { kind } }));
+          }
         }
       } catch {
         /* ignore */

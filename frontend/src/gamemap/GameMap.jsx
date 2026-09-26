@@ -11,6 +11,8 @@ import { applyGrayscaleWorld, desaturateObject } from './applyGrayscale.js';
 import { createSearchlight } from './Searchlight.js';
 import { createMakeupHouse } from './MakeupHouse.js';
 import { createWallBreakFX } from './WallBreakFX.js';
+import { createPaintSplash } from './PaintSplash.js';
+import { createHouseReadyCue } from './HouseReadyCue.js';
 import { buildGameHouse, buildRuinedHouse, placeHouseOnTile, createGamePatrolRobot, tickBuildingMotion, buildHouseBlueprint, tintBlueprint, createGuideMarker, tickGuideMarker, createRebuildFX, tickRebuildFX } from './buildStructure.js';
 import { createAttacker, tickCharacter, CHAR_MESH_REV } from '../character/buildCharacter.js';
 import { canEnterTile } from './occupancy.js';
@@ -75,6 +77,8 @@ export default function GameMap({
   buggyRide = null,
   carriedPart = null,
   pickupAnim = null,
+  coinBanks = null,
+  dayNight = true,
 }) {
   const mountRef = useRef(null);
   const callbacksRef = useRef({});
@@ -87,6 +91,10 @@ export default function GameMap({
   buildingsRef.current = buildings;
   const defensesRef = useRef(defenses);
   defensesRef.current = defenses;
+  const coinBanksRef = useRef(coinBanks);
+  coinBanksRef.current = coinBanks;
+  const dayNightRef = useRef(dayNight);
+  dayNightRef.current = dayNight;
   const selectedBuildingRef = useRef(selectedBuildingId);
   selectedBuildingRef.current = selectedBuildingId;
   const cameraModeRef = useRef(cameraMode);
@@ -173,7 +181,9 @@ export default function GameMap({
       camera.updateProjectionMatrix();
     };
 
-    scene.add(new THREE.HemisphereLight(grayscale ? 0xefefef : 0xfff6e8, grayscale ? 0x222222 : 0x3a2e6e, 0.92));
+    scene.add(new THREE.AmbientLight(0xffffff, 0.05));
+    const hemi = new THREE.HemisphereLight(grayscale ? 0xefefef : 0xfff6e8, grayscale ? 0x222222 : 0x3a2e6e, 0.92);
+    scene.add(hemi);
     const key = new THREE.DirectionalLight(grayscale ? 0xf0f0f0 : 0xfff3e0, 1.25);
     key.position.set(GRID_WIDTH * 0.25, Math.max(40, GRID_WIDTH * 0.45), GRID_DEPTH * 0.3);
     key.castShadow = !LARGE_MAP;
@@ -192,6 +202,17 @@ export default function GameMap({
     const fill = new THREE.DirectionalLight(grayscale ? 0x888888 : 0x8d7bd6, 0.35);
     fill.position.set(-GRID_WIDTH * 0.2, 24, -GRID_DEPTH * 0.15);
     scene.add(fill);
+
+    const dayHemiSky = new THREE.Color(grayscale ? 0xefefef : 0xfff6e8);
+    const dayHemiGround = new THREE.Color(grayscale ? 0x222222 : 0x3a2e6e);
+    const nightHemiSky = new THREE.Color(grayscale ? 0x888888 : 0x1a2744);
+    const nightHemiGround = new THREE.Color(grayscale ? 0x111111 : 0x0a1020);
+    const dayKey = new THREE.Color(grayscale ? 0xf0f0f0 : 0xfff3e0);
+    const nightKey = new THREE.Color(grayscale ? 0x666666 : 0x6a8ec8);
+    const dayFill = new THREE.Color(grayscale ? 0x888888 : 0x8d7bd6);
+    const nightFill = new THREE.Color(grayscale ? 0x444444 : 0x2a4a6e);
+    const fogDay = scene.fog ? scene.fog.color.clone() : new THREE.Color(0x070b0a);
+    const fogNight = fogDay.clone().lerp(new THREE.Color(0x050810), 0.55);
 
     // Sky dome sits just inside the camera's far plane; rendered first, ignores fog
     const aurora = createAuroraSky({ radius: camFar * 0.9, grayscale });
@@ -213,6 +234,22 @@ export default function GameMap({
     if (searchlight) scene.add(searchlight.object);
 
     const wallBreakFX = createWallBreakFX(scene, fortressBorder);
+    const paintSplash = createPaintSplash(scene);
+    const houseReadyCue = grayscale ? null : createHouseReadyCue(scene);
+
+    // Visit reaction float (heart/clap) above attacker
+    const reactRoot = new THREE.Group();
+    reactRoot.visible = false;
+    const reactMat = new THREE.MeshBasicMaterial({
+      color: 0xff6b8a,
+      transparent: true,
+      opacity: 0.95,
+      depthWrite: false,
+    });
+    const reactMesh = new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 10), reactMat);
+    reactRoot.add(reactMesh);
+    scene.add(reactRoot);
+    let reactLife = 0;
     let bumpShake = 0;
 
     // Glowing south-gate extraction marker (raid mode)
@@ -431,9 +468,21 @@ export default function GameMap({
     let attackerMesh = null;
     // Face into the fortress (-Z) from the south gate by default
     const attackerSmooth = { x: 0, z: 0, yaw: Math.PI, primed: false, speed: 0, sprintMul: 1 };
+    /** Second human attacker (duo raid) — driven via setPartnerPose. */
+    let partnerMesh = null;
+    const partnerPose = {
+      column: null,
+      row: null,
+      camoColor: 'RED',
+      characterModel: 1,
+      visible: false,
+    };
+    const partnerSmooth = { x: 0, z: 0, yaw: Math.PI, primed: false, speed: 0 };
     const chaseLook = new THREE.Vector3();
     const chaseDesired = new THREE.Vector3();
     const chaseCurrent = new THREE.Vector3();
+    const chaseLookCurrent = new THREE.Vector3();
+    let chaseLookPrimed = false;
     const patrolCmd = { chasing: false, column: SEARCHLIGHT_TILE.column, row: SEARCHLIGHT_TILE.row };
     let lastPatrolHit = { caught: false, hitting: false };
     let garagePad = null;
@@ -697,14 +746,17 @@ export default function GameMap({
       const dx = p.x - attackerSmooth.x;
       const dz = p.z - attackerSmooth.z;
       const dist = Math.hypot(dx, dz);
-      // Constant-speed glide between tile centers (feels smooth when holding WASD)
+      // Soft pursuit: constant walk speed when far, ease-in settle near the tile center.
       const walkSpeed = TILE_PITCH / WALK_TILE_SECONDS;
       const safeDt = Math.max(dt, 0.001);
       let moved = 0;
       if (dist > 1e-4) {
-        const speed = walkSpeed * attackerSmooth.sprintMul;
-        const ease = dist < TILE_PITCH * 0.14 ? 0.45 + 0.55 * (dist / (TILE_PITCH * 0.14)) : 1;
-        const step = Math.min(dist, speed * safeDt * ease);
+        const speed = walkSpeed * (attackerSmooth.sprintMul || 1);
+        const maxStep = speed * safeDt;
+        const settle = dist * (1 - Math.exp(-11 * safeDt));
+        // Near the tile, blend toward settle so footfalls don't clack; far away keep pace.
+        const near = Math.min(1, dist / (TILE_PITCH * 0.55));
+        const step = Math.min(dist, maxStep * (0.55 + 0.45 * near) + settle * (1 - near) * 0.85);
         attackerSmooth.x += (dx / dist) * step;
         attackerSmooth.z += (dz / dist) * step;
         moved = step;
@@ -714,16 +766,84 @@ export default function GameMap({
       }
       // Walk-units for the gait (1 = walking, ~1.9 = sprint). Tile glide speed is unchanged.
       const instSpeed = moved / safeDt / walkSpeed;
-      attackerSmooth.speed += (instSpeed - attackerSmooth.speed) * (1 - Math.exp(-10 * dt));
+      attackerSmooth.speed += (instSpeed - attackerSmooth.speed) * (1 - Math.exp(-8 * dt));
       // Body faces the direction of travel while moving, the camera look when idle (GTA feel)
-      const targetYaw = dist > 0.08 ? Math.atan2(dx, dz) : chase.lookYaw;
+      const targetYaw = dist > 0.06 ? Math.atan2(dx, dz) : chase.lookYaw;
       let yawDiff = targetYaw - attackerSmooth.yaw;
       while (yawDiff > Math.PI) yawDiff -= Math.PI * 2;
       while (yawDiff < -Math.PI) yawDiff += Math.PI * 2;
-      attackerSmooth.yaw += yawDiff * (1 - Math.exp(-(dist > 0.08 ? 9 : 5.5) * dt));
+      const yawHz = dist > 0.06 ? 11 : 6.5;
+      attackerSmooth.yaw += yawDiff * (1 - Math.exp(-yawHz * dt));
       attackerMesh.position.set(attackerSmooth.x, TILE_HEIGHT, attackerSmooth.z);
       attackerMesh.rotation.y = attackerSmooth.yaw;
     };
+
+    const syncPartner = (dt = 0.016) => {
+      if (!partnerPose.visible || partnerPose.column == null || partnerPose.row == null) {
+        if (partnerMesh) partnerMesh.visible = false;
+        partnerSmooth.primed = false;
+        return;
+      }
+      const charSig = `${partnerPose.characterModel || 1}|${partnerPose.camoColor || 'RED'}|partner|${CHAR_MESH_REV}`;
+      if (partnerMesh && partnerMesh.userData.charSig !== charSig) {
+        scene.remove(partnerMesh);
+        disposeObject(partnerMesh);
+        partnerMesh = null;
+      }
+      if (!partnerMesh) {
+        partnerMesh = createAttacker({
+          camoColor: partnerPose.camoColor || 'RED',
+          characterModel: partnerPose.characterModel || 1,
+          scale: cameraModeRef.current === 'chase' ? 0.72 : 0.4,
+        });
+        partnerMesh.userData.isPartner = true;
+        partnerMesh.userData.charSig = charSig;
+        partnerMesh.traverse((n) => {
+          n.userData.isPartner = true;
+          n.userData.keepColor = true;
+        });
+        scene.add(partnerMesh);
+      }
+      partnerMesh.visible = true;
+      const col = THREE.MathUtils.clamp(partnerPose.column, 0, MAP_COLS - 1);
+      const row = THREE.MathUtils.clamp(partnerPose.row, 0, MAP_ROWS - 1);
+      const p = tileWorldPos(col, row);
+      if (!partnerSmooth.primed) {
+        partnerSmooth.x = p.x;
+        partnerSmooth.z = p.z;
+        partnerSmooth.yaw = Math.PI;
+        partnerSmooth.primed = true;
+      }
+      const dx = p.x - partnerSmooth.x;
+      const dz = p.z - partnerSmooth.z;
+      const dist = Math.hypot(dx, dz);
+      const walkSpeed = TILE_PITCH / WALK_TILE_SECONDS;
+      const safeDt = Math.max(dt, 0.001);
+      let moved = 0;
+      if (dist > 1e-4) {
+        const maxStep = walkSpeed * 1.2 * safeDt;
+        const settle = dist * (1 - Math.exp(-10 * safeDt));
+        const step = Math.min(dist, Math.max(settle * 0.4, Math.min(maxStep, dist)));
+        partnerSmooth.x += (dx / dist) * step;
+        partnerSmooth.z += (dz / dist) * step;
+        moved = step;
+      } else {
+        partnerSmooth.x = p.x;
+        partnerSmooth.z = p.z;
+      }
+      const instSpeed = moved / safeDt / walkSpeed;
+      partnerSmooth.speed += (instSpeed - partnerSmooth.speed) * (1 - Math.exp(-8 * dt));
+      if (dist > 0.06) {
+        const targetYaw = Math.atan2(dx, dz);
+        let yawDiff = targetYaw - partnerSmooth.yaw;
+        while (yawDiff > Math.PI) yawDiff -= Math.PI * 2;
+        while (yawDiff < -Math.PI) yawDiff += Math.PI * 2;
+        partnerSmooth.yaw += yawDiff * (1 - Math.exp(-9 * dt));
+      }
+      partnerMesh.position.set(partnerSmooth.x, TILE_HEIGHT, partnerSmooth.z);
+      partnerMesh.rotation.y = partnerSmooth.yaw;
+    };
+
     syncVehicle(0.016, 0);
     syncAttacker(0.016);
 
@@ -1099,6 +1219,26 @@ export default function GameMap({
         playWallBreak: (column, row, opts = {}) => {
           wallBreakFX.play(column, row, opts);
         },
+        spawnPaintSplash: (coords, hex) => {
+          paintSplash.spawn(coords, hex);
+        },
+        showReaction: (kind = 'heart') => {
+          reactMat.color.set(kind === 'clap' ? 0xffe08a : 0xff6b8a);
+          reactLife = 2.2;
+          reactRoot.visible = true;
+        },
+        setShowcase: (on) => {
+          if (on) {
+            cameraModeRef.current = 'iso';
+            pan.x = 0;
+            pan.z = 0;
+            targetZoom = CAMERA.defaultZoom * 0.92;
+            placeCamera();
+          }
+        },
+        cameraPunch: (amount = 0.35) => {
+          bumpShake = Math.max(bumpShake, amount);
+        },
         pulseBuilding: (buildingId) => {
           const id = String(buildingId || '');
           buildingsGroup.children.forEach((house) => {
@@ -1222,6 +1362,22 @@ export default function GameMap({
         },
         clearLivePatrol: () => {
           patrol?.clearLiveControl?.();
+        },
+        /** Duo partner mesh — column/row in tile space; pass null to hide. */
+        setPartnerPose: (column, row, opts = {}) => {
+          if (column == null || row == null) {
+            partnerPose.visible = false;
+            return;
+          }
+          partnerPose.column = Number(column);
+          partnerPose.row = Number(row);
+          if (opts.camoColor) partnerPose.camoColor = opts.camoColor;
+          if (opts.characterModel != null) partnerPose.characterModel = opts.characterModel;
+          partnerPose.visible = true;
+        },
+        clearPartnerPose: () => {
+          partnerPose.visible = false;
+          partnerSmooth.primed = false;
         },
       };
     }
@@ -1358,6 +1514,37 @@ export default function GameMap({
       });
       tickDecorMotion(interiorDecor, elapsed);
       aurora.update(elapsed);
+      paintSplash.tick(dt);
+      if (houseReadyCue) {
+        houseReadyCue.sync(buildingsRef.current, coinBanksRef.current);
+        houseReadyCue.tick(elapsed);
+      }
+      if (reactLife > 0) {
+        reactLife -= dt;
+        const atk = attackerMesh;
+        if (atk) {
+          reactRoot.position.set(atk.position.x, atk.position.y + 1.85, atk.position.z);
+          reactRoot.position.y += Math.sin((2.2 - reactLife) * 4) * 0.08;
+          reactMat.opacity = Math.min(1, reactLife / 0.4) * 0.95;
+          reactRoot.visible = true;
+        }
+        if (reactLife <= 0) reactRoot.visible = false;
+      }
+      if (!grayscale && dayNightRef.current) {
+        // ~10 min full cycle; phase 0 = noon, 0.5 = midnight
+        const phase = (elapsed / 600) % 1;
+        const night = 0.5 - 0.5 * Math.cos(phase * Math.PI * 2);
+        hemi.color.copy(dayHemiSky).lerp(nightHemiSky, night);
+        hemi.groundColor.copy(dayHemiGround).lerp(nightHemiGround, night);
+        hemi.intensity = 0.92 - night * 0.35;
+        key.color.copy(dayKey).lerp(nightKey, night);
+        key.intensity = 1.25 - night * 0.55;
+        fill.color.copy(dayFill).lerp(nightFill, night);
+        fill.intensity = 0.35 + night * 0.15;
+        if (scene.fog) {
+          scene.fog.color.copy(fogDay).lerp(fogNight, night);
+        }
+      }
       if (tileRim.visible && selectedTile) tileRim.position.copy(selectedTile.position);
       if (brushActive) {
         brushMat.opacity = 0.4 + 0.25 * Math.sin(elapsed * 5.5);
@@ -1507,6 +1694,7 @@ export default function GameMap({
       selectRing.rotation.z = elapsed * 0.6;
       syncVehicle(dt, elapsed);
       syncAttacker(dt);
+      syncPartner(dt);
       if (attackerMesh) {
         const vehNow = vehicleRef.current || {};
         const picking = !!(vehNow.pickupAnim && vehNow.pickupAnim.t < 1);
@@ -1537,6 +1725,13 @@ export default function GameMap({
         }
         if (rideOtherMesh && rideOtherMesh.visible) {
           tickCharacter(rideOtherMesh, elapsed, { dt, speed: 0, seated: true });
+        }
+        if (partnerMesh && partnerMesh.visible) {
+          tickCharacter(partnerMesh, elapsed, {
+            dt,
+            speed: partnerSmooth.speed || 0,
+            seated: false,
+          });
         }
 
         const anim = vehNow.pickupAnim;
@@ -1618,13 +1813,22 @@ export default function GameMap({
         if (!chase.primed) {
           camera.position.copy(chaseDesired);
           chaseCurrent.copy(chaseDesired);
+          chaseLookCurrent.copy(chaseLook);
+          chaseLookPrimed = true;
           chase.primed = true;
         } else {
-          const camFollow = 1 - Math.exp(-9 * dt);
+          const camFollow = 1 - Math.exp(-(CHASE_CAM.followHz || 7.2) * dt);
+          const lookFollow = 1 - Math.exp(-(CHASE_CAM.lookHz || 9.5) * dt);
           chaseCurrent.lerp(chaseDesired, camFollow);
+          if (!chaseLookPrimed) {
+            chaseLookCurrent.copy(chaseLook);
+            chaseLookPrimed = true;
+          } else {
+            chaseLookCurrent.lerp(chaseLook, lookFollow);
+          }
           camera.position.copy(chaseCurrent);
         }
-        camera.lookAt(chaseLook);
+        camera.lookAt(chaseLookPrimed ? chaseLookCurrent : chaseLook);
       } else if (!isChase) {
         placeCamera();
       }
@@ -1667,6 +1871,8 @@ export default function GameMap({
       canvas.removeEventListener('wheel', onWheel);
       if (apiRef) apiRef.current = null;
       worldRef.current = null;
+      paintSplash.dispose();
+      houseReadyCue?.dispose();
       grid.dispose();
       renderer.dispose();
       if (canvas.parentNode === mount) mount.removeChild(canvas);

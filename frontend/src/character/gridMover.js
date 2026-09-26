@@ -2,7 +2,7 @@ import { MAP_COLS, MAP_ROWS } from '../gamemap/mapConfig.js';
 import { canEnterTile } from '../gamemap/occupancy.js';
 
 /** Turn speed in radians/second when steering with A/D. */
-export const TURN_RATE = 2.05;
+export const TURN_RATE = 2.45;
 
 /**
  * Quantize camera-relative input into an 8-way tile step.

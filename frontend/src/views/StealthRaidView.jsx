@@ -29,6 +29,7 @@ import { createSprintMeter, SPRINT_SPEED_MULT } from '../character/sprint.js';
 import StaminaBar from '../components/hud/StaminaBar.jsx';
 import ActionPrompt from '../components/hud/ActionPrompt.jsx';
 import { ensureStompConnected, stompPublish, stompSubscribe, stompUnsubscribe } from '../live/stompClient.js';
+import { duoMarkCaught } from '../api.js';
 import LootFloatFX from '../components/raid/LootFloatFX.jsx';
 import RaidTransitionOverlay, { RAID_CINEMATIC_MS } from '../components/raid/RaidTransitionOverlay.jsx';
 import { findRepairedNear } from '../gamemap/starterRuins.js';
@@ -37,6 +38,8 @@ const WALL_BREAK_HITS = 4;
 const RAID_DECOR_SEED = 41;
 /** Advance PatrolRobotContext on a fixed cadence (~session-log rate), not every rAF. */
 const ROBOT_TICK_HZ = 8;
+/** Duo members each keep half of greed loot on a successful extract. */
+const DUO_LOOT_SHARE = 0.5;
 
 /** Map robot SM → HUD ladder labels used by vignettes / SideRaidPanel. */
 function hudStateFromRobot(robotState) {
@@ -99,7 +102,12 @@ export default function StealthRaidView() {
     transitionTo,
     recordRaidResult,
     userId,
+    duoParty,
   } = useGameState();
+
+  const duoPartyId = raidSession?.duoPartyId || duoParty?.partyId || null;
+  const isDuoHost = duoPartyId && Number(duoParty?.hostId) === Number(userId);
+  const duoAlarmRef = useRef(false);
 
   const lockedCamo = raidSession?.camoColor || camoColor;
   const sceneApi = useRef(null);
@@ -152,12 +160,17 @@ export default function StealthRaidView() {
   const sprintMeter = useRef(createSprintMeter());
   const [stamina, setStamina] = useState({ stamina: 1, sprinting: false, exhausted: false });
 
-  const [attacker, setAttacker] = useState({
-    // Start just inside the fortress — not already standing in the extract zone.
-    column: GATE_SPAWN_TILE.column,
-    row: Math.max(0, GATE_SPAWN_TILE.row - 3),
-    camoColor: lockedCamo,
-    characterModel: characterModel || 1,
+  const [attacker, setAttacker] = useState(() => {
+    const baseCol = GATE_SPAWN_TILE.column;
+    const baseRow = Math.max(0, GATE_SPAWN_TILE.row - 3);
+    // Guest spawns one tile to the side so duo partners do not stack.
+    const guestOffset = duoPartyId && !isDuoHost ? 1 : 0;
+    return {
+      column: baseCol + guestOffset,
+      row: baseRow,
+      camoColor: lockedCamo,
+      characterModel: characterModel || 1,
+    };
   });
   const attackerRef = useRef(attacker);
   attackerRef.current = attacker;
@@ -235,6 +248,10 @@ export default function StealthRaidView() {
   // effect's deps or the siren toast restarts the raid loop (chase unlatch + greed → 0).
   const showToastRef = useRef(showToast);
   showToastRef.current = showToast;
+
+  useEffect(() => {
+    soundEngine.playAmbient('raid');
+  }, []);
 
   useEffect(() => {
     const started = Date.now();
@@ -356,6 +373,7 @@ export default function StealthRaidView() {
       }
 
       if (firstLightHit || result.justAlarmed) {
+        duoAlarmRef.current = true;
         alarmSystem.current.trigger({
           playerX: pos.column,
           playerY: pos.row,
@@ -482,7 +500,13 @@ export default function StealthRaidView() {
       // Spotted ≠ loot lost — preview ESCAPED payout so greed stays visible after the siren.
       const lootPreviewOutcome =
         chaseLatchedRef.current || result.alarmLatched || gateLockedRef.current ? 'ESCAPED' : 'SILENT';
-      const greedPreview = estimateLootAmounts(elapsed, { coins: poolCoins, ink: poolInk }, lootPreviewOutcome);
+      const greedPreviewRaw = estimateLootAmounts(elapsed, { coins: poolCoins, ink: poolInk }, lootPreviewOutcome);
+      const duoShare = duoPartyId ? DUO_LOOT_SHARE : 1;
+      const greedPreview = {
+        ...greedPreviewRaw,
+        coins: Math.round(greedPreviewRaw.coins * duoShare),
+        ink: Math.round(greedPreviewRaw.ink * duoShare),
+      };
 
       tickN += 1;
       if (tickN % 8 === 0) {
@@ -499,6 +523,7 @@ export default function StealthRaidView() {
       if (stateChanged) lastDetectState.current = robotHudState;
 
       if (robotCaught && !hudRef.current.outcome) {
+        if (duoPartyId) duoMarkCaught(duoPartyId, userId).catch(() => {});
         setStolen((prev) => ({ coins: prev.coins, ink: prev.ink }));
         hudRef.current = { ...hudRef.current, outcome: 'CAUGHT' };
         setHud((prev) => ({
@@ -520,7 +545,12 @@ export default function StealthRaidView() {
           caught: false,
           extractionOk: true,
         });
-        const greed = estimateLootAmounts(elapsed, { coins: poolCoins, ink: poolInk }, outcome);
+        const greedRaw = estimateLootAmounts(elapsed, { coins: poolCoins, ink: poolInk }, outcome);
+        const greed = {
+          ...greedRaw,
+          coins: Math.round(greedRaw.coins * duoShare),
+          ink: Math.round(greedRaw.ink * duoShare),
+        };
         setStolen((prev) => ({ coins: prev.coins + greed.coins, ink: prev.ink + greed.ink }));
         hudRef.current = { ...hudRef.current, outcome };
         setHud((prev) => ({
@@ -540,7 +570,12 @@ export default function StealthRaidView() {
         // Survived the full 150s — lock greed loot (spotted or not). Patrol never zeros this.
         const outcome =
           chaseLatchedRef.current || result.alarmLatched || gateLockedRef.current ? 'ESCAPED' : 'SILENT';
-        const greed = estimateLootAmounts(elapsed, { coins: poolCoins, ink: poolInk }, outcome);
+        const greedRaw = estimateLootAmounts(elapsed, { coins: poolCoins, ink: poolInk }, outcome);
+        const greed = {
+          ...greedRaw,
+          coins: Math.round(greedRaw.coins * duoShare),
+          ink: Math.round(greedRaw.ink * duoShare),
+        };
         setStolen((prev) => ({ coins: prev.coins + greed.coins, ink: prev.ink + greed.ink }));
         hudRef.current = { ...hudRef.current, outcome };
         setHud((prev) => ({
@@ -596,7 +631,7 @@ export default function StealthRaidView() {
       sceneApi.current?.setExtractionMarker?.({ active: false });
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lockedCamo, raidDefenses.length]);
+  }, [lockedCamo, raidDefenses.length, duoPartyId, userId]);
 
   // Optional live-defender takeover over STOMP (AI resumes if they disconnect).
   useEffect(() => {
@@ -650,6 +685,97 @@ export default function StealthRaidView() {
       sceneApi.current?.clearLivePatrol?.();
     };
   }, [raidSession?.raidId, userId]);
+
+  // Duo co-op: publish pose; partner mesh + shared alarm come from duoParty (context STOMP).
+  useEffect(() => {
+    const partyId = duoPartyId;
+    if (!partyId || !userId) return undefined;
+    let cancelled = false;
+    let pubTimer = 0;
+
+    (async () => {
+      try {
+        await ensureStompConnected();
+        if (cancelled) return;
+        pubTimer = window.setInterval(() => {
+          const pos = attackerRef.current;
+          stompPublish(`/app/duo/${partyId}/position`, {
+            userId,
+            x: pos.column,
+            y: pos.row,
+            alarm: duoAlarmRef.current || chaseLatchedRef.current || gateLockedRef.current,
+          }).catch(() => {});
+        }, 120);
+      } catch {
+        /* offline */
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(pubTimer);
+      sceneApi.current?.clearPartnerPose?.();
+    };
+  }, [duoPartyId, userId]);
+
+  // Mirror partner tile + shared alarm from party state broadcasts.
+  useEffect(() => {
+    if (!duoPartyId || !duoParty || duoParty.status !== 'IN_RAID') return;
+    const iAmHost = Number(duoParty.hostId) === Number(userId);
+    const px = iAmHost ? duoParty.guestX : duoParty.hostX;
+    const py = iAmHost ? duoParty.guestY : duoParty.hostY;
+    if (px != null && py != null) {
+      sceneApi.current?.setPartnerPose?.(px, py, {
+        camoColor: iAmHost ? 'RED' : 'GREEN',
+        characterModel: 1,
+      });
+    }
+    if (duoParty.alarmLatched && !chaseLatchedRef.current) {
+      duoAlarmRef.current = true;
+      chaseLatchedRef.current = true;
+      gateLockedRef.current = true;
+      alarmSystem.current?.trigger?.({
+        playerX: attackerRef.current.column,
+        playerY: attackerRef.current.row,
+        reason: 'DUO_PARTNER',
+        camoColor: lockedCamo,
+        tileColor: null,
+      });
+      soundEngine.playAlarmSound();
+      soundEngine.playGateSlamSound();
+      sceneApi.current?.setAlarm?.(true);
+      sceneApi.current?.lockGate?.();
+      setHud((prev) => ({
+        ...prev,
+        alarm: true,
+        gateLocked: true,
+        state: DETECTION_STATES.ALARM,
+      }));
+      showToastRef.current('Partner spotted — siren!', 'error');
+    }
+  }, [
+    duoPartyId,
+    duoParty?.hostX,
+    duoParty?.hostY,
+    duoParty?.guestX,
+    duoParty?.guestY,
+    duoParty?.alarmLatched,
+    duoParty?.status,
+    duoParty?.hostId,
+    userId,
+    lockedCamo,
+  ]);
+
+  const partnerCaughtToastRef = useRef(false);
+  useEffect(() => {
+    if (!duoPartyId || !duoParty) return;
+    const iAmHost = Number(duoParty.hostId) === Number(userId);
+    const partnerCaught = iAmHost ? duoParty.guestCaught : duoParty.hostCaught;
+    if (partnerCaught && !partnerCaughtToastRef.current) {
+      partnerCaughtToastRef.current = true;
+      showToast('Partner caught — keep raiding', 'info');
+    }
+  }, [duoPartyId, duoParty?.hostCaught, duoParty?.guestCaught, duoParty?.hostId, userId, showToast]);
 
   useEffect(() => {
     const down = (e) => {
@@ -728,9 +854,15 @@ export default function StealthRaidView() {
     const poolCoins = Number(raidLoot?.coins ?? targetMeta?.coins ?? 200);
     const poolInk = Number(raidLoot?.ink ?? targetMeta?.ink ?? 40);
     const greed = estimateLootAmounts(elapsed, { coins: poolCoins, ink: poolInk }, outcome);
+    const share = duoPartyId ? DUO_LOOT_SHARE : 1;
+    const greedCoins = Math.round(greed.coins * share);
+    const greedInk = Math.round(greed.ink * share);
+    if (outcome === 'CAUGHT' && duoPartyId) {
+      duoMarkCaught(duoPartyId, userId).catch(() => {});
+    }
     setStolen((prev) => ({
-      coins: prev.coins + (outcome === 'CAUGHT' || outcome === 'INCOMPLETE' ? 0 : greed.coins),
-      ink: prev.ink + (outcome === 'CAUGHT' || outcome === 'INCOMPLETE' ? 0 : greed.ink),
+      coins: prev.coins + (outcome === 'CAUGHT' || outcome === 'INCOMPLETE' ? 0 : greedCoins),
+      ink: prev.ink + (outcome === 'CAUGHT' || outcome === 'INCOMPLETE' ? 0 : greedInk),
     }));
     setHud((prev) => ({
       ...prev,
@@ -738,8 +870,8 @@ export default function StealthRaidView() {
       remaining: 0,
       breaking: false,
       channeling: false,
-      greedCoins: greed.coins,
-      greedInk: greed.ink,
+      greedCoins,
+      greedInk,
     }));
     showToast(
       outcome === 'CAUGHT'
@@ -747,19 +879,36 @@ export default function StealthRaidView() {
         : outcome === 'INCOMPLETE'
           ? 'Raid incomplete'
           : outcome === 'ESCAPED'
-            ? 'Escaped'
-            : 'Silent',
+            ? duoPartyId
+              ? 'Escaped (half loot)'
+              : 'Escaped'
+            : duoPartyId
+              ? 'Silent (half loot)'
+              : 'Silent',
       outcome === 'CAUGHT' || outcome === 'INCOMPLETE' ? 'error' : 'success'
     );
   };
 
   const finishRaid = () => {
     if (settled.current) return;
-    const { outcome } = hudRef.current;
+    const { outcome, greedCoins, greedInk } = hudRef.current;
     if (!outcome) return;
     settled.current = true;
     recordRaidResult(outcome);
     setLeaveFx(outcome === 'CAUGHT' ? 'caught' : 'exit');
+
+    if (outcome === 'SILENT' || outcome === 'ESCAPED') {
+      soundEngine.playRaidExitSound();
+      sceneApi.current?.playBump?.();
+      
+      const coins = greedCoins ?? stolenRef.current.coins;
+      const ink = greedInk ?? stolenRef.current.ink;
+      const drops = [];
+      if (coins > 0) drops.push({ id: `win-c`, kind: 'coin', amount: coins, x: 0.45, y: 0.4 });
+      if (ink > 0) drops.push({ id: `win-i`, kind: 'ink', amount: ink, x: 0.55, y: 0.4 });
+      if (drops.length) setFloatingLoot((p) => [...p, ...drops]);
+    }
+
     window.setTimeout(() => {
       transitionTo('BASE_BUILDER', {
         loadingTitle: outcome === 'CAUGHT' ? 'Caught' : outcome === 'INCOMPLETE' ? 'Incomplete' : 'Extracted',
@@ -817,15 +966,18 @@ export default function StealthRaidView() {
         const poolCoins = Number(raidLoot?.coins ?? targetMeta?.coins ?? 200);
         const poolInk = Number(raidLoot?.ink ?? targetMeta?.ink ?? 40);
         const greed = estimateLootAmounts(elapsed, { coins: poolCoins, ink: poolInk }, 'ESCAPED');
-        setStolen((prev) => ({ coins: prev.coins + greed.coins, ink: prev.ink + greed.ink }));
+        const share = duoPartyId ? DUO_LOOT_SHARE : 1;
+        const greedCoins = Math.round(greed.coins * share);
+        const greedInk = Math.round(greed.ink * share);
+        setStolen((prev) => ({ coins: prev.coins + greedCoins, ink: prev.ink + greedInk }));
         setHud((prev) => ({
           ...prev,
           outcome: 'ESCAPED',
           remaining: 0,
           breaking: false,
           breakFlash: false,
-          greedCoins: greed.coins,
-          greedInk: greed.ink,
+          greedCoins,
+          greedInk,
           greedPercent: greed.percent,
           elapsed,
         }));

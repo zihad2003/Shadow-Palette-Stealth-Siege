@@ -417,8 +417,8 @@ function collectDecorPlacements(seed = 7) {
   while (placed < target && attempts < target * 40) {
     attempts += 1;
     const n = seed * 97 + attempts * 13;
-    const column = 2 + Math.floor(hash(n, 1) * (MAP_COLS - 4));
-    const row = 2 + Math.floor(hash(n, 2) * (MAP_ROWS - 4));
+    const column = 3 + Math.floor(hash(n, 1) * (MAP_COLS - 6));
+    const row = 3 + Math.floor(hash(n, 2) * (MAP_ROWS - 6));
     const key = tileKey(column, row);
     if (used.has(key) || isStaticDecorBanned(column, row)) continue;
     used.add(key);
@@ -426,23 +426,22 @@ function collectDecorPlacements(seed = 7) {
     placed += 1;
   }
 
+  // Wall lanterns sit on the walk ring visually but must NOT block movement.
   const edgeStep = LARGE_MAP ? 5 : 3;
   for (let c = 3; c < MAP_COLS - 3; c += edgeStep) {
     [2, MAP_ROWS - 3].forEach((r, idx) => {
-      if (isStaticDecorBanned(c, r)) return;
       const key = tileKey(c, r);
       if (used.has(key)) return;
       used.add(key);
-      tiles.push({ column: c, row: r, key, n: seed + c * 17 + idx, lantern: true });
+      tiles.push({ column: c, row: r, key, n: seed + c * 17 + idx, lantern: true, walkable: true });
     });
   }
   for (let r = 4; r < MAP_ROWS - 4; r += edgeStep) {
     [2, MAP_COLS - 3].forEach((c, idx) => {
-      if (isStaticDecorBanned(c, r)) return;
       const key = tileKey(c, r);
       if (used.has(key)) return;
       used.add(key);
-      tiles.push({ column: c, row: r, key, n: seed + r * 19 + idx + 99, lantern: true });
+      tiles.push({ column: c, row: r, key, n: seed + r * 19 + idx + 99, lantern: true, walkable: true });
     });
   }
   return tiles;
@@ -450,10 +449,12 @@ function collectDecorPlacements(seed = 7) {
 
 /**
  * Deterministic list of tiles occupied by courtyard props (same as visuals).
+ * Wall lanterns are walkable — they decorate the rim without blocking movement.
  */
 export function listDecorOccupiedTiles(seed = 7, buildings = []) {
   const used = new Set();
   collectDecorPlacements(seed).forEach((p) => {
+    if (p.walkable || p.lantern) return;
     if (buildings.some((b) => buildingCoversTile(b, p.column, p.row))) return;
     used.add(p.key);
   });
@@ -477,7 +478,7 @@ export function createInteriorDecor({ seed = 7, buildings = [] } = {}) {
     if (!spot.lantern) prop.rotation.y = hash(spot.n, 6) * Math.PI * 2;
     prop.scale.setScalar(spot.lantern ? 1 : 0.92 + hash(spot.n, 7) * 0.18);
     prop.userData.decorTile = spot.key;
-    prop.userData.solid = true;
+    prop.userData.solid = !spot.walkable && !spot.lantern;
     group.add(prop);
   });
 

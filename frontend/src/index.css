@@ -115,13 +115,18 @@ body,
 /* ─── Clay buttons (base; motion handles press travel) ─────────────── */
 .clay-btn {
   position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
   border: none;
   border-radius: 16px;
   font-family: var(--font-heading);
   font-weight: 800;
   letter-spacing: 0.04em;
   cursor: pointer;
-  line-height: 1.1;
+  line-height: 1;
+  text-align: center;
 }
 
 .clay-btn-primary {

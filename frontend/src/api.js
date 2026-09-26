@@ -182,3 +182,35 @@ export async function endVisitSession(payload) {
   });
 }
 
+/* —— Duo party —— */
+export async function duoInvite(payload) {
+  return request('/api/duo/invite', { method: 'POST', body: JSON.stringify(payload) });
+}
+
+export async function duoAccept(payload) {
+  return request('/api/duo/accept', { method: 'POST', body: JSON.stringify(payload) });
+}
+
+export async function duoDecline(payload) {
+  return request('/api/duo/decline', { method: 'POST', body: JSON.stringify(payload) });
+}
+
+export async function duoLeave(payload) {
+  return request('/api/duo/leave', { method: 'POST', body: JSON.stringify(payload) });
+}
+
+export async function duoStartRaid(payload) {
+  return request('/api/duo/raid/start', { method: 'POST', body: JSON.stringify(payload) });
+}
+
+export async function duoMarkCaught(partyId, userId) {
+  return request(`/api/duo/${partyId}/caught`, {
+    method: 'POST',
+    body: JSON.stringify({ partyId, userId }),
+  });
+}
+
+export async function duoForUser(userId) {
+  return request(`/api/duo/user/${userId}`);
+}
+
