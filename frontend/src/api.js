@@ -1,8 +1,11 @@
 // API Service Client for Backend Integration
 
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '');
+
 async function request(url, options = {}) {
+  const fullUrl = url.startsWith('http') ? url : `${API_BASE_URL}${url}`;
   const headers = { 'Content-Type': 'application/json', ...options.headers };
-  const res = await fetch(url, { ...options, headers });
+  const res = await fetch(fullUrl, { ...options, headers });
   const data = await res.json().catch(() => ({ success: false, error: 'INVALID_JSON_RESPONSE' }));
 
   if (!res.ok) {
