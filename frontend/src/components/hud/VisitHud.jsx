@@ -28,6 +28,7 @@ export default function VisitHud() {
     declinePendingInvite,
     endVisit,
     bumpBuggyGear,
+    sendVisitReaction,
   } = useGameState();
   const [sentIds, setSentIds] = useState({});
 
@@ -127,6 +128,13 @@ export default function VisitHud() {
               <LogOut size={11} />
               {isVisitGuest ? 'Leave' : 'Kick'}
             </ClayButton>
+            {isVisitGuest && (
+              <>
+                <span className="w-px h-4 bg-clay-muted/40 mx-1" />
+                <ClayButton variant="ghost" className="h-7 px-2 rounded-lg text-[14px]" onClick={() => sendVisitReaction('heart')}>❤️</ClayButton>
+                <ClayButton variant="ghost" className="h-7 px-2 rounded-lg text-[14px]" onClick={() => sendVisitReaction('clap')}>👏</ClayButton>
+              </>
+            )}
           </ClayPanel>
         </div>
       )}

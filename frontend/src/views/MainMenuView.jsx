@@ -1,4 +1,4 @@
-import React, { useState, Suspense, lazy } from 'react';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { ArrowRight } from 'lucide-react';
 import { useGameState } from '../state/GameStateContext.jsx';
 import { GAME_COLOR_KEYS, GAME_COLORS, COLOR_NAMES } from '../colors.js';
@@ -22,6 +22,10 @@ export default function MainMenuView() {
   } = useGameState();
   const [selectedChar, setSelectedChar] = useState(Number(characterModel) === 2 ? 2 : 1);
   const [selectedCamo, setSelectedCamo] = useState(camoColor || 'BLUE');
+
+  useEffect(() => {
+    soundEngine.playAmbient('menu');
+  }, []);
 
   const handleStartGame = () => {
     soundEngine.playClickSound();

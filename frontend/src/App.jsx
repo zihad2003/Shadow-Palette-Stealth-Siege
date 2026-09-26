@@ -15,6 +15,7 @@ import RaidEnterView from './views/RaidEnterView.jsx';
 import StealthRaidView from './views/StealthRaidView.jsx';
 import LiveDefenseView from './live/LiveDefenseView.jsx';
 import LiveRaidInviteListener from './live/LiveRaidInviteListener.jsx';
+import DuoVoiceBar, { DuoInviteListener } from './duo/DuoVoiceBar.jsx';
 import AdminDashboardView from './views/AdminDashboardView.jsx';
 import OptionsModal from './components/hud/OptionsModal.jsx';
 import MetaEconomyPanel from './components/hud/MetaEconomyPanel.jsx';
@@ -86,6 +87,8 @@ export default function App() {
           <LoadingOverlay />
           <VisitHud />
           <LiveRaidInviteListener />
+          <DuoInviteListener />
+          <DuoVoiceBar />
           <ToastContainer />
         </ScreenError>
       </div>

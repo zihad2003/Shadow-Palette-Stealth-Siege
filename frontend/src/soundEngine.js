@@ -7,6 +7,7 @@ class SoundEngine {
     this.volume = 0.5;
     this.muted = false;
     this.initialized = false;
+    this._ambientBed = null;
   }
 
   init() {
@@ -439,6 +440,97 @@ class SoundEngine {
     this.playAlarmSound();
     window.setTimeout(() => this.playBuildSound(), 220);
     window.setTimeout(() => this.playAlarmSound(), 480);
+  }
+
+  // ─── Ambient Music Beds ─────────────────────────────────────────────
+
+  playAmbient(type) {
+    this.ensureContext();
+    if (!this.ctx) return;
+
+    if (this._ambientBed) {
+      try {
+        const now = this.ctx.currentTime;
+        this._ambientBed.gain.gain.cancelScheduledValues(now);
+        this._ambientBed.gain.gain.setValueAtTime(0, now);
+        this._ambientBed.osc1.stop();
+        this._ambientBed.osc2.stop();
+      } catch (e) {}
+      this._ambientBed = null;
+    }
+    return;
+
+    const now = this.ctx.currentTime;
+
+    // Crossfade out existing
+    if (this._ambientBed) {
+      const old = this._ambientBed;
+      old.gain.gain.cancelScheduledValues(now);
+      old.gain.gain.setValueAtTime(old.gain.gain.value, now);
+      old.gain.gain.linearRampToValueAtTime(0, now + 1.5);
+      window.setTimeout(() => {
+        try {
+          old.osc1.stop();
+          old.osc2.stop();
+          if (old.osc3) old.osc3.stop();
+        } catch (e) {}
+      }, 1600);
+    }
+
+    if (this.muted || type === 'none') {
+      this._ambientBed = null;
+      return;
+    }
+
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(0.2, now + 2.0);
+    gain.connect(this.masterGain);
+
+    const osc1 = this.ctx.createOscillator();
+    const osc2 = this.ctx.createOscillator();
+    let osc3 = null;
+
+    if (type === 'menu') {
+      osc1.type = 'sine';
+      osc1.frequency.setValueAtTime(110, now); // A2
+      osc2.type = 'triangle';
+      osc2.frequency.setValueAtTime(164.81, now); // E3
+    } else if (type === 'base') {
+      osc1.type = 'sine';
+      osc1.frequency.setValueAtTime(130.81, now); // C3
+      osc2.type = 'sine';
+      osc2.frequency.setValueAtTime(196.00, now); // G3
+      osc3 = this.ctx.createOscillator();
+      osc3.type = 'triangle';
+      osc3.frequency.setValueAtTime(261.63, now); // C4
+      osc3.connect(gain);
+      osc3.start(now);
+    } else if (type === 'raid') {
+      osc1.type = 'sawtooth';
+      osc1.frequency.setValueAtTime(65.41, now); // C2
+      osc2.type = 'square';
+      osc2.frequency.setValueAtTime(98.00, now); // G2
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(200, now);
+      // slowly modulate filter
+      filter.frequency.linearRampToValueAtTime(400, now + 4);
+      filter.frequency.linearRampToValueAtTime(200, now + 8);
+      osc1.connect(filter);
+      osc2.connect(filter);
+      filter.connect(gain);
+    }
+
+    if (type !== 'raid') {
+      osc1.connect(gain);
+      osc2.connect(gain);
+    }
+    
+    osc1.start(now);
+    osc2.start(now);
+
+    this._ambientBed = { type, osc1, osc2, osc3, gain };
   }
 }
 

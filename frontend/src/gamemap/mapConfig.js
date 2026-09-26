@@ -77,6 +77,9 @@ export const CHASE_CAM = {
   lookAtHeight: 0.55,
   shoulder: 0.38,
   fov: 58,
+  /** Higher = snappier camera; lower = silkier follow. */
+  followHz: 7.2,
+  lookHz: 9.5,
   /** Positive = looking up. */
   lookPitch: 0.0,
   /** Mouse-down limit (camera climbs, looks at the ground). */
@@ -88,8 +91,8 @@ export const CHASE_CAM = {
   maxDist: 7.5,
 };
 
-/** Seconds to glide from one tile center to the next (WASD). 25% faster than 0.34. */
-export const WALK_TILE_SECONDS = 0.272;
+/** Seconds to glide from one tile center to the next (WASD). Slightly quicker + softer settle in GameMap. */
+export const WALK_TILE_SECONDS = 0.248;
 
 export function cameraDistance() {
   // Flat board ≠ bounding sphere: use the larger half-extent so 48×40 fills the view.

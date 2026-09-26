@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import DailyTasksPanel from '../components/hud/DailyTasksPanel.jsx';
+import { Camera, X } from 'lucide-react';
 import { Plus, Minus, Eye, Map } from 'lucide-react';
 import TopResourceBar from '../components/hud/TopResourceBar.jsx';
 import NavigationTabs from '../components/hud/NavigationTabs.jsx';
@@ -267,6 +269,16 @@ export default function BaseBuilderView() {
     };
   };
 
+  const [showcase, setShowcase] = useState(false);
+
+  useEffect(() => {
+    soundEngine.playAmbient('base');
+  }, []);
+
+  useEffect(() => {
+    sceneApi.current?.setShowcase?.(showcase);
+  }, [showcase]);
+
   // Walk-brush: paints/erases the footprint whenever you step, flip ON, change
   // size/color, or switch to eraser. Stops itself on ink/quota so toasts don't spam.
   const brushFnRef = useRef({ paintTiles, eraseTiles, setBrush });
@@ -279,6 +291,9 @@ export default function BaseBuilderView() {
       return;
     }
     const res = brushFnRef.current.paintTiles(tiles);
+    if (res.batch && res.batch.length > 0) {
+      sceneApi.current?.spawnPaintSplash?.(res.batch, GAME_COLORS[selectedColor] || '#FFFFFF');
+    }
     if (res.stop) {
       brushFnRef.current.setBrush((b) => ({ ...b, on: false }));
       showToast('Brush off', 'error');
@@ -629,6 +644,10 @@ export default function BaseBuilderView() {
         e.preventDefault();
         setCameraMode((m) => (m === 'chase' ? 'iso' : 'chase'));
       }
+      if ((e.key === 'x' || e.key === 'X') && !e.repeat) {
+        e.preventDefault();
+        setShowcase((s) => !s);
+      }
       if (e.key === 'Escape') {
         e.preventDefault();
         const rk = rebuildKeysRef.current;
@@ -667,16 +686,26 @@ export default function BaseBuilderView() {
     window.addEventListener('keydown', down);
     window.addEventListener('keyup', up);
     const unguard = bindKeyReleaseGuards(keys);
+    
+    const onReact = (e) => {
+      sceneApi.current?.showReaction?.(e.detail.kind);
+    };
+    window.addEventListener('visit-reaction', onReact);
+
     return () => {
       window.removeEventListener('keydown', down);
       window.removeEventListener('keyup', up);
+      window.removeEventListener('visit-reaction', onReact);
       unguard();
     };
   }, []);
 
-  const handleTileClick = (data) => {
+  const handleTileClick = async (data) => {
     setSelectedTile(data);
-    handlePlaceAt(data.column, data.row, { occupant: walkerRef.current });
+    const res = await handlePlaceAt(data.column, data.row, { occupant: walkerRef.current });
+    if (res && res.batch && res.batch.length > 0) {
+      sceneApi.current?.spawnPaintSplash?.(res.batch, GAME_COLORS[selectedColor] || '#FFFFFF');
+    }
   };
 
   const handleTileHover = (data) => {
@@ -769,30 +798,32 @@ export default function BaseBuilderView() {
         pickupAnim={pickupAnim}
       />
 
-      <HudHeader
-        left={
-          <HudBanner
-            title="Base"
-            subtitle={
-              movingBuilding
-                ? 'Drop on a tile'
-                : guideActive
-                  ? `${repairedCount}/6`
-                  : brush.on
-                    ? `Brush ${brush.size}×${brush.size}`
-                    : isPov
-                      ? 'POV'
-                      : null
+      {!showcase && (
+        <>
+          <HudHeader
+            left={
+              <HudBanner
+                title="Base"
+                subtitle={
+                  movingBuilding
+                    ? 'Drop on a tile'
+                    : guideActive
+                      ? `${repairedCount}/6`
+                      : brush.on
+                        ? `Brush ${brush.size}×${brush.size}`
+                        : isPov
+                          ? 'POV'
+                          : null
+                }
+              />
+            }
+            right={
+              <>
+                <NavigationTabs />
+                <TopResourceBar />
+              </>
             }
           />
-        }
-        right={
-          <>
-            <NavigationTabs />
-            <TopResourceBar />
-          </>
-        }
-      />
 
       <BuildQuestHud
         guideStep={guideStep}
@@ -830,6 +861,8 @@ export default function BaseBuilderView() {
       />
       {guideStep !== GUIDE_STEPS.WELCOME && <ActionPrompt lines={actionLines} />}
 
+      <DailyTasksPanel hidden={guideStep !== GUIDE_STEPS.DONE || isVisitGuest} />
+
       <aside className="absolute right-4 top-[4.75rem] z-40 hidden md:flex flex-col items-end gap-2">
         <BaseStatusPanel />
         <div className="flex flex-col gap-1.5 pointer-events-auto">
@@ -841,6 +874,15 @@ export default function BaseBuilderView() {
             title={isPov ? 'Map (V)' : 'POV (V)'}
           >
             {isPov ? <Map size={15} /> : <Eye size={15} />}
+          </ClayButton>
+          <ClayButton
+            variant="ghost"
+            onClick={() => setShowcase(true)}
+            className="w-9 h-9 rounded-xl flex items-center justify-center"
+            aria-label="Showcase"
+            title="Showcase (X)"
+          >
+            <Camera size={15} />
           </ClayButton>
           <ClayButton
             variant="ghost"
@@ -861,14 +903,23 @@ export default function BaseBuilderView() {
         </div>
       </aside>
 
-      <StaminaBar
-        stamina={stamina.stamina}
-        sprinting={stamina.sprinting}
-        exhausted={stamina.exhausted}
-        className="absolute left-4 bottom-4 z-40"
-      />
+        <StaminaBar
+          stamina={stamina.stamina}
+          sprinting={stamina.sprinting}
+          exhausted={stamina.exhausted}
+          className="absolute left-4 bottom-4 z-40"
+        />
 
-      {!isVisitGuest && <BottomBuildDock />}
+        {!isVisitGuest && <BottomBuildDock />}
+      </>)}
+
+      {showcase && (
+        <div className="absolute top-6 left-1/2 -translate-x-1/2 z-50">
+          <ClayButton variant="ghost" onClick={() => setShowcase(false)} className="px-4 h-10 rounded-xl bg-clay-surface/50 backdrop-blur-md font-semibold text-[13px] tracking-wide text-clay-text/90 hover:text-clay-text shadow-xl border border-clay-card/30">
+            Exit Showcase (X)
+          </ClayButton>
+        </div>
+      )}
 
       {makeupOpen && <MakeupHousePanel onClose={() => setMakeupOpen(false)} />}
     </div>

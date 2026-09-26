@@ -60,7 +60,8 @@ export function buildingCoversTile(b, column, row) {
 
 /** True if a prop should avoid this cell when scattering decor. */
 export function isDecorBannedTile(column, row, buildings = []) {
-  if (column <= 1 || row <= 1 || column >= MAP_COLS - 2 || row >= MAP_ROWS - 2) return true;
+  // Leave a 2-tile walk corridor inside the brick walls (cols/rows 1–2).
+  if (column <= 2 || row <= 2 || column >= MAP_COLS - 3 || row >= MAP_ROWS - 3) return true;
   if (inSearchlightPlaza(column, row, 1, 1)) return true;
   if (isGateTile(column, row)) return true;
   if (isGarageCell(column, row)) return true;
@@ -111,14 +112,8 @@ function markPerimeterWalls(solids, { gateLocked = false } = {}) {
     solids.add(tileKey(0, r));
     solids.add(tileKey(MAP_COLS - 1, r));
   }
-  [
-    [1, 1],
-    [1, MAP_ROWS - 2],
-    [MAP_COLS - 2, 1],
-    [MAP_COLS - 2, MAP_ROWS - 2],
-  ].forEach(([c, r]) => {
-    if (!isGateTile(c, r)) solids.add(tileKey(c, r));
-  });
+  // Keep the inner ring (col/row 1 and MAP-2) walkable — needed for wall-break
+  // stand spots and pacing along the fortress walls.
 }
 
 function markGaragePad(solids) {

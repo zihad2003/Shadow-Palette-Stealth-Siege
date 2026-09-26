@@ -531,15 +531,15 @@ export function tickCharacter(figure, elapsed, motion = null) {
     (figure.userData.gait = { phase: 0, amp: 0, lean: 0, run: 0, bob: 0 });
 
   const targetAmp = Math.min(1.25, speed);
-  gait.amp += (targetAmp - gait.amp) * (1 - Math.exp(-9 * dt));
+  gait.amp += (targetAmp - gait.amp) * (1 - Math.exp(-7.2 * dt));
   const runTarget = speed > RUN_GAIT_SPEED ? 1 : 0;
-  gait.run += (runTarget - gait.run) * (1 - Math.exp(-6 * dt));
+  gait.run += (runTarget - gait.run) * (1 - Math.exp(-5 * dt));
 
   const cadence = (5.6 + speed * 3.4) * body.hz;
   if (speed > 0.04) gait.phase += dt * cadence;
   else if (gait.amp > 0.015) {
     const rest = Math.round(gait.phase / Math.PI) * Math.PI;
-    gait.phase += (rest - gait.phase) * (1 - Math.exp(-8 * dt));
+    gait.phase += (rest - gait.phase) * (1 - Math.exp(-6.2 * dt));
   }
 
   const s = Math.sin(gait.phase);
@@ -549,8 +549,8 @@ export function tickCharacter(figure, elapsed, motion = null) {
   const idle = 1 - Math.min(1, gait.amp);
   const breathe = Math.sin(elapsed * 1.55);
   const stride = body.stride * gait.amp;
-  const bobTarget = Math.abs(s) * (0.042 + gait.run * 0.035) * gait.amp;
-  gait.bob += (bobTarget - gait.bob) * (1 - Math.exp(-12 * dt));
+  const bobTarget = Math.abs(s) * (0.038 + gait.run * 0.03) * gait.amp;
+  gait.bob += (bobTarget - gait.bob) * (1 - Math.exp(-10 * dt));
 
   const seated = !!motion?.seated;
   const picking = !!motion?.picking && !seated;
@@ -613,7 +613,7 @@ export function tickCharacter(figure, elapsed, motion = null) {
   }
 
   const targetLean = seated ? 0.04 : picking ? 0.14 : speed > 0.04 ? (0.04 + gait.run * 0.14) * body.lean : 0;
-  gait.lean += (targetLean - gait.lean) * (1 - Math.exp(-5.5 * dt));
+  gait.lean += (targetLean - gait.lean) * (1 - Math.exp(-4.2 * dt));
   rig.root.rotation.x = gait.lean;
   rig.root.rotation.y = 0;
   rig.root.rotation.z = seated || picking ? 0 : -s * 0.028 * stride + breathe * 0.01 * idle;
