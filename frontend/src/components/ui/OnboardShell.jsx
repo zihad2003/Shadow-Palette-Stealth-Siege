@@ -26,7 +26,7 @@ export default function OnboardShell({ step = 0, children, footer = null }) {
       </div>
 
       {footer ? (
-        <div className="relative z-20 shrink-0 px-6 md:px-10 py-4 flex justify-center pointer-events-auto">
+        <div className="relative z-20 shrink-0 px-6 md:px-10 pt-4 pb-16 md:pb-24 flex justify-center pointer-events-auto">
           {footer}
         </div>
       ) : null}
