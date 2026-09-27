@@ -29,10 +29,12 @@ public class PlayerService {
     private final PlotRepository plotRepository;
     private final BuildingRepository buildingRepository;
 
+    public static final long MIN_PLAYER_ID = 20161L;
+
     @Transactional
     public SessionStartResponse startSession(SessionStartRequest request) {
-        // If the client sends a userId, check if it exists in the DB.
-        if (request != null && request.getUserId() != null && request.getUserId() > 0) {
+        // If the client sends a valid userId (>= 20161), check if it exists in the DB.
+        if (request != null && request.getUserId() != null && request.getUserId() >= MIN_PLAYER_ID) {
             return userRepository.findById(request.getUserId())
                     .map(existing -> SessionStartResponse.builder()
                             .success(true)
@@ -41,14 +43,14 @@ public class PlayerService {
                             .newUser(false)
                             .build())
                     // Client sent an ID that doesn't exist — generate a new one.
-                    .orElseGet(() -> createNewUser());
+                    .orElseGet(this::createNewUser);
         }
-        // No userId supplied (first-time visitor) — server generates a new unique ID.
+        // No valid userId supplied (first-time visitor or legacy ID < 20161) — server generates a new unique ID >= 20161.
         return createNewUser();
     }
 
     private SessionStartResponse createNewUser() {
-        long nextId = userRepository.findMaxId() + 1;
+        long nextId = Math.max(MIN_PLAYER_ID, userRepository.findMaxId() + 1);
         User user = User.builder()
                 .id(nextId)
                 .username("Player" + nextId)
@@ -70,15 +72,19 @@ public class PlayerService {
 
     @Transactional
     public PlayerSetupResponse setupPlayer(PlayerSetupRequest request) {
-        User user = userRepository.findById(request.getUserId())
+        Long effectiveUserId = (request.getUserId() != null && request.getUserId() >= MIN_PLAYER_ID)
+                ? request.getUserId()
+                : Math.max(MIN_PLAYER_ID, userRepository.findMaxId() + 1);
+
+        User user = userRepository.findById(effectiveUserId)
                 .orElse(null);
 
         boolean camoAlreadySet = user != null && user.getCamoColor() != null && !user.getCamoColor().trim().isEmpty();
 
         if (user == null) {
             user = User.builder()
-                    .id(request.getUserId())
-                    .username("Player" + request.getUserId())
+                    .id(effectiveUserId)
+                    .username("Player" + effectiveUserId)
                     .coins(500)
                     .inkEnergy(100)
                     .chips(200)

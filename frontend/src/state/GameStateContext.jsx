@@ -180,16 +180,23 @@ export function GameStateProvider({ children }) {
     try {
       // ?userId= query param override for local dev/testing
       const q = Number(new URLSearchParams(window.location.search).get('userId'));
-      if (Number.isFinite(q) && q > 0) return q;
+      if (Number.isFinite(q) && q >= 20161) return q;
       const tab = Number(window.sessionStorage.getItem('sp_userId'));
-      if (Number.isFinite(tab) && tab > 0) return tab;
+      if (Number.isFinite(tab) && tab >= 20161) return tab;
       const stored = Number(window.localStorage.getItem('sp_userId'));
-      if (Number.isFinite(stored) && stored > 0) return stored;
+      if (Number.isFinite(stored) && stored >= 20161) return stored;
     } catch {
       /* ignore */
     }
-    // null = no known identity yet — will be resolved by /api/session/start
-    return null;
+    // Clean up any stale legacy id (< 20161) from local/session storage
+    try {
+      window.sessionStorage.removeItem('sp_userId');
+      window.localStorage.removeItem('sp_userId');
+    } catch {
+      /* ignore */
+    }
+    // Default fallback starting at 20161 until backend validates/generates
+    return 20161;
   });
 
   // On first mount, resolve the player identity via the server.

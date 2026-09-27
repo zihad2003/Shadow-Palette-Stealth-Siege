@@ -6,10 +6,26 @@ async function request(url, options = {}) {
   const fullUrl = url.startsWith('http') ? url : `${API_BASE_URL}${url}`;
   const headers = { 'Content-Type': 'application/json', ...options.headers };
   const res = await fetch(fullUrl, { ...options, headers });
-  const data = await res.json().catch(() => ({ success: false, error: 'INVALID_JSON_RESPONSE' }));
 
-  if (!res.ok) {
-    const errorMsg = data.error || `HTTP ${res.status}`;
+  const contentType = res.headers.get('content-type') || '';
+  let data = null;
+  if (contentType.includes('application/json')) {
+    data = await res.json().catch(() => null);
+  }
+
+  if (!data) {
+    const isVercel = typeof window !== 'undefined' && window.location.hostname.includes('vercel.app');
+    const errorMsg = !API_BASE_URL && isVercel
+      ? 'Backend URL not configured on Vercel (set VITE_API_BASE_URL)'
+      : 'Backend offline or returned non-JSON';
+    const err = new Error(errorMsg);
+    err.status = res.status;
+    err.data = { success: false, error: errorMsg };
+    throw err;
+  }
+
+  if (!res.ok || (data && data.success === false && data.error)) {
+    const errorMsg = data.error || data.message || `HTTP ${res.status}`;
     const err = new Error(errorMsg);
     err.status = res.status;
     err.data = data;

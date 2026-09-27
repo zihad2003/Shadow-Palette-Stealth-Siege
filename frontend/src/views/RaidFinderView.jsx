@@ -87,7 +87,7 @@ export default function RaidFinderView() {
   };
 
   const players = (onlinePlayers || []).filter((p) => Number(p.userId) !== Number(userId));
-  const otherHint = Number(userId) === 12 ? 34 : 12;
+  const otherHint = Number(userId) === 20161 ? 20162 : 20161;
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -103,7 +103,7 @@ export default function RaidFinderView() {
   const sendManualInvite = async () => {
     const gid = Number(manualId);
     if (!Number.isFinite(gid) || gid <= 0) {
-      showToast('Enter friend user id (e.g. 34)', 'error');
+      showToast(`Enter friend user id (e.g. ${otherHint})`, 'error');
       return;
     }
     const ok = await inviteDuoPlayer(gid);
