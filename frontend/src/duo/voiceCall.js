@@ -59,27 +59,40 @@ export function createDuoVoiceCall({ partyId, userId, isHost, onStatus, onRemote
     }
   }
 
+  let activeSource = null;
+  let activeGain = null;
+
   function playStream(stream) {
     if (disposed || !stream) return;
 
-    // 1. Standalone persistent HTML5 Audio element
+    // 1. Dedicated DOM-attached HTML5 Audio element for Windows/macOS Chrome audio routing
     try {
       if (!remoteAudioElement) {
-        remoteAudioElement = new Audio();
-        remoteAudioElement.autoplay = true;
-        remoteAudioElement.playsInline = true;
+        let el = document.getElementById('webrtc-duo-audio-el');
+        if (!el) {
+          el = document.createElement('audio');
+          el.id = 'webrtc-duo-audio-el';
+          el.autoplay = true;
+          el.playsInline = true;
+          el.style.display = 'none';
+          document.body.appendChild(el);
+        }
+        remoteAudioElement = el;
       }
       remoteAudioElement.srcObject = stream;
       remoteAudioElement.volume = deafened ? 0 : 1.0;
       remoteAudioElement.muted = deafened;
-      remoteAudioElement.play().catch((err) => {
-        console.warn('[Voice] Autoplay blocked, waiting for user interaction:', err);
-      });
-    } catch {
-      /* fallback */
+      const p = remoteAudioElement.play();
+      if (p !== undefined) {
+        p.catch((err) => {
+          console.warn('[Voice] Audio autoplay waiting for gesture:', err);
+        });
+      }
+    } catch (e) {
+      console.warn('[Voice] DOM audio element:', e);
     }
 
-    // 2. Web Audio API pipeline for crystal-clear output
+    // 2. Web Audio API pipeline with persistent references (prevents V8 garbage collection drop)
     try {
       if (!audioCtx || audioCtx.state === 'closed') {
         const AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -91,11 +104,14 @@ export function createDuoVoiceCall({ partyId, userId, isHost, onStatus, onRemote
         if (audioCtx.state === 'suspended') {
           audioCtx.resume().catch(() => {});
         }
-        const source = audioCtx.createMediaStreamSource(stream);
-        const gainNode = audioCtx.createGain();
-        gainNode.gain.value = deafened ? 0 : 1.0;
-        source.connect(gainNode);
-        gainNode.connect(audioCtx.destination);
+        if (activeSource) {
+          try { activeSource.disconnect(); } catch { /* ignore */ }
+        }
+        activeSource = audioCtx.createMediaStreamSource(stream);
+        activeGain = audioCtx.createGain();
+        activeGain.gain.value = deafened ? 0 : 1.0;
+        activeSource.connect(activeGain);
+        activeGain.connect(audioCtx.destination);
       }
     } catch (e) {
       console.warn('[Voice] WebAudio pipeline:', e);
@@ -148,7 +164,9 @@ export function createDuoVoiceCall({ partyId, userId, isHost, onStatus, onRemote
         await pc.setRemoteDescription(desc);
         await flushIce();
 
-        const answer = await pc.createAnswer();
+        const answer = await pc.createAnswer({
+          offerToReceiveAudio: true,
+        });
         await pc.setLocalDescription(answer);
         await publish('answer', { type: answer.type, sdp: answer.sdp });
         setStatus('connected');

@@ -24,6 +24,8 @@ export default function DuoVoiceBar() {
   const partnerName =
     isHost ? duoParty?.guestName || `Player ${duoParty?.guestId}` : duoParty?.hostName || `Player ${duoParty?.hostId}`;
 
+  const audioRef = useRef(null);
+
   useEffect(() => {
     if (!partyId || !userId) return undefined;
     let cancelled = false;
@@ -38,7 +40,14 @@ export default function DuoVoiceBar() {
           userId,
           isHost,
           onStatus: (s) => !cancelled && setVoiceStatus(s),
-          onRemoteStream: () => {},
+          onRemoteStream: (stream) => {
+            if (audioRef.current) {
+              audioRef.current.srcObject = stream;
+              audioRef.current.volume = 1.0;
+              audioRef.current.muted = false;
+              audioRef.current.play().catch(() => {});
+            }
+          },
         });
         callRef.current = call;
         await call.start();
@@ -50,22 +59,23 @@ export default function DuoVoiceBar() {
       }
     })();
 
-    // Browser audio unlock on first user gesture
+    // Continuous audio unlocker on any user interaction (essential for Chrome on Laptop/Desktop)
     const unlockAudio = () => {
-      if (typeof window !== 'undefined' && (window.AudioContext || window.webkitAudioContext)) {
-        try {
-          const ctx = new (window.AudioContext || window.webkitAudioContext)();
-          if (ctx.state === 'suspended') ctx.resume();
-        } catch {
-          /* ignore */
-        }
+      if (audioRef.current && audioRef.current.srcObject && audioRef.current.paused) {
+        audioRef.current.play().catch(() => {});
+      }
+      const extEl = document.getElementById('webrtc-duo-audio-el');
+      if (extEl && extEl.srcObject && extEl.paused) {
+        extEl.play().catch(() => {});
       }
     };
-    window.addEventListener('click', unlockAudio, { passive: true, once: true });
-    window.addEventListener('touchstart', unlockAudio, { passive: true, once: true });
+    window.addEventListener('pointerdown', unlockAudio, { passive: true });
+    window.addEventListener('keydown', unlockAudio, { passive: true });
 
     return () => {
       cancelled = true;
+      window.removeEventListener('pointerdown', unlockAudio);
+      window.removeEventListener('keydown', unlockAudio);
       call?.stop();
       callRef.current = null;
       setVoiceStatus('idle');
@@ -142,6 +152,9 @@ export default function DuoVoiceBar() {
           <PhoneOff size={11} strokeWidth={2} />
         </button>
       </div>
+
+      {/* Persistent DOM-mounted audio element for desktop Chrome audio output */}
+      <audio ref={audioRef} autoPlay playsInline style={{ display: 'none' }} />
     </div>
   );
 }
