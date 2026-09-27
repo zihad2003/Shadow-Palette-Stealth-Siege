@@ -22,6 +22,14 @@ export async function fetchHealth() {
   return request('/api/health');
 }
 
+/** Resolve or create a player identity server-side. */
+export async function startSession(userId) {
+  return request('/api/session/start', {
+    method: 'POST',
+    body: JSON.stringify(userId != null ? { userId } : {}),
+  });
+}
+
 export async function fetchMap() {
   return request('/api/map');
 }

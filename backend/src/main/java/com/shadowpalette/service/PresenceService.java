@@ -18,6 +18,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+/**
+ * Tracks online presence and visit sessions. Both the {@code presence} and
+ * {@code sessions} maps are <b>in-memory only</b> — they do NOT survive a Render
+ * free-tier restart or redeployment. A restart wipes all online-player data and
+ * active visit sessions. The frontend is expected to handle a suddenly-vanished
+ * session gracefully (returns {@code status="ENDED"}).
+ *
+ * TODO: For production durability, consider moving presence/visit state to the
+ *       database with a lightweight cleanup job for stale entries.
+ */
 @Service
 @RequiredArgsConstructor
 public class PresenceService {

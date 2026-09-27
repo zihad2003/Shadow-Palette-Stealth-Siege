@@ -177,22 +177,48 @@ export function GameStateProvider({ children }) {
   const savedWorld = useRef(forceFullHome ? createMaxedHome() : readWorldSave()).current;
   const [userId, setUserId] = useState(() => {
     try {
+      // ?userId= query param override for local dev/testing
       const q = Number(new URLSearchParams(window.location.search).get('userId'));
       if (Number.isFinite(q) && q > 0) return q;
       const tab = Number(window.sessionStorage.getItem('sp_userId'));
       if (Number.isFinite(tab) && tab > 0) return tab;
-      const other = Number(window.localStorage.getItem('sp_userId'));
-      if (Number.isFinite(other) && other > 0) {
-        if (other === 12) return 34;
-        if (other === 34) return 12;
-        return other;
-      }
+      const stored = Number(window.localStorage.getItem('sp_userId'));
+      if (Number.isFinite(stored) && stored > 0) return stored;
     } catch {
       /* ignore */
     }
-    return 12;
+    // null = no known identity yet — will be resolved by /api/session/start
+    return null;
   });
+
+  // On first mount, resolve the player identity via the server.
+  // If we already have a stored userId, the server validates it; if not,
+  // the server generates a fresh one. This replaces the old hardcoded fallback.
   useEffect(() => {
+    let cancelled = false;
+    const resolve = async () => {
+      try {
+        const { startSession } = await import('../api.js');
+        const res = await startSession(userId);
+        if (!cancelled && res?.success && res.userId) {
+          setUserId(res.userId);
+          try {
+            window.sessionStorage.setItem('sp_userId', String(res.userId));
+            window.localStorage.setItem('sp_userId', String(res.userId));
+          } catch { /* private mode */ }
+        }
+      } catch {
+        // Backend offline — keep whatever local userId we have (may be null).
+        // When backend comes online, next page load will resolve it.
+      }
+    };
+    resolve();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (userId == null) return;
     try {
       window.sessionStorage.setItem('sp_userId', String(userId));
       window.localStorage.setItem('sp_userId', String(userId));

@@ -203,8 +203,8 @@ class RaidValidatorTest {
     @DisplayName("Robot chase speed stays above walk")
     void testRobotChaseAboveWalk() {
         assertTrue(StealthConstants.ROBOT_CHASE_SPEED > StealthConstants.PLAYER_WALK_SPEED);
-        assertEquals(4.5, StealthConstants.ROBOT_CHASE_SPEED, 0.001);
-        assertEquals(4.5, StealthConstants.ROBOT_HIT_SPEED, 0.001);
+        assertEquals(3.95, StealthConstants.ROBOT_CHASE_SPEED, 0.001);
+        assertEquals(4.15, StealthConstants.ROBOT_HIT_SPEED, 0.001);
     }
 
     @Test
@@ -273,5 +273,39 @@ class RaidValidatorTest {
                 earlyPy
         );
         assertTrue(insideLate.inBeam());
+    }
+
+    @Test
+    @DisplayName("Null sessionLog → EMPTY_SESSION_LOG rejection")
+    void testNullSessionLogRejected() {
+        RaidCompleteRequest request = RaidCompleteRequest.builder()
+                .attackerId(12L)
+                .defenderId(34L)
+                .durationSeconds(40)
+                .sessionLog(null)
+                .build();
+
+        com.shadowpalette.exception.ApiException ex = assertThrows(
+                com.shadowpalette.exception.ApiException.class,
+                () -> raidValidator.validateSession(request, "BLUE", 500, 100)
+        );
+        assertEquals("EMPTY_SESSION_LOG", ex.getErrorCode());
+    }
+
+    @Test
+    @DisplayName("Empty sessionLog → EMPTY_SESSION_LOG rejection")
+    void testEmptySessionLogRejected() {
+        RaidCompleteRequest request = RaidCompleteRequest.builder()
+                .attackerId(12L)
+                .defenderId(34L)
+                .durationSeconds(40)
+                .sessionLog(new ArrayList<>())
+                .build();
+
+        com.shadowpalette.exception.ApiException ex = assertThrows(
+                com.shadowpalette.exception.ApiException.class,
+                () -> raidValidator.validateSession(request, "BLUE", 500, 100)
+        );
+        assertEquals("EMPTY_SESSION_LOG", ex.getErrorCode());
     }
 }

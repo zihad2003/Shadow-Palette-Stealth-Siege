@@ -4,6 +4,8 @@ import com.shadowpalette.dto.PlayerPrestigeRequest;
 import com.shadowpalette.dto.PlayerPrestigeResponse;
 import com.shadowpalette.dto.PlayerSetupRequest;
 import com.shadowpalette.dto.PlayerSetupResponse;
+import com.shadowpalette.dto.SessionStartRequest;
+import com.shadowpalette.dto.SessionStartResponse;
 import com.shadowpalette.entity.Building;
 import com.shadowpalette.entity.Plot;
 import com.shadowpalette.entity.User;
@@ -16,6 +18,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+
 import java.util.List;
 
 @Service
@@ -25,6 +28,45 @@ public class PlayerService {
     private final UserRepository userRepository;
     private final PlotRepository plotRepository;
     private final BuildingRepository buildingRepository;
+
+    @Transactional
+    public SessionStartResponse startSession(SessionStartRequest request) {
+        // If the client sends a userId, check if it exists in the DB.
+        if (request != null && request.getUserId() != null && request.getUserId() > 0) {
+            return userRepository.findById(request.getUserId())
+                    .map(existing -> SessionStartResponse.builder()
+                            .success(true)
+                            .userId(existing.getId())
+                            .username(existing.getUsername())
+                            .newUser(false)
+                            .build())
+                    // Client sent an ID that doesn't exist — generate a new one.
+                    .orElseGet(() -> createNewUser());
+        }
+        // No userId supplied (first-time visitor) — server generates a new unique ID.
+        return createNewUser();
+    }
+
+    private SessionStartResponse createNewUser() {
+        long nextId = userRepository.findMaxId() + 1;
+        User user = User.builder()
+                .id(nextId)
+                .username("Player" + nextId)
+                .coins(500)
+                .inkEnergy(100)
+                .chips(200)
+                .characterModel(1)
+                .camoColor("BLUE")
+                .prestigeLevel(0)
+                .build();
+        user = userRepository.save(user);
+        return SessionStartResponse.builder()
+                .success(true)
+                .userId(user.getId())
+                .username(user.getUsername())
+                .newUser(true)
+                .build();
+    }
 
     @Transactional
     public PlayerSetupResponse setupPlayer(PlayerSetupRequest request) {
