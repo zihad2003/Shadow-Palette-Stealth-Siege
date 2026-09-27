@@ -1,20 +1,21 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Mic, MicOff, PhoneOff, Users } from 'lucide-react';
+import { Mic, MicOff, Volume2, VolumeX, PhoneOff } from 'lucide-react';
 import { useGameState } from '../state/GameStateContext.jsx';
-import ClayPanel from '../components/ui/ClayPanel.jsx';
-import ClayButton from '../components/ui/ClayButton.jsx';
 import { createDuoVoiceCall } from './voiceCall.js';
 import { ensureStompConnected, stompSubscribe, stompUnsubscribe } from '../live/stompClient.js';
+import ClayPanel from '../components/ui/ClayPanel.jsx';
+import ClayButton from '../components/ui/ClayButton.jsx';
 
 /**
- * Voice bar + party strip while in a duo lobby or raid.
+ * Ultra-minimal PUBG / Battle Royale style in-game voice widget.
+ * Floating compact controls with one-tap Mic & Speaker toggles.
  */
 export default function DuoVoiceBar() {
   const { duoParty, userId, leaveDuoParty, showToast } = useGameState();
   const [voiceStatus, setVoiceStatus] = useState('idle');
   const [muted, setMuted] = useState(false);
+  const [deafened, setDeafened] = useState(false);
   const callRef = useRef(null);
-  const audioRef = useRef(null);
   const showToastRef = useRef(showToast);
   showToastRef.current = showToast;
 
@@ -37,39 +38,34 @@ export default function DuoVoiceBar() {
           userId,
           isHost,
           onStatus: (s) => !cancelled && setVoiceStatus(s),
-          onRemoteStream: (stream) => {
-            if (audioRef.current) {
-              audioRef.current.srcObject = stream;
-              audioRef.current.volume = 1.0;
-              audioRef.current.muted = false;
-              audioRef.current.play().catch((err) => {
-                console.warn('Audio play autoplay blocked:', err);
-              });
-            }
-          },
+          onRemoteStream: () => {},
         });
         callRef.current = call;
         await call.start();
-      } catch {
+      } catch (err) {
         if (!cancelled) {
           setVoiceStatus('mic-denied');
-          showToastRef.current?.('Mic needed for duo call', 'error');
+          showToastRef.current?.('Please allow microphone in browser for voice chat', 'error');
         }
       }
     })();
 
+    // Browser audio unlock on first user gesture
     const unlockAudio = () => {
-      if (audioRef.current && audioRef.current.srcObject && audioRef.current.paused) {
-        audioRef.current.play().catch(() => {});
+      if (typeof window !== 'undefined' && (window.AudioContext || window.webkitAudioContext)) {
+        try {
+          const ctx = new (window.AudioContext || window.webkitAudioContext)();
+          if (ctx.state === 'suspended') ctx.resume();
+        } catch {
+          /* ignore */
+        }
       }
     };
-    window.addEventListener('click', unlockAudio, { passive: true });
-    window.addEventListener('keydown', unlockAudio, { passive: true });
+    window.addEventListener('click', unlockAudio, { passive: true, once: true });
+    window.addEventListener('touchstart', unlockAudio, { passive: true, once: true });
 
     return () => {
       cancelled = true;
-      window.removeEventListener('click', unlockAudio);
-      window.removeEventListener('keydown', unlockAudio);
       call?.stop();
       callRef.current = null;
       setVoiceStatus('idle');
@@ -82,53 +78,70 @@ export default function DuoVoiceBar() {
     const next = !muted;
     setMuted(next);
     callRef.current?.setMuted(next);
+    showToast(next ? 'Mic MUTED' : 'Mic ON', next ? 'error' : 'success');
   };
 
-  const statusLabel = (() => {
-    const s = String(voiceStatus || '');
-    if (!s || s === 'idle') return '…';
-    if (s === 'connected' || s === 'completed') return 'Connected';
-    if (s === 'calling' || s === 'answering' || s === 'connecting' || s === 'waiting-offer') return 'Connecting…';
-    if (s === 'requesting-mic') return 'Mic…';
-    if (s === 'mic-denied') return 'Mic blocked';
-    if (s.startsWith('signal-error')) return 'Reconnecting…';
-    if (s === 'failed' || s === 'disconnected') return 'Reconnecting…';
-    if (s === 'ended') return 'Ended';
-    return s;
-  })();
-  const linked = voiceStatus === 'connected' || voiceStatus === 'completed';
+  const toggleDeafen = () => {
+    const next = !deafened;
+    setDeafened(next);
+    callRef.current?.setDeafened(next);
+    showToast(next ? 'Teammate DEAFENED' : 'Voice UNMUTED', next ? 'error' : 'success');
+  };
+
+  const isConnected = voiceStatus === 'connected';
 
   return (
-    <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-[165] pointer-events-auto">
-      <audio ref={audioRef} autoPlay playsInline />
-      <ClayPanel depth="deep" className="h-12 pl-3.5 pr-2 rounded-full flex items-center gap-2.5 shadow-lg border border-white/10">
-        <div
-          className={`h-2 w-2 rounded-full shrink-0 ${linked ? 'bg-emerald-400' : 'bg-clay-accent animate-pulse'}`}
-        />
-        <Users size={14} className="text-clay-accent shrink-0" />
-        <div className="min-w-0 leading-tight">
-          <p className="text-[12px] font-semibold text-clay-text truncate max-w-[9rem]">Duo · {partnerName}</p>
-          <p className="text-[10px] text-clay-muted">{statusLabel}</p>
+    <div className="fixed top-3 left-1/2 -translate-x-1/2 sm:left-auto sm:right-28 sm:translate-x-0 z-[180] pointer-events-auto select-none">
+      <div className="h-10 px-2.5 rounded-full bg-black/75 backdrop-blur-md border border-white/15 shadow-2xl flex items-center gap-2">
+        {/* Connection status indicator */}
+        <div className="flex items-center gap-1.5 pl-1 pr-1.5 border-r border-white/10">
+          <span
+            className={`h-2.5 w-2.5 rounded-full ${
+              isConnected
+                ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)] animate-pulse'
+                : 'bg-amber-400 animate-ping'
+            }`}
+          />
+          <span className="text-[11px] font-mono font-medium text-white/90 max-w-[80px] truncate">
+            {partnerName}
+          </span>
         </div>
-        <div className="flex items-center gap-1.5 ml-1">
-          <ClayButton
-            variant={muted ? 'ghost' : 'primary'}
-            className="!h-9 !w-9 !min-w-9 !p-0 !rounded-full !gap-0 shrink-0"
-            onClick={toggleMute}
-            title={muted ? 'Unmute' : 'Mute'}
-          >
-            {muted ? <MicOff size={15} strokeWidth={2.25} /> : <Mic size={15} strokeWidth={2.25} />}
-          </ClayButton>
-          <ClayButton
-            variant="danger"
-            className="!h-9 !w-9 !min-w-9 !p-0 !rounded-full !gap-0 shrink-0"
-            title="Leave duo"
-            onClick={() => leaveDuoParty?.()}
-          >
-            <PhoneOff size={15} strokeWidth={2.25} />
-          </ClayButton>
-        </div>
-      </ClayPanel>
+
+        {/* PUBG Minimal Mic Button */}
+        <button
+          onClick={toggleMute}
+          title={muted ? 'Mic Off (Click to speak)' : 'Mic On (Click to mute)'}
+          className={`h-7 w-7 rounded-full flex items-center justify-center transition-all ${
+            muted
+              ? 'bg-red-500/80 text-white hover:bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]'
+              : 'bg-emerald-500/90 text-black hover:bg-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.5)]'
+          }`}
+        >
+          {muted ? <MicOff size={13} strokeWidth={2.5} /> : <Mic size={13} strokeWidth={2.5} />}
+        </button>
+
+        {/* PUBG Minimal Speaker / Deafen Button */}
+        <button
+          onClick={toggleDeafen}
+          title={deafened ? 'Muted (Click to listen)' : 'Listening (Click to mute teammate)'}
+          className={`h-7 w-7 rounded-full flex items-center justify-center transition-all ${
+            deafened
+              ? 'bg-red-500/80 text-white hover:bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]'
+              : 'bg-white/15 text-white/90 hover:bg-white/25 hover:text-white'
+          }`}
+        >
+          {deafened ? <VolumeX size={13} strokeWidth={2.5} /> : <Volume2 size={13} strokeWidth={2.5} />}
+        </button>
+
+        {/* Minimal Leave Button */}
+        <button
+          onClick={() => leaveDuoParty?.()}
+          title="Disconnect duo"
+          className="h-6 w-6 ml-0.5 rounded-full bg-white/5 hover:bg-red-500/30 text-white/60 hover:text-red-300 flex items-center justify-center transition-all"
+        >
+          <PhoneOff size={11} strokeWidth={2} />
+        </button>
+      </div>
     </div>
   );
 }
@@ -160,7 +173,6 @@ export function DuoInviteListener() {
             showToast?.('Duo raid invite', 'info');
           }
           if (msg.message === 'GUEST_ACCEPTED' || msg.message === 'ACCEPTED') {
-            // Host learns guest accepted — GameStateContext also polls/sets party
             setDuoInvite(null);
           }
           if (msg.message === 'DECLINED' || msg.message === 'LEFT') {
