@@ -1,5 +1,5 @@
 /**
- * Robust WebRTC voice chat with STUN/TURN traversal and Web Audio API playback.
+ * Robust WebRTC voice chat with STUN and TURN fallback (via Open Relay's public free server: 20GB/month shared pool, no account).
  * Modeled after battle-royale in-game comms (PUBG/Valorant).
  */
 import { stompPublish, stompSubscribe, stompUnsubscribe } from '../live/stompClient.js';
@@ -12,15 +12,9 @@ const ICE_SERVERS = {
     { urls: 'stun:stun3.l.google.com:19302' },
     { urls: 'stun:stun4.l.google.com:19302' },
     { urls: 'stun:global.stun.twilio.com:3478' },
-    {
-      urls: [
-        'turn:openrelay.metered.ca:80',
-        'turn:openrelay.metered.ca:443',
-        'turn:openrelay.metered.ca:443?transport=tcp',
-      ],
-      username: 'openrelay',
-      credential: 'openrelay',
-    },
+    { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
   ],
   iceCandidatePoolSize: 10,
 };
