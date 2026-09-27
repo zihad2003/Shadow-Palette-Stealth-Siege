@@ -14,17 +14,22 @@ public class WebConfig implements WebMvcConfigurer {
      * On Render, set ALLOWED_ORIGINS to your Vercel domain(s), e.g.:
      *   ALLOWED_ORIGINS=https://shadow-palette.vercel.app,https://shadow-palette-git-main.vercel.app
      */
-    @Value("${ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173,http://localhost:8080}")
+    @Value("${ALLOWED_ORIGINS:}")
     private String allowedOrigins;
 
     @Override
     public void addCorsMappings(CorsRegistry registry) {
-        String[] origins = allowedOrigins.split(",");
-        for (int i = 0; i < origins.length; i++) {
-            origins[i] = origins[i].trim();
+        String[] patterns;
+        if (allowedOrigins != null && !allowedOrigins.isBlank()) {
+            patterns = allowedOrigins.split(",");
+            for (int i = 0; i < patterns.length; i++) {
+                patterns[i] = patterns[i].trim();
+            }
+        } else {
+            patterns = new String[] { "*" };
         }
         registry.addMapping("/**")
-                .allowedOrigins(origins)
+                .allowedOriginPatterns(patterns)
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH")
                 .allowedHeaders("*")
                 .allowCredentials(true)

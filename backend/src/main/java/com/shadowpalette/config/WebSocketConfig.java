@@ -11,17 +11,22 @@ import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerCo
 @EnableWebSocketMessageBroker
 public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
-    @Value("${ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173,http://localhost:8080}")
+    @Value("${ALLOWED_ORIGINS:}")
     private String allowedOrigins;
 
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
-        String[] origins = allowedOrigins.split(",");
-        for (int i = 0; i < origins.length; i++) {
-            origins[i] = origins[i].trim();
+        String[] patterns;
+        if (allowedOrigins != null && !allowedOrigins.isBlank()) {
+            patterns = allowedOrigins.split(",");
+            for (int i = 0; i < patterns.length; i++) {
+                patterns[i] = patterns[i].trim();
+            }
+        } else {
+            patterns = new String[] { "*" };
         }
         registry.addEndpoint("/ws")
-                .setAllowedOrigins(origins)
+                .setAllowedOriginPatterns(patterns)
                 .withSockJS();
     }
 
