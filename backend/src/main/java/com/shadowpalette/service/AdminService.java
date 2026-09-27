@@ -9,8 +9,14 @@ import com.shadowpalette.dto.AdminUserDto;
 import com.shadowpalette.dto.AdminUserListResponse;
 import com.shadowpalette.dto.AdminUserWriteRequest;
 import com.shadowpalette.entity.Building;
+import com.shadowpalette.entity.CoinGenerator;
+import com.shadowpalette.entity.CraftHouse;
+import com.shadowpalette.entity.InkHouse;
+import com.shadowpalette.entity.Lighthouse;
+import com.shadowpalette.entity.PatrolRobot;
 import com.shadowpalette.entity.Plot;
 import com.shadowpalette.entity.RaidLog;
+import com.shadowpalette.entity.SleepHouse;
 import com.shadowpalette.entity.User;
 import com.shadowpalette.exception.ApiException;
 import com.shadowpalette.repository.BuildingRepository;
@@ -194,16 +200,21 @@ public class AdminService {
     @Transactional
     public AdminActionResponse seedDemoUsers() {
         List<AdminUserWriteRequest> seeds = Arrays.asList(
-                seed(12L, "ShadowNinja", 500, 100, 200, 1, "BLUE", 0),
-                seed(21L, "ForestScout", 820, 70, 140, 2, "GREEN", 1),
-                seed(34L, "PhantomGhost", 210, 40, 80, 2, "RED", 0),
-                seed(55L, "InkWarden", 1200, 100, 400, 1, "YELLOW", 2)
+                seed(12L, "ShadowNinja", 1500, 300, 500, 1, "BLUE", 1),
+                seed(34L, "PhantomGhost", 1800, 250, 600, 2, "RED", 2)
         );
         int created = 0;
         for (AdminUserWriteRequest req : seeds) {
             if (userRepository.existsById(req.getId())) continue;
             if (userRepository.existsByUsernameIgnoreCase(req.getUsername())) continue;
-            createUser(req);
+            AdminActionResponse resp = createUser(req);
+            if (resp.isSuccess() && resp.getUser() != null) {
+                Long plotId = resp.getUser().getPlotId();
+                if (plotId != null) {
+                    seedStarterBuildings(plotId, req.getCamoColor(), req.getId());
+                    seedDefenses(plotId, req.getId());
+                }
+            }
             created += 1;
         }
         return AdminActionResponse.builder()
@@ -211,6 +222,64 @@ public class AdminService {
                 .message(created > 0 ? "DEMO_USERS_SEEDED" : "DEMO_USERS_ALREADY_PRESENT")
                 .seeded(created)
                 .build();
+    }
+
+    private void seedStarterBuildings(Long plotId, String camoColor, Long userId) {
+        if (buildingRepository.countByPlotId(plotId) > 0) return;
+        String hex = hexForCamo(camoColor);
+        boolean isHard = userId != null && userId == 34L;
+        int craftLevel = isHard ? 3 : 2;
+        int inkLevel = isHard ? 3 : 2;
+        int sleepLevel = isHard ? 2 : 1;
+        int coinLevel = isHard ? 3 : 2;
+        buildingRepository.saveAll(Arrays.asList(
+                CraftHouse.builder()
+                        .plotId(plotId).buildingType("CRAFT_HOUSE").modelVariant(1)
+                        .level(craftLevel).hexColor(hex).xPos(8).yPos(8)
+                        .footprintWidth(4).footprintHeight(4).build(),
+                InkHouse.builder()
+                        .plotId(plotId).buildingType("INK_HOUSE").modelVariant(1)
+                        .level(inkLevel).hexColor(hex).xPos(18).yPos(10)
+                        .footprintWidth(3).footprintHeight(3).build(),
+                SleepHouse.builder()
+                        .plotId(plotId).buildingType("SLEEP_HOUSE").modelVariant(1)
+                        .level(sleepLevel).hexColor(hex).xPos(28).yPos(12)
+                        .footprintWidth(3).footprintHeight(3).build(),
+                CoinGenerator.builder()
+                        .plotId(plotId).buildingType("COIN_GENERATOR").modelVariant(1)
+                        .level(coinLevel).hexColor(hex).xPos(36).yPos(8)
+                        .footprintWidth(4).footprintHeight(3).build()
+        ));
+    }
+
+    private void seedDefenses(Long plotId, Long userId) {
+        if (!lighthouseRepository.existsByPlotId(plotId)) {
+            boolean isHard = userId != null && userId == 34L;
+            int coneAngle = isHard ? 56 : 42;
+            int coneRange = isHard ? 23 : 16;
+            float sweep = isHard ? 42.0f : 26.0f;
+            lighthouseRepository.save(Lighthouse.builder()
+                    .plotId(plotId).modelVariant(isHard ? 3 : 1)
+                    .coneAngle(coneAngle).coneRange(coneRange).sweepSpeed(sweep).build());
+        }
+        boolean isHardTarget = userId != null && userId == 34L;
+        if (isHardTarget && !patrolRobotRepository.existsByPlotId(plotId)) {
+            patrolRobotRepository.save(PatrolRobot.builder()
+                    .plotId(plotId).currentState("PATROL").baseSpeed(3.95f).build());
+        }
+    }
+
+    private static String hexForCamo(String camo) {
+        if (camo == null) return "#8FD19E";
+        switch (camo.trim().toUpperCase(Locale.ROOT)) {
+            case "WHITE": return "#F5F1E8";
+            case "RED":   return "#E88A8A";
+            case "GREEN": return "#8FD19E";
+            case "BLUE":  return "#8FB8E8";
+            case "YELLOW":return "#E8D88F";
+            case "PURPLE":return "#C9A3E8";
+            default:      return "#8FD19E";
+        }
     }
 
     private AdminUserWriteRequest seed(
