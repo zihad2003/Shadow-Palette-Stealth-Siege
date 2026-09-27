@@ -17,4 +17,6 @@ public class PlayerSetupRequest {
     private int characterModel; // 1 male, 2 female
 
     private String camoColor; // RED/GREEN/BLUE/YELLOW/PURPLE
+
+    private String username;
 }

@@ -14,4 +14,7 @@ import lombok.NoArgsConstructor;
 public class SessionStartRequest {
     /** Optional — if the client already has a persisted userId, send it for validation. */
     private Long userId;
+
+    /** Optional — if player wants to login or register by username. */
+    private String username;
 }

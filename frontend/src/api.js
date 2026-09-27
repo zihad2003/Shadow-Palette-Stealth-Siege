@@ -39,10 +39,13 @@ export async function fetchHealth() {
 }
 
 /** Resolve or create a player identity server-side. */
-export async function startSession(userId) {
+export async function startSession(userId, username) {
+  const payload = {};
+  if (userId != null) payload.userId = userId;
+  if (username) payload.username = username;
   return request('/api/session/start', {
     method: 'POST',
-    body: JSON.stringify(userId != null ? { userId } : {}),
+    body: JSON.stringify(payload),
   });
 }
 
@@ -50,10 +53,12 @@ export async function fetchMap() {
   return request('/api/map');
 }
 
-export async function setupPlayer(userId, characterModel, camoColor) {
+export async function setupPlayer(userId, characterModel, camoColor, username) {
+  const payload = { userId, characterModel, camoColor };
+  if (username) payload.username = username;
   return request('/api/player/setup', {
     method: 'POST',
-    body: JSON.stringify({ userId, characterModel, camoColor }),
+    body: JSON.stringify(payload),
   });
 }
 

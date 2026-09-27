@@ -33,6 +33,18 @@ public class PlayerService {
 
     @Transactional
     public SessionStartResponse startSession(SessionStartRequest request) {
+        String reqUsername = request != null && request.getUsername() != null ? request.getUsername().trim() : null;
+        if (reqUsername != null && !reqUsername.isEmpty()) {
+            return userRepository.findByUsernameIgnoreCase(reqUsername)
+                    .map(existing -> SessionStartResponse.builder()
+                            .success(true)
+                            .userId(existing.getId())
+                            .username(existing.getUsername())
+                            .newUser(false)
+                            .build())
+                    .orElseGet(() -> createNewUserWithUsername(reqUsername));
+        }
+
         // If the client sends a valid userId (>= 20161), check if it exists in the DB.
         if (request != null && request.getUserId() != null && request.getUserId() >= MIN_PLAYER_ID) {
             return userRepository.findById(request.getUserId())
@@ -49,11 +61,11 @@ public class PlayerService {
         return createNewUser();
     }
 
-    private SessionStartResponse createNewUser() {
+    private SessionStartResponse createNewUserWithUsername(String username) {
         long nextId = Math.max(MIN_PLAYER_ID, userRepository.findMaxId() + 1);
         User user = User.builder()
                 .id(nextId)
-                .username("Player" + nextId)
+                .username(username)
                 .coins(500)
                 .inkEnergy(100)
                 .chips(200)
@@ -70,6 +82,11 @@ public class PlayerService {
                 .build();
     }
 
+    private SessionStartResponse createNewUser() {
+        long nextId = Math.max(MIN_PLAYER_ID, userRepository.findMaxId() + 1);
+        return createNewUserWithUsername("Player" + nextId);
+    }
+
     @Transactional
     public PlayerSetupResponse setupPlayer(PlayerSetupRequest request) {
         Long effectiveUserId = (request.getUserId() != null && request.getUserId() >= MIN_PLAYER_ID)
@@ -80,11 +97,14 @@ public class PlayerService {
                 .orElse(null);
 
         boolean camoAlreadySet = user != null && user.getCamoColor() != null && !user.getCamoColor().trim().isEmpty();
+        String desiredName = request.getUsername() != null && !request.getUsername().trim().isEmpty()
+                ? request.getUsername().trim()
+                : ("Player" + effectiveUserId);
 
         if (user == null) {
             user = User.builder()
                     .id(effectiveUserId)
-                    .username("Player" + effectiveUserId)
+                    .username(desiredName)
                     .coins(500)
                     .inkEnergy(100)
                     .chips(200)
@@ -92,9 +112,14 @@ public class PlayerService {
                     .camoColor(request.getCamoColor() != null ? request.getCamoColor().toUpperCase() : "BLUE")
                     .prestigeLevel(0)
                     .build();
-        } else if (!camoAlreadySet) {
-            user.setCharacterModel(clampModel(request.getCharacterModel()));
-            user.setCamoColor(request.getCamoColor() != null ? request.getCamoColor().toUpperCase() : "BLUE");
+        } else {
+            if (request.getUsername() != null && !request.getUsername().trim().isEmpty()) {
+                user.setUsername(desiredName);
+            }
+            if (!camoAlreadySet) {
+                user.setCharacterModel(clampModel(request.getCharacterModel()));
+                user.setCamoColor(request.getCamoColor() != null ? request.getCamoColor().toUpperCase() : "BLUE");
+            }
         }
 
         User saved = userRepository.save(user);

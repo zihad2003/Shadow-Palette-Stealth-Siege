@@ -161,11 +161,12 @@ export function GameStateProvider({ children }) {
     }
   })();
   const isAdminPath = typeof window !== 'undefined' && (window.location.pathname === '/admin' || window.location.pathname === '/admin/');
-  const startView = isAdminPath ? 'ADMIN' : (allowedViews.includes(initialView) ? initialView : introDone ? 'MAIN_MENU' : 'SPLASH');
+  const startView = isAdminPath ? 'ADMIN' : (allowedViews.includes(initialView) ? initialView : 'SPLASH');
   const [gameState, setGameState] = useState(startView);
-  const [isFirstRun] = useState(!introDone);
+  const [isFirstRun, setIsFirstRun] = useState(!introDone);
 
   const markIntroDone = () => {
+    setIsFirstRun(false);
     try {
       window.localStorage.setItem(INTRO_DONE_KEY, '1');
     } catch (e) {
@@ -353,7 +354,48 @@ export function GameStateProvider({ children }) {
   const visitRoleRef = useRef(null);
   const endVisitRef = useRef(async () => { });
   const snapshotRef = useRef({});
-  const username = `Player${userId}`;
+  const [username, setUsername] = useState(() => {
+    try {
+      const stored = window.localStorage.getItem('sp_username');
+      if (stored && stored.trim()) return stored.trim();
+    } catch {
+      /* ignore */
+    }
+    return `Player${userId}`;
+  });
+
+  useEffect(() => {
+    if (!username) return;
+    try {
+      window.localStorage.setItem('sp_username', username);
+    } catch {
+      /* ignore */
+    }
+  }, [username]);
+
+  const loginOrRegister = async (name) => {
+    const trimmed = (name || '').trim();
+    if (!trimmed) return false;
+    try {
+      const { startSession } = await import('../api.js');
+      const res = await startSession(null, trimmed);
+      if (res?.success && res.userId) {
+        setUserId(res.userId);
+        setUsername(res.username || trimmed);
+        try {
+          window.sessionStorage.setItem('sp_userId', String(res.userId));
+          window.localStorage.setItem('sp_userId', String(res.userId));
+          window.localStorage.setItem('sp_username', res.username || trimmed);
+        } catch {
+          /* ignore */
+        }
+        return res;
+      }
+    } catch {
+      setUsername(trimmed);
+    }
+    return true;
+  };
   const isVisitGuest = visitRole === 'guest';
   visitSessionRef.current = visitSession;
   visitRoleRef.current = visitRole;
@@ -1925,6 +1967,8 @@ export function GameStateProvider({ children }) {
     toasts,
     showToast,
     username,
+    setUsername,
+    loginOrRegister,
     mountedParts,
     carriedPart,
     partSpawns,
