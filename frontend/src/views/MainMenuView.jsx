@@ -36,7 +36,7 @@ export default function MainMenuView() {
       .then((res) => {
         if (res?.plotId) provisionHomeBase(res.plotId);
       })
-      .catch(() => {});
+      .catch(() => { });
     transitionTo(isFirstRun ? 'PAINT_TUTORIAL' : 'BASE_BUILDER');
   };
 
@@ -84,6 +84,7 @@ export default function MainMenuView() {
             className="h-11 px-8 rounded-2xl text-[12px] flex items-center gap-2"
           >
             {isFirstRun ? 'Train' : 'Enter base'} <ArrowRight size={14} />
+          </ClayButton>
         </div>
       }
     >

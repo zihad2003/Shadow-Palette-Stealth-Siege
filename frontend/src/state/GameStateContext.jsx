@@ -160,7 +160,8 @@ export function GameStateProvider({ children }) {
       return false;
     }
   })();
-  const startView = window.location.pathname === '/admin' ? 'ADMIN' : (allowedViews.includes(initialView) ? initialView : introDone ? 'MAIN_MENU' : 'SPLASH');
+  const isAdminPath = typeof window !== 'undefined' && (window.location.pathname === '/admin' || window.location.pathname === '/admin/');
+  const startView = isAdminPath ? 'ADMIN' : (allowedViews.includes(initialView) ? initialView : introDone ? 'MAIN_MENU' : 'SPLASH');
   const [gameState, setGameState] = useState(startView);
   const [isFirstRun] = useState(!introDone);
 
@@ -343,7 +344,7 @@ export function GameStateProvider({ children }) {
   const homeBackupRef = useRef(null);
   const visitSessionRef = useRef(null);
   const visitRoleRef = useRef(null);
-  const endVisitRef = useRef(async () => {});
+  const endVisitRef = useRef(async () => { });
   const snapshotRef = useRef({});
   const username = `Player${userId}`;
   const isVisitGuest = visitRole === 'guest';
@@ -579,10 +580,10 @@ export function GameStateProvider({ children }) {
       const session = createRaidSession({ attackerId: userId, defenderId: defender, camoColor });
       const raidSessionObj = duoParty?.partyId
         ? Object.freeze({
-            ...session,
-            raidId: duoParty.raidId || session.raidId,
-            duoPartyId: duoParty.partyId,
-          })
+          ...session,
+          raidId: duoParty.raidId || session.raidId,
+          duoPartyId: duoParty.partyId,
+        })
         : session;
       setRaidSession(raidSessionObj);
       const mountRaid = async () => {
@@ -605,11 +606,11 @@ export function GameStateProvider({ children }) {
               setRaidSession((prev) =>
                 prev
                   ? {
-                      ...prev,
-                      raidId: live.raidId,
-                      liveInviteSent: !!live.liveInviteSent,
-                      joinDeadline: live.joinDeadline || null,
-                    }
+                    ...prev,
+                    raidId: live.raidId,
+                    liveInviteSent: !!live.liveInviteSent,
+                    joinDeadline: live.joinDeadline || null,
+                  }
                   : prev
               );
             }
@@ -1532,7 +1533,7 @@ export function GameStateProvider({ children }) {
         seated: true,
         gear: host ? 1 : undefined,
         trackT: host ? buggyTrackT : undefined,
-      }).catch(() => {});
+      }).catch(() => { });
     }
     if (role === 'passenger') {
       showToast('Passenger', 'success');
@@ -1551,7 +1552,7 @@ export function GameStateProvider({ children }) {
       visitId: visitSession.visitId,
       userId,
       reaction: rx,
-    }).catch(() => {});
+    }).catch(() => { });
     window.dispatchEvent(new CustomEvent('visit-reaction', { detail: { kind } }));
   };
 
@@ -1566,7 +1567,7 @@ export function GameStateProvider({ children }) {
         seated: false,
         gear: visitRole === 'guest' ? undefined : 0,
         trackT: visitRole === 'guest' ? undefined : buggyTrackT,
-      }).catch(() => {});
+      }).catch(() => { });
     }
     return true;
   };
@@ -1582,7 +1583,7 @@ export function GameStateProvider({ children }) {
         seated: buggySeated,
         gear,
         trackT: buggyTrackT,
-      }).catch(() => {});
+      }).catch(() => { });
     }
   };
 
@@ -1714,7 +1715,7 @@ export function GameStateProvider({ children }) {
         visitId: session.visitId,
         userId,
         seated: true,
-      }).catch(() => {});
+      }).catch(() => { });
       triggerLoading(
         `ARRIVING AT ${String(session.hostName || 'HOST').toUpperCase()} FORTRESS`,
         'You are in their base',
@@ -2123,7 +2124,7 @@ export function GameStateProvider({ children }) {
         characterModel,
         camoColor,
         snapshot: snapshotRef.current,
-      }).catch(() => {});
+      }).catch(() => { });
     };
     beat();
     const id = window.setInterval(beat, 8000);
@@ -2229,7 +2230,7 @@ export function GameStateProvider({ children }) {
         seated: buggySeated,
         gear: buggyGear,
         trackT: buggyTrackT,
-      }).catch(() => {});
+      }).catch(() => { });
     }, 450);
     return () => window.clearInterval(id);
   }, [visitSession?.visitId, visitRole, buggySeated, buggyGear, buggyTrackT, userId]);
@@ -2241,7 +2242,7 @@ export function GameStateProvider({ children }) {
         visitId: visitSession.visitId,
         userId,
         seated: buggySeated,
-      }).catch(() => {});
+      }).catch(() => { });
     }, 800);
     return () => window.clearInterval(id);
   }, [visitSession?.visitId, visitRole, buggySeated, userId]);
