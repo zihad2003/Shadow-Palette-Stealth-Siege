@@ -84,17 +84,6 @@ export default function MainMenuView() {
             className="h-11 px-8 rounded-2xl text-[12px] flex items-center gap-2"
           >
             {isFirstRun ? 'Train' : 'Enter base'} <ArrowRight size={14} />
-          </ClayButton>
-          <button
-            type="button"
-            onClick={() => {
-              soundEngine.playClickSound();
-              transitionTo('ADMIN');
-            }}
-            className="text-[10px] text-clay-muted/70 hover:text-clay-accent"
-          >
-            Dashboard
-          </button>
         </div>
       }
     >

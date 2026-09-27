@@ -160,7 +160,7 @@ export function GameStateProvider({ children }) {
       return false;
     }
   })();
-  const startView = allowedViews.includes(initialView) ? initialView : introDone ? 'MAIN_MENU' : 'SPLASH';
+  const startView = window.location.pathname === '/admin' ? 'ADMIN' : (allowedViews.includes(initialView) ? initialView : introDone ? 'MAIN_MENU' : 'SPLASH');
   const [gameState, setGameState] = useState(startView);
   const [isFirstRun] = useState(!introDone);
 
