@@ -179,11 +179,14 @@ export function GameStateProvider({ children }) {
     try {
       const q = Number(new URLSearchParams(window.location.search).get('userId'));
       if (Number.isFinite(q) && q > 0) return q;
-      // sessionStorage is per-tab so two windows can be Player 12 and 34 without colliding.
       const tab = Number(window.sessionStorage.getItem('sp_userId'));
       if (Number.isFinite(tab) && tab > 0) return tab;
-      const saved = Number(window.localStorage.getItem('sp_userId'));
-      if (Number.isFinite(saved) && saved > 0) return saved;
+      const other = Number(window.localStorage.getItem('sp_userId'));
+      if (Number.isFinite(other) && other > 0) {
+        if (other === 12) return 34;
+        if (other === 34) return 12;
+        return other;
+      }
     } catch {
       /* ignore */
     }
