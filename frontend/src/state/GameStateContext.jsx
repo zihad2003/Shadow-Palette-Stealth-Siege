@@ -190,7 +190,7 @@ export function GameStateProvider({ children }) {
     } catch {
       /* ignore */
     }
-    return 12;
+    return Math.floor(10000 + Math.random() * 90000);
   });
   useEffect(() => {
     try {
