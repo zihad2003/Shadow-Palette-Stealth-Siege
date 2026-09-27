@@ -90,6 +90,7 @@ export default function RaidFinderView() {
 
   const players = (onlinePlayers || []).filter((p) => Number(p.userId) !== Number(userId));
   const otherHint = Number(userId) === 12 ? 34 : 12;
+  const otherHintFormatted = fmtUid(otherHint);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -213,7 +214,7 @@ export default function RaidFinderView() {
                   <input
                     type="number"
                     min={1}
-                    placeholder={`Friend id (e.g. ${otherHint})`}
+                    placeholder={`Friend id (e.g. ${otherHintFormatted})`}
                     value={manualId}
                     onChange={(e) => setManualId(e.target.value)}
                     className="flex-1 h-8 rounded-lg bg-black/15 px-2 text-[11px] text-clay-text outline-none border border-white/10"

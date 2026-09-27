@@ -36,7 +36,7 @@ public class PlayerService {
         if (user == null) {
             user = User.builder()
                     .id(request.getUserId())
-                    .username("Player" + request.getUserId())
+                    .username("Player" + String.format("%05d", request.getUserId()))
                     .coins(500)
                     .inkEnergy(100)
                     .chips(200)
