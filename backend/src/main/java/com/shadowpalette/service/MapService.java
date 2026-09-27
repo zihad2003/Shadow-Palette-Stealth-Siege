@@ -44,11 +44,8 @@ public class MapService {
             for (int x = 0; x < 8; x++) {
                 Long owner = null;
                 boolean occupied = false;
-                if (x == 3 && y == 3) { owner = 12L; occupied = true; } // Player base
+                if (x == 3 && y == 3) { owner = 12L; occupied = true; }
                 else if (x == 1 && y == 1) { owner = 34L; occupied = true; }
-                else if (x == 5 && y == 2) { owner = 5L; occupied = true; }
-                else if (x == 2 && y == 6) { owner = 20L; occupied = true; }
-                else if (x == 6 && y == 5) { owner = 42L; occupied = true; }
 
                 starterPlots.add(Plot.builder()
                         .xCoord(x)

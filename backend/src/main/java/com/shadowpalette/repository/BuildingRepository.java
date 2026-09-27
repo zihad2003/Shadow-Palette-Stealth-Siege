@@ -9,4 +9,5 @@ import java.util.List;
 @Repository
 public interface BuildingRepository extends JpaRepository<Building, Long> {
     List<Building> findByPlotId(Long plotId);
+    long countByPlotId(Long plotId);
 }

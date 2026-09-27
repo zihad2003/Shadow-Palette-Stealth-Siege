@@ -282,7 +282,7 @@ export function GameStateProvider({ children }) {
     return Math.max(0, ...list.map((b) => Number(b.id) || 0), ...defs.map((d) => Number(d.id) || 0)) + 1;
   });
 
-  const [raidTargetId, setRaidTargetId] = useState(forceFullHome ? 21 : 34);
+  const [raidTargetId, setRaidTargetId] = useState(forceFullHome ? 12 : 34);
   const [raidData, setRaidData] = useState(null);
 
   const [isOptionsOpen, setIsOptionsOpen] = useState(false);
