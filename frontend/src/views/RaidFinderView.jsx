@@ -58,12 +58,14 @@ export default function RaidFinderView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [duoOpen, duoParty?.partyId, duoParty?.status]);
 
+  const fmtUid = (id) => String(id).padStart(5, '0');
+
   const inDuo = !!duoParty?.partyId && duoParty.status !== 'ENDED';
   const isDuoHost = inDuo && Number(duoParty.hostId) === Number(userId);
   const partnerLabel = inDuo
     ? isDuoHost
-      ? duoParty.guestName || `Player ${duoParty.guestId}`
-      : duoParty.hostName || `Player ${duoParty.hostId}`
+      ? duoParty.guestName || `Player ${fmtUid(duoParty.guestId)}`
+      : duoParty.hostName || `Player ${fmtUid(duoParty.hostId)}`
     : null;
 
   const handleRaid = async (target) => {
@@ -151,7 +153,7 @@ export default function RaidFinderView() {
               </ClayButton>
             </div>
             <p className="text-[10px] text-clay-muted mb-2">
-              You are <span className="text-clay-text font-semibold">Player {userId}</span>
+              You are <span className="text-clay-text font-semibold">Player {fmtUid(userId)}</span>
             </p>
 
             {inDuo ? (
@@ -188,9 +190,9 @@ export default function RaidFinderView() {
                       >
                         <div className="min-w-0">
                           <p className="text-[12px] font-medium truncate">
-                            {p.username || `Player ${p.userId}`}
+                            {p.username || `Player ${fmtUid(p.userId)}`}
                           </p>
-                          <p className="text-[9px] text-clay-muted">id {p.userId} · online</p>
+                          <p className="text-[9px] text-clay-muted">id {fmtUid(p.userId)} · online</p>
                         </div>
                         <ClayButton
                           variant={sentDuo[p.userId] ? 'ghost' : 'success'}

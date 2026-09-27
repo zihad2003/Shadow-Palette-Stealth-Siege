@@ -20,8 +20,9 @@ export default function DuoVoiceBar() {
 
   const partyId = duoParty?.partyId;
   const isHost = Number(duoParty?.hostId) === Number(userId);
+  const fmtUid = (id) => String(id).padStart(5, '0');
   const partnerName =
-    isHost ? duoParty?.guestName || `Player ${duoParty?.guestId}` : duoParty?.hostName || `Player ${duoParty?.hostId}`;
+    isHost ? duoParty?.guestName || `Player ${fmtUid(duoParty?.guestId)}` : duoParty?.hostName || `Player ${fmtUid(duoParty?.hostId)}`;
 
   useEffect(() => {
     if (!partyId || !userId) return undefined;

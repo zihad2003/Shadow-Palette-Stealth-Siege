@@ -319,7 +319,9 @@ export function GameStateProvider({ children }) {
   const visitRoleRef = useRef(null);
   const endVisitRef = useRef(async () => {});
   const snapshotRef = useRef({});
-  const username = `Player${userId}`;
+
+  const fmtUid = (id) => String(id).padStart(5, '0');
+  const username = `Player${fmtUid(userId)}`;
   const isVisitGuest = visitRole === 'guest';
   visitSessionRef.current = visitSession;
   visitRoleRef.current = visitRole;
