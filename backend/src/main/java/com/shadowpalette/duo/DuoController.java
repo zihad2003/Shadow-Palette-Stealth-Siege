@@ -35,6 +35,11 @@ public class DuoController {
         return ResponseEntity.ok(duoService.leave(request));
     }
 
+    @PostMapping("/ready")
+    public ResponseEntity<DuoPartyState> ready(@RequestBody DuoReadyRequest request) {
+        return ResponseEntity.ok(duoService.setReady(request));
+    }
+
     @PostMapping("/raid/start")
     public ResponseEntity<DuoPartyState> startRaid(@RequestBody DuoRaidStartRequest request) {
         return ResponseEntity.ok(duoService.startRaid(request));

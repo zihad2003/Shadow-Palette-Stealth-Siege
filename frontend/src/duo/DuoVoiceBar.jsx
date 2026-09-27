@@ -40,7 +40,11 @@ export default function DuoVoiceBar() {
           onRemoteStream: (stream) => {
             if (audioRef.current) {
               audioRef.current.srcObject = stream;
-              audioRef.current.play().catch(() => {});
+              audioRef.current.volume = 1.0;
+              audioRef.current.muted = false;
+              audioRef.current.play().catch((err) => {
+                console.warn('Audio play autoplay blocked:', err);
+              });
             }
           },
         });
@@ -54,8 +58,18 @@ export default function DuoVoiceBar() {
       }
     })();
 
+    const unlockAudio = () => {
+      if (audioRef.current && audioRef.current.srcObject && audioRef.current.paused) {
+        audioRef.current.play().catch(() => {});
+      }
+    };
+    window.addEventListener('click', unlockAudio, { passive: true });
+    window.addEventListener('keydown', unlockAudio, { passive: true });
+
     return () => {
       cancelled = true;
+      window.removeEventListener('click', unlockAudio);
+      window.removeEventListener('keydown', unlockAudio);
       call?.stop();
       callRef.current = null;
       setVoiceStatus('idle');

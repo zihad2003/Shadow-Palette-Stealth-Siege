@@ -9,6 +9,7 @@ import RaidTargetCard from '../components/raid/RaidTargetCard.jsx';
 import { RAID_TARGETS } from '../data/raidTargets.js';
 import { useGameState } from '../state/GameStateContext.jsx';
 import { RefreshCw, Users } from 'lucide-react';
+import DuoLobbyView from '../duo/DuoLobbyView.jsx';
 
 export default function RaidFinderView() {
   const {
@@ -60,6 +61,10 @@ export default function RaidFinderView() {
 
   const inDuo = !!duoParty?.partyId && duoParty.status !== 'ENDED';
   const isDuoHost = inDuo && Number(duoParty.hostId) === Number(userId);
+
+  if (inDuo && duoParty?.status !== 'IN_RAID') {
+    return <DuoLobbyView />;
+  }
   const partnerLabel = inDuo
     ? isDuoHost
       ? duoParty.guestName || `Player ${duoParty.guestId}`

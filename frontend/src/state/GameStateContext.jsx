@@ -2119,7 +2119,7 @@ export function GameStateProvider({ children }) {
           if (
             state.status === 'IN_RAID' &&
             state.defenderId != null &&
-            Number(state.guestId) === Number(userId) &&
+            (Number(state.guestId) === Number(userId) || Number(state.hostId) === Number(userId)) &&
             gameState !== 'STEALTH_RAID' &&
             gameState !== 'RAID_ENTER'
           ) {
@@ -2176,7 +2176,9 @@ export function GameStateProvider({ children }) {
             prev?.status === res.status &&
             prev?.alarmLatched === res.alarmLatched &&
             prev?.hostX === res.hostX &&
-            prev?.guestX === res.guestX
+            prev?.guestX === res.guestX &&
+            prev?.hostReady === res.hostReady &&
+            prev?.guestReady === res.guestReady
           ) {
             return prev;
           }
@@ -2186,7 +2188,7 @@ export function GameStateProvider({ children }) {
         if (
           res.status === 'IN_RAID' &&
           res.defenderId != null &&
-          iAmGuest &&
+          (iAmGuest || iAmHost) &&
           gameState !== 'STEALTH_RAID' &&
           gameState !== 'RAID_ENTER'
         ) {

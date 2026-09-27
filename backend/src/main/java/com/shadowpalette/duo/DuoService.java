@@ -221,6 +221,41 @@ public class DuoService {
         return registry.get(partyId).orElse(null);
     }
 
+    public DuoPartyState setReady(DuoReadyRequest request) {
+        if (request == null || request.getPartyId() == null || request.getUserId() == null) {
+            return fail("INVALID_READY_REQUEST");
+        }
+        DuoParty party = requireParty(request.getPartyId());
+        if (party == null) return fail("PARTY_GONE");
+
+        boolean isHost = request.getUserId().equals(party.getHostId());
+        boolean isGuest = request.getUserId().equals(party.getGuestId());
+        if (!isHost && !isGuest) return fail("NOT_IN_PARTY");
+
+        if (isHost) {
+            party.setHostReady(request.isReady());
+            if (request.getModel() != null) party.setHostModel(request.getModel());
+            if (request.getCamo() != null) party.setHostCamo(request.getCamo());
+            if (request.getDefenderId() != null) party.setDefenderId(request.getDefenderId());
+        } else {
+            party.setGuestReady(request.isReady());
+            if (request.getModel() != null) party.setGuestModel(request.getModel());
+            if (request.getCamo() != null) party.setGuestCamo(request.getCamo());
+        }
+
+        if (party.isHostReady() && party.isGuestReady()) {
+            party.setStatus("IN_RAID");
+            if (party.getRaidId() == null || party.getRaidId().isBlank()) {
+                party.setRaidId("duo_" + System.currentTimeMillis());
+            }
+        } else if ("IN_RAID".equals(party.getStatus()) && (!party.isHostReady() || !party.isGuestReady())) {
+            party.setStatus("LOBBY");
+        }
+
+        broadcast(party);
+        return toState(party, null);
+    }
+
     private static DuoPartyState toState(DuoParty party, String message) {
         return DuoPartyState.builder()
                 .success(true)
@@ -239,6 +274,12 @@ public class DuoService {
                 .alarmLatched(party.isAlarmLatched())
                 .hostCaught(party.isHostCaught())
                 .guestCaught(party.isGuestCaught())
+                .hostReady(party.isHostReady())
+                .guestReady(party.isGuestReady())
+                .hostModel(party.getHostModel())
+                .guestModel(party.getGuestModel())
+                .hostCamo(party.getHostCamo())
+                .guestCamo(party.getGuestCamo())
                 .message(message)
                 .build();
     }

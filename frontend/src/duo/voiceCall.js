@@ -7,7 +7,16 @@
  */
 import { stompPublish, stompSubscribe, stompUnsubscribe } from '../live/stompClient.js';
 
-const ICE = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+const ICE = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun3.l.google.com:19302' },
+    { urls: 'stun:stun4.l.google.com:19302' },
+    { urls: 'stun:global.stun.twilio.com:3478' },
+  ],
+};
 
 export function createDuoVoiceCall({ partyId, userId, isHost, onStatus, onRemoteStream }) {
   let pc = null;
@@ -138,6 +147,11 @@ export function createDuoVoiceCall({ partyId, userId, isHost, onStatus, onRemote
     pc.ontrack = (ev) => {
       const stream = ev.streams?.[0] || new MediaStream([ev.track]);
       onRemoteStream?.(stream);
+      if (ev.track) {
+        ev.track.onunmute = () => {
+          onRemoteStream?.(stream);
+        };
+      }
       setStatus('connected');
     };
     pc.onconnectionstatechange = () => {

@@ -250,6 +250,10 @@ export async function duoMarkCaught(partyId, userId) {
   });
 }
 
+export async function duoSetReady(payload) {
+  return request('/api/duo/ready', { method: 'POST', body: JSON.stringify(payload) });
+}
+
 export async function duoForUser(userId) {
   return request(`/api/duo/user/${userId}`);
 }
