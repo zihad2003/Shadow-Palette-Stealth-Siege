@@ -191,18 +191,20 @@ export function GameStateProvider({ children }) {
     }
     // Clean up any stale legacy id (< 20161) from local/session storage
     try {
-      window.sessionStorage.removeItem('sp_userId');
-      window.localStorage.removeItem('sp_userId');
+      const legacyTab = Number(window.sessionStorage.getItem('sp_userId'));
+      if (Number.isFinite(legacyTab) && legacyTab < 20161) window.sessionStorage.removeItem('sp_userId');
+      const legacyStored = Number(window.localStorage.getItem('sp_userId'));
+      if (Number.isFinite(legacyStored) && legacyStored < 20161) window.localStorage.removeItem('sp_userId');
     } catch {
       /* ignore */
     }
-    // Default fallback starting at 20161 until backend validates/generates
-    return 20161;
+    // null = new visitor/device — will be assigned a unique ID >= 20161 by /api/session/start
+    return null;
   });
 
-  // On first mount, resolve the player identity via the server.
-  // If we already have a stored userId, the server validates it; if not,
-  // the server generates a fresh one. This replaces the old hardcoded fallback.
+  // On first mount, resolve or allocate player identity via the server.
+  // If we already have a stored userId, the server validates it.
+  // If null (new device), the server generates the next unique ID >= 20161.
   useEffect(() => {
     let cancelled = false;
     const resolve = async () => {
@@ -211,18 +213,37 @@ export function GameStateProvider({ children }) {
         const res = await startSession(userId);
         if (!cancelled && res?.success && res.userId) {
           setUserId(res.userId);
+          if (res.username) setUsername(res.username);
           try {
             window.sessionStorage.setItem('sp_userId', String(res.userId));
             window.localStorage.setItem('sp_userId', String(res.userId));
-          } catch { /* private mode */ }
+            if (res.username) window.localStorage.setItem('sp_username', res.username);
+          } catch {
+            /* private mode */
+          }
         }
       } catch {
-        // Backend offline — keep whatever local userId we have (may be null).
-        // When backend comes online, next page load will resolve it.
+        // Backend offline / unreachable:
+        // Assign a random unique ephemeral ID for this device so devices don't collide
+        if (!cancelled) {
+          setUserId((prev) => {
+            if (prev != null) return prev;
+            const fallbackId = 20161 + Math.floor(Math.random() * 9000);
+            try {
+              window.sessionStorage.setItem('sp_userId', String(fallbackId));
+              window.localStorage.setItem('sp_userId', String(fallbackId));
+            } catch {
+              /* ignore */
+            }
+            return fallbackId;
+          });
+        }
       }
     };
     resolve();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
