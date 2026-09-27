@@ -221,6 +221,24 @@ export function GameStateProvider({ children }) {
           } catch {
             /* private mode */
           }
+
+          if (res.worldSaveJson) {
+            try {
+              const data = JSON.parse(res.worldSaveJson);
+              window.localStorage.setItem(WORLD_SAVE_KEY, res.worldSaveJson);
+              if (Number.isFinite(data.coins)) setCoins(data.coins);
+              if (Number.isFinite(data.inkEnergy)) setInkEnergy(data.inkEnergy);
+              if (Number.isFinite(data.chips)) setChips(data.chips);
+              if (data.buildings) setBuildings(data.buildings);
+              if (data.paintedTiles) setPaintedTiles(data.paintedTiles);
+              if (data.defenses) setDefenses(data.defenses);
+              if (data.characterModel) setCharacterModel(data.characterModel);
+              if (data.camoColor) setCamoColor(data.camoColor);
+              if (data.prestigeLevel) setPrestigeLevel(data.prestigeLevel);
+            } catch {
+              /* ignore parse error */
+            }
+          }
         }
       } catch {
         // Backend offline / unreachable:
@@ -394,12 +412,12 @@ export function GameStateProvider({ children }) {
     }
   }, [username]);
 
-  const loginOrRegister = async (name) => {
+  const loginOrRegister = async (name, password) => {
     const trimmed = (name || '').trim();
     if (!trimmed) return false;
     try {
       const { startSession } = await import('../api.js');
-      const res = await startSession(null, trimmed);
+      const res = await startSession(null, trimmed, password);
       if (res?.success && res.userId) {
         setUserId(res.userId);
         setUsername(res.username || trimmed);
@@ -410,12 +428,34 @@ export function GameStateProvider({ children }) {
         } catch {
           /* ignore */
         }
+
+        if (res.worldSaveJson) {
+          try {
+            const data = JSON.parse(res.worldSaveJson);
+            window.localStorage.setItem(WORLD_SAVE_KEY, res.worldSaveJson);
+            if (Number.isFinite(data.coins)) setCoins(data.coins);
+            if (Number.isFinite(data.inkEnergy)) setInkEnergy(data.inkEnergy);
+            if (Number.isFinite(data.chips)) setChips(data.chips);
+            if (data.buildings) setBuildings(data.buildings);
+            if (data.paintedTiles) setPaintedTiles(data.paintedTiles);
+            if (data.defenses) setDefenses(data.defenses);
+            if (data.characterModel) setCharacterModel(data.characterModel);
+            if (data.camoColor) setCamoColor(data.camoColor);
+            if (data.prestigeLevel) setPrestigeLevel(data.prestigeLevel);
+          } catch {
+            /* ignore parse error */
+          }
+        }
         return res;
       }
-    } catch {
+      return res;
+    } catch (err) {
+      if (err?.message === 'INVALID_PASSWORD' || err?.data?.error === 'INVALID_PASSWORD') {
+        return { success: false, error: 'INVALID_PASSWORD' };
+      }
       setUsername(trimmed);
+      return { success: true, offline: true };
     }
-    return true;
   };
   const isVisitGuest = visitRole === 'guest';
   visitSessionRef.current = visitSession;
@@ -459,8 +499,25 @@ export function GameStateProvider({ children }) {
 
   const saveWorld = (message = 'Saved') => {
     try {
-      window.localStorage.setItem(WORLD_SAVE_KEY, JSON.stringify(worldRef.current));
+      const serialized = JSON.stringify(worldRef.current);
+      window.localStorage.setItem(WORLD_SAVE_KEY, serialized);
       if (message) showToast(message, 'success');
+
+      if (userId) {
+        import('../api.js').then(({ savePlayerProgress }) => {
+          savePlayerProgress({
+            userId,
+            worldSaveJson: serialized,
+            coins: worldRef.current.coins,
+            inkEnergy: worldRef.current.inkEnergy,
+            chips: worldRef.current.chips,
+            prestigeLevel: worldRef.current.prestigeLevel,
+            termsAccepted: true,
+          }).catch(() => {
+            /* local save preserved */
+          });
+        });
+      }
       return true;
     } catch {
       showToast('Save failed', 'error');

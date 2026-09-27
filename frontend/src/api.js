@@ -39,11 +39,19 @@ export async function fetchHealth() {
 }
 
 /** Resolve or create a player identity server-side. */
-export async function startSession(userId, username) {
+export async function startSession(userId, username, password) {
   const payload = {};
   if (userId != null) payload.userId = userId;
   if (username) payload.username = username;
+  if (password) payload.password = password;
   return request('/api/session/start', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function savePlayerProgress(payload) {
+  return request('/api/player/save', {
     method: 'POST',
     body: JSON.stringify(payload),
   });

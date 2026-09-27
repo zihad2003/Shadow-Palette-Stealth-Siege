@@ -34,26 +34,36 @@ public class PlayerService {
     @Transactional
     public SessionStartResponse startSession(SessionStartRequest request) {
         String reqUsername = request != null && request.getUsername() != null ? request.getUsername().trim() : null;
+        String reqPassword = request != null && request.getPassword() != null ? request.getPassword().trim() : null;
+
         if (reqUsername != null && !reqUsername.isEmpty()) {
             return userRepository.findByUsernameIgnoreCase(reqUsername)
-                    .map(existing -> SessionStartResponse.builder()
-                            .success(true)
-                            .userId(existing.getId())
-                            .username(existing.getUsername())
-                            .newUser(false)
-                            .build())
-                    .orElseGet(() -> createNewUserWithUsername(reqUsername));
+                    .map(existing -> {
+                        if (existing.getPassword() != null && !existing.getPassword().isEmpty() && reqPassword != null && !reqPassword.isEmpty()) {
+                            if (!existing.getPassword().equals(reqPassword)) {
+                                throw new ApiException(HttpStatus.UNAUTHORIZED, "INVALID_PASSWORD");
+                            }
+                        }
+                        if (existing.getPassword() == null && reqPassword != null && !reqPassword.isEmpty()) {
+                            existing.setPassword(reqPassword);
+                            userRepository.save(existing);
+                        }
+                        return buildResponseFromUser(existing, false);
+                    })
+                    .orElseGet(() -> createNewUserWithUsername(reqUsername, reqPassword));
         }
 
         // If the client sends a valid userId (>= 20161), check if it exists in the DB.
         if (request != null && request.getUserId() != null && request.getUserId() >= MIN_PLAYER_ID) {
             return userRepository.findById(request.getUserId())
-                    .map(existing -> SessionStartResponse.builder()
-                            .success(true)
-                            .userId(existing.getId())
-                            .username(existing.getUsername())
-                            .newUser(false)
-                            .build())
+                    .map(existing -> {
+                        if (existing.getPassword() != null && !existing.getPassword().isEmpty() && reqPassword != null && !reqPassword.isEmpty()) {
+                            if (!existing.getPassword().equals(reqPassword)) {
+                                throw new ApiException(HttpStatus.UNAUTHORIZED, "INVALID_PASSWORD");
+                            }
+                        }
+                        return buildResponseFromUser(existing, false);
+                    })
                     // Client sent an ID that doesn't exist — generate a new one.
                     .orElseGet(this::createNewUser);
         }
@@ -61,30 +71,72 @@ public class PlayerService {
         return createNewUser();
     }
 
-    private SessionStartResponse createNewUserWithUsername(String username) {
+    private SessionStartResponse buildResponseFromUser(User user, boolean newUser) {
+        return SessionStartResponse.builder()
+                .success(true)
+                .userId(user.getId())
+                .username(user.getUsername())
+                .newUser(newUser)
+                .worldSaveJson(user.getWorldSaveJson())
+                .coins(user.getCoins())
+                .inkEnergy(user.getInkEnergy())
+                .chips(user.getChips())
+                .characterModel(user.getCharacterModel())
+                .camoColor(user.getCamoColor())
+                .prestigeLevel(user.getPrestigeLevel())
+                .termsAccepted(user.isTermsAccepted())
+                .build();
+    }
+
+    private SessionStartResponse createNewUserWithUsername(String username, String password) {
         long nextId = Math.max(MIN_PLAYER_ID, userRepository.findMaxId() + 1);
         User user = User.builder()
                 .id(nextId)
                 .username(username)
+                .password(password)
                 .coins(500)
                 .inkEnergy(100)
                 .chips(200)
                 .characterModel(1)
                 .camoColor("BLUE")
                 .prestigeLevel(0)
+                .termsAccepted(false)
                 .build();
         user = userRepository.save(user);
-        return SessionStartResponse.builder()
-                .success(true)
-                .userId(user.getId())
-                .username(user.getUsername())
-                .newUser(true)
-                .build();
+
+        ensureHomePlot(user);
+
+        return buildResponseFromUser(user, true);
     }
 
     private SessionStartResponse createNewUser() {
         long nextId = Math.max(MIN_PLAYER_ID, userRepository.findMaxId() + 1);
-        return createNewUserWithUsername("Player" + nextId);
+        return createNewUserWithUsername("Player" + nextId, null);
+    }
+
+    @Transactional
+    public com.shadowpalette.dto.PlayerSaveResponse saveProgress(com.shadowpalette.dto.PlayerSaveRequest request) {
+        if (request == null || request.getUserId() == null) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "USER_ID_REQUIRED");
+        }
+        User user = userRepository.findById(request.getUserId())
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "USER_NOT_FOUND"));
+
+        if (request.getWorldSaveJson() != null) {
+            user.setWorldSaveJson(request.getWorldSaveJson());
+        }
+        if (request.getCoins() != null) user.setCoins(request.getCoins());
+        if (request.getInkEnergy() != null) user.setInkEnergy(request.getInkEnergy());
+        if (request.getChips() != null) user.setChips(request.getChips());
+        if (request.getPrestigeLevel() != null) user.setPrestigeLevel(request.getPrestigeLevel());
+        if (request.getTermsAccepted() != null) user.setTermsAccepted(request.getTermsAccepted());
+
+        userRepository.save(user);
+        return com.shadowpalette.dto.PlayerSaveResponse.builder()
+                .success(true)
+                .userId(user.getId())
+                .message("PROGRESS_SAVED")
+                .build();
     }
 
     @Transactional
@@ -111,8 +163,10 @@ public class PlayerService {
                     .characterModel(clampModel(request.getCharacterModel()))
                     .camoColor(request.getCamoColor() != null ? request.getCamoColor().toUpperCase() : "BLUE")
                     .prestigeLevel(0)
+                    .termsAccepted(true)
                     .build();
         } else {
+            user.setTermsAccepted(true);
             if (request.getUsername() != null && !request.getUsername().trim().isEmpty()) {
                 user.setUsername(desiredName);
             }

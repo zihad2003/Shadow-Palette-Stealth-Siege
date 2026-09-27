@@ -17,4 +17,7 @@ public class SessionStartRequest {
 
     /** Optional — if player wants to login or register by username. */
     private String username;
+
+    /** Optional passcode for the player account. */
+    private String password;
 }

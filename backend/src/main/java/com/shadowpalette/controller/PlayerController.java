@@ -45,4 +45,10 @@ public class PlayerController {
         PlayerPrestigeResponse response = playerService.performPrestige(request);
         return ResponseEntity.ok(response);
     }
+
+    @PostMapping("/player/save")
+    public ResponseEntity<com.shadowpalette.dto.PlayerSaveResponse> saveProgress(@Valid @RequestBody com.shadowpalette.dto.PlayerSaveRequest request) {
+        com.shadowpalette.dto.PlayerSaveResponse response = playerService.saveProgress(request);
+        return ResponseEntity.ok(response);
+    }
 }

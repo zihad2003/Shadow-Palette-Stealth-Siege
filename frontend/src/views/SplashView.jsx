@@ -11,6 +11,8 @@ export default function SplashView() {
   const { transitionTo, isFirstRun, username, userId, loginOrRegister, provisionHomeBase } = useGameState();
   const [showSwitchModal, setShowSwitchModal] = useState(false);
   const [switchName, setSwitchName] = useState('');
+  const [switchPass, setSwitchPass] = useState('');
+  const [loginError, setLoginError] = useState('');
 
   useEffect(() => {
     // Only auto-advance for first-time onboarding if user does not click
@@ -35,10 +37,18 @@ export default function SplashView() {
 
   const handleSwitchSubmit = async (e) => {
     e?.preventDefault?.();
+    setLoginError('');
     if (!switchName.trim()) return;
-    await loginOrRegister(switchName.trim());
+    const res = await loginOrRegister(switchName.trim(), switchPass.trim() || undefined);
+    if (res?.error) {
+      setLoginError(res.error === 'INVALID_PASSWORD' ? 'Incorrect passcode for this agent' : res.error);
+      return;
+    }
     setShowSwitchModal(false);
     setSwitchName('');
+    setSwitchPass('');
+    provisionHomeBase();
+    transitionTo('BASE_BUILDER');
   };
 
   return (
@@ -163,12 +173,23 @@ export default function SplashView() {
                   <input
                     type="text"
                     autoFocus
-                    placeholder="Enter username (e.g. ShadowHunter)"
+                    placeholder="Username or Player ID"
                     value={switchName}
                     onChange={(e) => setSwitchName(e.target.value)}
                     className="w-full h-10 px-3.5 rounded-xl bg-black/40 border border-white/10 text-[13px] text-clay-text placeholder:text-clay-muted/50 focus:outline-none focus:border-clay-accent"
                     maxLength={20}
                   />
+                  <input
+                    type="password"
+                    placeholder="Passcode / PIN (if set)"
+                    value={switchPass}
+                    onChange={(e) => setSwitchPass(e.target.value)}
+                    className="w-full h-10 px-3.5 rounded-xl bg-black/40 border border-white/10 text-[13px] text-clay-text placeholder:text-clay-muted/50 focus:outline-none focus:border-clay-accent"
+                    maxLength={20}
+                  />
+                  {loginError && (
+                    <p className="text-[11px] text-rose-400">{loginError}</p>
+                  )}
                   <div className="flex items-center justify-end gap-2 mt-1">
                     <ClayButton
                       type="button"
@@ -183,7 +204,7 @@ export default function SplashView() {
                       variant="success"
                       className="h-9 px-5 rounded-xl text-[12px] font-semibold"
                     >
-                      Confirm
+                      Login / Resume
                     </ClayButton>
                   </div>
                 </form>
