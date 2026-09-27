@@ -230,7 +230,7 @@ export default function RaidFinderView() {
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto px-4 pb-16 pt-20">
+<div className="flex-1 overflow-y-auto px-4 pb-16 pt-28">
         <div className="grid gap-5 sm:grid-cols-2 max-w-4xl mx-auto">
           {RAID_TARGETS.map((t) => (
             <RaidTargetCard key={t.id} target={t} onRaid={() => handleRaid(t)} />

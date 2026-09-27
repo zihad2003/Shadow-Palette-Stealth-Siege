@@ -11,6 +11,10 @@ const subscriptions = new Map();
 
 function wsUrl() {
   if (typeof window === 'undefined') return 'http://127.0.0.1:8080/ws';
+  const apiBase = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '');
+  if (apiBase) {
+    return `${apiBase}/ws`;
+  }
   const proto = window.location.protocol === 'https:' ? 'https' : 'http';
   return `${proto}://${window.location.host}/ws`;
 }
