@@ -806,6 +806,7 @@ export default function StealthRaidView() {
   // Auto-finish raid when outcome is set (after results panel shows briefly)
   useEffect(() => {
     if (hud.outcome && !settled.current) {
+      settled.current = true;
       const timer = window.setTimeout(() => {
         finishRaid();
       }, 1500);
