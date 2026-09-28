@@ -22,6 +22,7 @@ services:
         value: prod
       - key: PORT
         value: 8080
+    healthCheckPath: /api/health
 
 databases:
   - name: shadow-palette-db
