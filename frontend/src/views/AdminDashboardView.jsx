@@ -66,7 +66,7 @@ export default function AdminDashboardView() {
     () => [
       {
         id: userId,
-        username: `Player${userId}`,
+        username: `Player${String(userId).padStart(5, '0')}`,
         coins,
         inkEnergy,
         chips,
@@ -370,7 +370,7 @@ export default function AdminDashboardView() {
           <ClayPanel depth="deep" className="p-4 rounded-[28px] flex flex-col gap-3">
             <div className="flex items-center justify-between gap-2">
               <h2 className="font-heading font-bold text-sm text-clay-text">
-                {creating ? 'New player' : selectedId ? `Player #${selectedId}` : 'Select a player'}
+                {creating ? 'New player' : selectedId ? `Player #${String(selectedId).padStart(5, '0')}` : 'Select a player'}
               </h2>
               {!creating && selectedId && (
                 <ClayButton

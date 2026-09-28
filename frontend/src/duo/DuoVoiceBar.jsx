@@ -26,6 +26,11 @@ export default function DuoVoiceBar() {
   const showToastRef = useRef(showToast);
   showToastRef.current = showToast;
 
+  const partyId = duoParty?.partyId;
+  const isHost = Number(duoParty?.hostId) === Number(userId);
+  const fmtUid = (id) => String(id).padStart(5, '0');
+  const partnerName =
+    isHost ? duoParty?.guestName || `Player ${fmtUid(duoParty?.guestId)}` : duoParty?.hostName || `Player ${fmtUid(duoParty?.hostId)}`;
   const bothInLobby =
     !!duoParty?.partyId &&
     duoParty.status !== 'ENDED' &&

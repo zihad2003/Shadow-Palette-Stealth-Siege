@@ -32,7 +32,7 @@ public class PlotService {
         User user = userRepository.findById(request.getUserId())
                 .orElseGet(() -> userRepository.save(User.builder()
                         .id(request.getUserId())
-                        .username("Player_" + request.getUserId())
+                        .username("Player_" + String.format("%05d", request.getUserId()))
                         .coins(500)
                         .inkEnergy(100)
                         .chips(0)

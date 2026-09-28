@@ -198,6 +198,7 @@ export function GameStateProvider({ children }) {
     } catch {
       /* ignore */
     }
+    return Math.floor(10000 + Math.random() * 90000);
     // null = new visitor/device — will be assigned a unique ID >= 20161 by /api/session/start
     return null;
   });
@@ -393,6 +394,9 @@ export function GameStateProvider({ children }) {
   const visitRoleRef = useRef(null);
   const endVisitRef = useRef(async () => { });
   const snapshotRef = useRef({});
+
+  const fmtUid = (id) => String(id).padStart(5, '0');
+  const username = `Player${fmtUid(userId)}`;
   const [username, setUsername] = useState(() => {
     try {
       const stored = window.localStorage.getItem('sp_username');
@@ -836,14 +840,17 @@ export function GameStateProvider({ children }) {
       const res = await postDuoInvite({ hostId: userId, guestId: gid, hostName: username });
       if (!res?.success) {
         const msg = res?.message || 'Invite failed';
-        showToast(
-          msg === 'GUEST_OFFLINE'
-            ? 'Player offline — both must be on Raid Finder'
-            : msg === 'ALREADY_IN_PARTY'
-              ? 'Already in a duo — leave first'
-              : msg,
-          'error'
-        );
+        let displayMsg = msg;
+        if (msg === 'GUEST_OFFLINE') {
+          displayMsg = 'Player offline — both must be on Raid Finder';
+        } else if (msg === 'ALREADY_IN_PARTY') {
+          displayMsg = 'Already in a duo — leave first';
+        } else if (msg === 'CANNOT_DUO_SELF') {
+          displayMsg = 'Cannot invite yourself';
+        } else if (msg === 'HOST_AND_GUEST_REQUIRED') {
+          displayMsg = 'Host and guest required';
+        }
+        showToast(displayMsg, 'error');
         return false;
       }
       setDuoParty(res);
@@ -883,18 +890,32 @@ export function GameStateProvider({ children }) {
 
   const acceptDuoInvite = async (invite) => {
     const inv = invite || duoInvite;
-    if (!inv?.partyId) return;
+    if (!inv?.partyId) {
+      showToast('No valid party to accept', 'error');
+      return;
+    }
     try {
       const res = await duoAccept({ partyId: inv.partyId, userId });
       if (!res?.success) {
-        showToast(res?.message || 'Accept failed', 'error');
+        const msg = res?.message || 'Accept failed';
+        if (msg === 'PARTY_GONE') {
+          showToast('Party no longer exists', 'error');
+        } else if (msg === 'NOT_GUEST') {
+          showToast('Only the guest can accept', 'error');
+        } else if (msg === 'NOT_IN_LOBBY') {
+          showToast('Party is no longer in lobby', 'error');
+        } else {
+          showToast(msg, 'error');
+        }
+        setDuoInvite(null);
         return;
       }
       setDuoParty(res);
       setDuoInvite(null);
       showToast('Duo ready — host picks a base', 'success');
-    } catch {
+    } catch (e) {
       showToast('Accept failed', 'error');
+      setDuoInvite(null);
     }
   };
 
@@ -905,7 +926,13 @@ export function GameStateProvider({ children }) {
       return;
     }
     try {
-      await duoDecline({ partyId: inv.partyId, userId });
+      const res = await duoDecline({ partyId: inv.partyId, userId });
+      if (!res?.success) {
+        const msg = res?.message || 'Decline failed';
+        if (msg === 'PARTY_GONE') {
+          showToast('Party no longer exists', 'error');
+        }
+      }
     } catch {
       /* ignore */
     }
@@ -918,7 +945,13 @@ export function GameStateProvider({ children }) {
       return;
     }
     try {
-      await duoLeave({ partyId: duoParty.partyId, userId });
+      const res = await duoLeave({ partyId: duoParty.partyId, userId });
+      if (!res?.success) {
+        const msg = res?.message || 'Leave failed';
+        if (msg === 'PARTY_GONE') {
+          showToast('Party no longer exists', 'error');
+        }
+      }
     } catch {
       /* ignore */
     }
@@ -927,7 +960,10 @@ export function GameStateProvider({ children }) {
   };
 
   const startDuoRaidOnTarget = async (defenderId, raidLoot) => {
-    if (!duoParty?.partyId) return false;
+    if (!duoParty?.partyId) {
+      showToast('No active duo party', 'error');
+      return false;
+    }
     const isHost = Number(duoParty.hostId) === Number(userId);
     if (!isHost) {
       showToast('Host picks the target', 'info');
@@ -941,7 +977,18 @@ export function GameStateProvider({ children }) {
         raidId: `duo_${Date.now()}`,
       });
       if (!res?.success) {
-        showToast(res?.message || 'Could not start duo raid', 'error');
+        const msg = res?.message || 'Could not start duo raid';
+        if (msg === 'PARTY_GONE') {
+          showToast('Party no longer exists', 'error');
+        } else if (msg === 'NOT_HOST') {
+          showToast('Only the host can start raids', 'error');
+        } else if (msg === 'DEFENDER_REQUIRED') {
+          showToast('Target base required', 'error');
+        } else if (msg === 'PARTY_ENDED') {
+          showToast('Party has ended', 'error');
+        } else {
+          showToast(msg, 'error');
+        }
         return false;
       }
       setDuoParty(res);

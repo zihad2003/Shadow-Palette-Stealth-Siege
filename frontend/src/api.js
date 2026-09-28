@@ -5,6 +5,17 @@ const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '
 async function request(url, options = {}) {
   const fullUrl = url.startsWith('http') ? url : `${API_BASE_URL}${url}`;
   const headers = { 'Content-Type': 'application/json', ...options.headers };
+  // Add a timeout so the UI doesn't hang if backend proxy is unresponsive
+  const signal = options.signal || (typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(5000) : undefined);
+  const res = await fetch(fullUrl, { ...options, headers, signal }).catch((err) => {
+    // Convert fetch abort/network errors into an offline error immediately
+    const errorMsg = 'Backend offline or unreachable';
+    const fakeRes = new Error(errorMsg);
+    fakeRes.status = 503;
+    fakeRes.data = { success: false, error: errorMsg };
+    throw fakeRes;
+  });
+  const data = await res.json().catch(() => ({ success: false, error: 'INVALID_JSON_RESPONSE' }));
   const res = await fetch(fullUrl, { ...options, headers });
 
   const contentType = res.headers.get('content-type') || '';

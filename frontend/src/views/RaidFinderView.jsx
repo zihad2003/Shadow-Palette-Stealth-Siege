@@ -59,6 +59,8 @@ export default function RaidFinderView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [duoOpen, duoParty?.partyId, duoParty?.status]);
 
+  const fmtUid = (id) => String(id).padStart(5, '0');
+
   const inDuo = !!duoParty?.partyId && duoParty.status !== 'ENDED';
   const isDuoHost = inDuo && Number(duoParty.hostId) === Number(userId);
 
@@ -67,8 +69,8 @@ export default function RaidFinderView() {
   }
   const partnerLabel = inDuo
     ? isDuoHost
-      ? duoParty.guestName || `Player ${duoParty.guestId}`
-      : duoParty.hostName || `Player ${duoParty.hostId}`
+      ? duoParty.guestName || `Player ${fmtUid(duoParty.guestId)}`
+      : duoParty.hostName || `Player ${fmtUid(duoParty.hostId)}`
     : null;
 
   const handleRaid = async (target) => {
@@ -92,6 +94,8 @@ export default function RaidFinderView() {
   };
 
   const players = (onlinePlayers || []).filter((p) => Number(p.userId) !== Number(userId));
+  const otherHint = Number(userId) === 12 ? 34 : 12;
+  const otherHintFormatted = fmtUid(otherHint);
   const otherHint = Number(userId) === 20161 ? 20162 : 20161;
 
   const onRefresh = async () => {
@@ -156,7 +160,7 @@ export default function RaidFinderView() {
               </ClayButton>
             </div>
             <p className="text-[10px] text-clay-muted mb-2">
-              You are <span className="text-clay-text font-semibold">Player {userId}</span>
+              You are <span className="text-clay-text font-semibold">Player {fmtUid(userId)}</span>
             </p>
 
             {inDuo ? (
@@ -193,9 +197,9 @@ export default function RaidFinderView() {
                       >
                         <div className="min-w-0">
                           <p className="text-[12px] font-medium truncate">
-                            {p.username || `Player ${p.userId}`}
+                            {p.username || `Player ${fmtUid(p.userId)}`}
                           </p>
-                          <p className="text-[9px] text-clay-muted">id {p.userId} · online</p>
+                          <p className="text-[9px] text-clay-muted">id {fmtUid(p.userId)} · online</p>
                         </div>
                         <ClayButton
                           variant={sentDuo[p.userId] ? 'ghost' : 'success'}
@@ -216,7 +220,7 @@ export default function RaidFinderView() {
                   <input
                     type="number"
                     min={1}
-                    placeholder={`Friend id (e.g. ${otherHint})`}
+                    placeholder={`Friend id (e.g. ${otherHintFormatted})`}
                     value={manualId}
                     onChange={(e) => setManualId(e.target.value)}
                     className="flex-1 h-8 rounded-lg bg-black/15 px-2 text-[11px] text-clay-text outline-none border border-white/10"

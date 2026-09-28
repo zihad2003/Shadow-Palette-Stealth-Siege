@@ -97,7 +97,7 @@ export default function VisitHud() {
               <div className="flex flex-col gap-1.5">
                 {players.map((p) => (
                   <div key={p.userId} className="flex items-center justify-between gap-2">
-                    <span className="text-[12px] font-semibold text-clay-text truncate">{p.username || `Player ${p.userId}`}</span>
+                    <span className="text-[12px] font-semibold text-clay-text truncate">{p.username || `Player ${String(p.userId).padStart(5, '0')}`}</span>
                     <ClayButton
                       variant={sentIds[p.userId] ? 'ghost' : 'success'}
                       className="h-7 px-2.5 rounded-lg text-[10px]"

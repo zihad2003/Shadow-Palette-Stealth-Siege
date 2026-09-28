@@ -305,7 +305,7 @@ public class PresenceService {
         if (fallback != null && !fallback.isBlank()) return fallback.trim();
         return userRepository.findById(userId)
                 .map(User::getUsername)
-                .orElse("Player" + userId);
+                .orElse("Player" + String.format("%05d", userId));
     }
 
     private VisitInviteDto toInviteDto(VisitInvite invite, Map<String, Object> snapshot) {

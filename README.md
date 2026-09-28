@@ -152,6 +152,8 @@ Player id for local multi-window tests: `?userId=34` (persisted in `localStorage
 | [`docs/05-api-contract-v2.md`](docs/05-api-contract-v2.md) | REST contract |
 | [`docs/09-setup-guide.md`](docs/09-setup-guide.md) | Tooling / first-time setup |
 | [`docs/live-raid-testing.md`](docs/live-raid-testing.md) | Hybrid live defense playbook |
+| [`docs/deployment-guide.md`](docs/deployment-guide.md) | Production deployment (Render + Vercel) |
+| [`docs/deployment-guide-bn.md`](docs/deployment-guide-bn.md) | ডিপ্লয়মেন্ট গাইড (বাংলা) |
 
 ---
 

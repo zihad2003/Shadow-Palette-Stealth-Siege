@@ -36,7 +36,7 @@ export default function LiveRaidInviteListener() {
           setLiveRaidInvite({
             raidId: msg.raidId,
             attackerUserId: msg.attackerUserId,
-            attackerName: msg.attackerName || `Player${msg.attackerUserId}`,
+            attackerName: msg.attackerName || `Player${String(msg.attackerUserId).padStart(5, '0')}`,
             joinDeadline: msg.joinDeadline,
             joinSeconds: msg.joinSeconds || 15,
             receivedAt: Date.now(),
