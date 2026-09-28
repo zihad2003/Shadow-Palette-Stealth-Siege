@@ -1,6 +1,6 @@
 /**
- * Robust WebRTC voice chat with STUN and TURN fallback (via Open Relay's public free server: 20GB/month shared pool, no account).
- * Modeled after battle-royale in-game comms (PUBG/Valorant).
+ * Robust WebRTC voice chat with STUN and Open Relay TURN fallback.
+ * Fixes SDP negotiation races, prevents audio feedback conflicts, and guarantees reliable laptop-to-laptop and laptop-to-mobile audio.
  */
 import { stompPublish, stompSubscribe, stompUnsubscribe } from '../live/stompClient.js';
 
@@ -27,8 +27,6 @@ export function createDuoVoiceCall({ partyId, userId, isHost, onStatus, onRemote
   let disposed = false;
   let makingOffer = false;
   let remoteReady = false;
-  let audioCtx = null;
-  let remoteAudioElement = null;
   const pendingIce = [];
   const signalDest = `/topic/duo/${partyId}/signal`;
 
@@ -59,69 +57,9 @@ export function createDuoVoiceCall({ partyId, userId, isHost, onStatus, onRemote
     }
   }
 
-  let activeSource = null;
-  let activeGain = null;
-
-  function playStream(stream) {
-    if (disposed || !stream) return;
-
-    // 1. Dedicated DOM-attached HTML5 Audio element for Windows/macOS Chrome audio routing
-    try {
-      if (!remoteAudioElement) {
-        let el = document.getElementById('webrtc-duo-audio-el');
-        if (!el) {
-          el = document.createElement('audio');
-          el.id = 'webrtc-duo-audio-el';
-          el.autoplay = true;
-          el.playsInline = true;
-          el.style.display = 'none';
-          document.body.appendChild(el);
-        }
-        remoteAudioElement = el;
-      }
-      remoteAudioElement.srcObject = stream;
-      remoteAudioElement.volume = deafened ? 0 : 1.0;
-      remoteAudioElement.muted = deafened;
-      const p = remoteAudioElement.play();
-      if (p !== undefined) {
-        p.catch((err) => {
-          console.warn('[Voice] Audio autoplay waiting for gesture:', err);
-        });
-      }
-    } catch (e) {
-      console.warn('[Voice] DOM audio element:', e);
-    }
-
-    // 2. Web Audio API pipeline with persistent references (prevents V8 garbage collection drop)
-    try {
-      if (!audioCtx || audioCtx.state === 'closed') {
-        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-        if (AudioContextClass) {
-          audioCtx = new AudioContextClass();
-        }
-      }
-      if (audioCtx) {
-        if (audioCtx.state === 'suspended') {
-          audioCtx.resume().catch(() => {});
-        }
-        if (activeSource) {
-          try { activeSource.disconnect(); } catch { /* ignore */ }
-        }
-        activeSource = audioCtx.createMediaStreamSource(stream);
-        activeGain = audioCtx.createGain();
-        activeGain.gain.value = deafened ? 0 : 1.0;
-        activeSource.connect(activeGain);
-        activeGain.connect(audioCtx.destination);
-      }
-    } catch (e) {
-      console.warn('[Voice] WebAudio pipeline:', e);
-    }
-
-    onRemoteStream?.(stream);
-  }
-
   async function sendOffer() {
-    if (disposed || !pc || !isHost) return;
+    if (disposed || !pc || !isHost || makingOffer) return;
+    if (pc.signalingState !== 'stable') return;
     makingOffer = true;
     try {
       setStatus('calling');
@@ -132,7 +70,7 @@ export function createDuoVoiceCall({ partyId, userId, isHost, onStatus, onRemote
       await pc.setLocalDescription(offer);
       await publish('offer', { type: offer.type, sdp: offer.sdp });
     } catch (e) {
-      console.warn('[Voice] Offer error:', e);
+      console.warn('[Voice] sendOffer error:', e);
     } finally {
       makingOffer = false;
     }
@@ -145,20 +83,21 @@ export function createDuoVoiceCall({ partyId, userId, isHost, onStatus, onRemote
     try {
       if (msg.type === 'ready' && isHost) {
         remoteReady = true;
-        if (pc.signalingState === 'stable' || pc.signalingState === 'have-local-offer') {
-          if (pc.signalingState === 'have-local-offer') {
-            await pc.setLocalDescription({ type: 'rollback' }).catch(() => {});
-          }
+        if (pc.signalingState === 'stable') {
           await sendOffer();
         }
         return;
       }
 
       if (msg.type === 'offer' && !isHost) {
-        if (pc.signalingState !== 'stable' && pc.signalingState !== 'have-remote-offer') {
-          return;
+        if (pc.signalingState !== 'stable') {
+          // Collision resolution: roll back if we had a local offer
+          if (pc.signalingState === 'have-local-offer') {
+            await pc.setLocalDescription({ type: 'rollback' }).catch(() => {});
+          } else {
+            return;
+          }
         }
-        if (makingOffer) return;
 
         const desc = new RTCSessionDescription(msg.payload);
         await pc.setRemoteDescription(desc);
@@ -225,7 +164,8 @@ export function createDuoVoiceCall({ partyId, userId, isHost, onStatus, onRemote
 
     pc = new RTCPeerConnection(ICE_SERVERS);
 
-    localStream.getTracks().forEach((track) => {
+    localStream.getAudioTracks().forEach((track) => {
+      track.enabled = !muted;
       pc.addTrack(track, localStream);
     });
 
@@ -236,9 +176,9 @@ export function createDuoVoiceCall({ partyId, userId, isHost, onStatus, onRemote
 
     pc.ontrack = (ev) => {
       const stream = ev.streams?.[0] || new MediaStream([ev.track]);
-      playStream(stream);
+      onRemoteStream?.(stream);
       if (ev.track) {
-        ev.track.onunmute = () => playStream(stream);
+        ev.track.onunmute = () => onRemoteStream?.(stream);
       }
       setStatus('connected');
     };
@@ -252,6 +192,13 @@ export function createDuoVoiceCall({ partyId, userId, isHost, onStatus, onRemote
     pc.oniceconnectionstatechange = () => {
       const s = pc?.iceConnectionState;
       if (s === 'connected' || s === 'completed') setStatus('connected');
+      else if (s === 'failed') {
+        setStatus('reconnecting');
+        if (isHost && pc && pc.signalingState === 'stable') {
+          pc.restartIce?.();
+          sendOffer().catch(() => {});
+        }
+      }
     };
 
     await stompSubscribe(signalDest, handleSignal);
@@ -259,27 +206,17 @@ export function createDuoVoiceCall({ partyId, userId, isHost, onStatus, onRemote
     if (isHost) {
       setStatus('calling');
       await sendOffer();
-      // Periodically ping offer if not connected yet
-      const timer = window.setInterval(() => {
-        if (disposed || !pc || pc.connectionState === 'connected') {
-          window.clearInterval(timer);
-          return;
-        }
-        if (!remoteReady) {
-          publish('ready');
-          sendOffer().catch(() => {});
-        }
-      }, 2000);
     } else {
       setStatus('waiting-offer');
       await publish('ready');
+      // If host was slightly slower to subscribe, re-announce ready every 2s until offer arrives
       const timer = window.setInterval(() => {
-        if (disposed || !pc || pc.connectionState === 'connected') {
+        if (disposed || !pc || pc.connectionState === 'connected' || pc.remoteDescription) {
           window.clearInterval(timer);
           return;
         }
         publish('ready');
-      }, 1500);
+      }, 2000);
     }
   }
 
@@ -296,10 +233,6 @@ export function createDuoVoiceCall({ partyId, userId, isHost, onStatus, onRemote
 
   function setDeafened(next) {
     deafened = !!next;
-    if (remoteAudioElement) {
-      remoteAudioElement.muted = deafened;
-      remoteAudioElement.volume = deafened ? 0 : 1.0;
-    }
   }
 
   function isDeafened() {
@@ -317,14 +250,6 @@ export function createDuoVoiceCall({ partyId, userId, isHost, onStatus, onRemote
     pc = null;
     localStream?.getTracks().forEach((t) => t.stop());
     localStream = null;
-    if (remoteAudioElement) {
-      remoteAudioElement.srcObject = null;
-      remoteAudioElement = null;
-    }
-    if (audioCtx && audioCtx.state !== 'closed') {
-      audioCtx.close().catch(() => {});
-      audioCtx = null;
-    }
     setStatus('ended');
   }
 
