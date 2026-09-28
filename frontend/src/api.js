@@ -15,8 +15,6 @@ async function request(url, options = {}) {
     fakeRes.data = { success: false, error: errorMsg };
     throw fakeRes;
   });
-  const data = await res.json().catch(() => ({ success: false, error: 'INVALID_JSON_RESPONSE' }));
-  const res = await fetch(fullUrl, { ...options, headers });
 
   const contentType = res.headers.get('content-type') || '';
   let data = null;

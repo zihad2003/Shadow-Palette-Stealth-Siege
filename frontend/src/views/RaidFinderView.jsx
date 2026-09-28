@@ -94,9 +94,8 @@ export default function RaidFinderView() {
   };
 
   const players = (onlinePlayers || []).filter((p) => Number(p.userId) !== Number(userId));
-  const otherHint = Number(userId) === 12 ? 34 : 12;
-  const otherHintFormatted = fmtUid(otherHint);
   const otherHint = Number(userId) === 20161 ? 20162 : 20161;
+  const otherHintFormatted = fmtUid(otherHint);
 
   const onRefresh = async () => {
     setRefreshing(true);

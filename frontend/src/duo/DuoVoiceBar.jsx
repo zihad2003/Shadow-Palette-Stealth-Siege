@@ -19,18 +19,15 @@ export default function DuoVoiceBar() {
 
   const partyId = duoParty?.partyId;
   const isHost = Number(duoParty?.hostId) === Number(userId);
-  const partnerName = isHost ? duoParty?.guestName : duoParty?.hostName;
+  const fmtUid = (id) => String(id).padStart(5, '0');
+  const partnerName =
+    isHost ? duoParty?.guestName || `Player ${fmtUid(duoParty?.guestId)}` : duoParty?.hostName || `Player ${fmtUid(duoParty?.hostId)}`;
 
   const callRef = useRef(null);
   const audioRef = useRef(null);
   const showToastRef = useRef(showToast);
   showToastRef.current = showToast;
 
-  const partyId = duoParty?.partyId;
-  const isHost = Number(duoParty?.hostId) === Number(userId);
-  const fmtUid = (id) => String(id).padStart(5, '0');
-  const partnerName =
-    isHost ? duoParty?.guestName || `Player ${fmtUid(duoParty?.guestId)}` : duoParty?.hostName || `Player ${fmtUid(duoParty?.hostId)}`;
   const bothInLobby =
     !!duoParty?.partyId &&
     duoParty.status !== 'ENDED' &&

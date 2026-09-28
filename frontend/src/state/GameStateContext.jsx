@@ -396,7 +396,7 @@ export function GameStateProvider({ children }) {
   const snapshotRef = useRef({});
 
   const fmtUid = (id) => String(id).padStart(5, '0');
-  const username = `Player${fmtUid(userId)}`;
+  const defaultUsername = `Player${fmtUid(userId)}`;
   const [username, setUsername] = useState(() => {
     try {
       const stored = window.localStorage.getItem('sp_username');
@@ -404,7 +404,7 @@ export function GameStateProvider({ children }) {
     } catch {
       /* ignore */
     }
-    return `Player${userId}`;
+    return defaultUsername;
   });
 
   useEffect(() => {
@@ -414,7 +414,7 @@ export function GameStateProvider({ children }) {
     } catch {
       /* ignore */
     }
-  }, [username]);
+  }, [username, defaultUsername]);
 
   const loginOrRegister = async (name, password) => {
     const trimmed = (name || '').trim();
