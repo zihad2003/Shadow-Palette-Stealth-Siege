@@ -17,6 +17,10 @@ export default function DuoVoiceBar() {
   const [deafened, setDeafened] = useState(false);
   const [autoplayBlocked, setAutoplayBlocked] = useState(false);
 
+  const partyId = duoParty?.partyId;
+  const isHost = Number(duoParty?.hostId) === Number(userId);
+  const partnerName = isHost ? duoParty?.guestName : duoParty?.hostName;
+
   const callRef = useRef(null);
   const audioRef = useRef(null);
   const showToastRef = useRef(showToast);
