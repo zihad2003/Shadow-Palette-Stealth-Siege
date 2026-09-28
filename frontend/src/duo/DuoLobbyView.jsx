@@ -174,26 +174,43 @@ export default function DuoLobbyView() {
               }`}
             >
               {guestReady ? <CheckCircle2 size={13} /> : <Clock size={13} />}
-              {guestReady ? 'READY' : 'PREPARING'}
+              {guestReady ? 'READY' : duoParty?.guestJoined ? 'PREPARING' : 'INVITED'}
             </div>
           </div>
 
-          {/* 3D Model Canvas */}
-          <div className="relative w-44 h-48 sm:w-52 sm:h-56 my-2 rounded-2xl overflow-hidden bg-gradient-to-b from-white/5 to-transparent border border-white/5 shadow-inner">
-            <CharacterPreview characterModel={guestModel} camoColor={guestCamo} />
-            <div className="absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-black/60 to-transparent pointer-events-none" />
-          </div>
+          {!duoParty?.guestJoined && !isGuest ? (
+            <div className="flex flex-col items-center justify-center my-auto py-12 text-center">
+              <div className="relative mb-3 flex items-center justify-center">
+                <span className="absolute h-14 w-14 rounded-full border border-amber-500/40 animate-ping" />
+                <div className="h-12 w-12 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400">
+                  <Clock size={20} className="animate-spin" style={{ animationDuration: '4s' }} />
+                </div>
+              </div>
+              <h4 className="text-[13px] font-semibold text-white">Invite Sent to Player #{duoParty?.guestId}</h4>
+              <p className="text-[11px] text-clay-muted mt-1 max-w-[22ch]">
+                Waiting for friend to accept invite and enter lobby...
+              </p>
+            </div>
+          ) : (
+            <>
+              {/* 3D Model Canvas */}
+              <div className="relative w-44 h-48 sm:w-52 sm:h-56 my-2 rounded-2xl overflow-hidden bg-gradient-to-b from-white/5 to-transparent border border-white/5 shadow-inner">
+                <CharacterPreview characterModel={guestModel} camoColor={guestCamo} />
+                <div className="absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-black/60 to-transparent pointer-events-none" />
+              </div>
 
-          <h3 className="text-[15px] font-semibold text-white mt-1">
-            {duoParty?.guestName || `Player #${duoParty?.guestId}`}
-          </h3>
-          <div className="flex items-center gap-2 mt-1">
-            <span className="text-[10px] font-mono text-clay-muted">ID: {duoParty?.guestId}</span>
-            <span className="h-1 w-1 rounded-full bg-white/20" />
-            <span className="text-[10px] font-semibold uppercase text-clay-accent">
-              Camo {guestCamo}
-            </span>
-          </div>
+              <h3 className="text-[15px] font-semibold text-white mt-1">
+                {duoParty?.guestName || `Player #${duoParty?.guestId}`}
+              </h3>
+              <div className="flex items-center gap-2 mt-1">
+                <span className="text-[10px] font-mono text-clay-muted">ID: {duoParty?.guestId}</span>
+                <span className="h-1 w-1 rounded-full bg-white/20" />
+                <span className="text-[10px] font-semibold uppercase text-clay-accent">
+                  Camo {guestCamo}
+                </span>
+              </div>
+            </>
+          )}
         </ClayPanel>
       </div>
 

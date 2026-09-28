@@ -22,13 +22,13 @@ export default function DuoVoiceBar() {
   const showToastRef = useRef(showToast);
   showToastRef.current = showToast;
 
-  const partyId = duoParty?.partyId;
-  const isHost = Number(duoParty?.hostId) === Number(userId);
-  const partnerName =
-    isHost ? duoParty?.guestName || `Player ${duoParty?.guestId}` : duoParty?.hostName || `Player ${duoParty?.hostId}`;
+  const bothInLobby =
+    !!duoParty?.partyId &&
+    duoParty.status !== 'ENDED' &&
+    (duoParty.guestJoined || duoParty.status === 'IN_RAID');
 
   useEffect(() => {
-    if (!partyId || !userId) return undefined;
+    if (!bothInLobby || !userId) return undefined;
     let cancelled = false;
     let call = null;
 
@@ -88,9 +88,9 @@ export default function DuoVoiceBar() {
       setVoiceStatus('idle');
       setAutoplayBlocked(false);
     };
-  }, [partyId, userId, isHost, deafened]);
+  }, [partyId, userId, isHost, deafened, bothInLobby]);
 
-  if (!duoParty || duoParty.status === 'ENDED') return null;
+  if (!bothInLobby) return null;
 
   const toggleMute = () => {
     const next = !muted;

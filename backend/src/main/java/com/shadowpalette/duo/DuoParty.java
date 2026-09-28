@@ -34,6 +34,7 @@ public class DuoParty {
 
     private boolean hostReady;
     private boolean guestReady;
+    private boolean guestJoined;
     private Integer hostModel;
     private Integer guestModel;
     private String hostCamo;

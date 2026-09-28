@@ -83,6 +83,7 @@ public class DuoService {
         if (!"LOBBY".equals(party.getStatus())) {
             return fail("NOT_IN_LOBBY");
         }
+        party.setGuestJoined(true);
         party.setGuestName("Player" + party.getGuestId());
         broadcast(party);
         messaging.convertAndSend("/topic/duo-invite/" + party.getHostId(), toState(party, "GUEST_ACCEPTED"));
@@ -276,6 +277,7 @@ public class DuoService {
                 .guestCaught(party.isGuestCaught())
                 .hostReady(party.isHostReady())
                 .guestReady(party.isGuestReady())
+                .guestJoined(party.isGuestJoined())
                 .hostModel(party.getHostModel())
                 .guestModel(party.getGuestModel())
                 .hostCamo(party.getHostCamo())
