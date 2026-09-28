@@ -22,6 +22,15 @@ public class User {
     @Column(nullable = false)
     private String username;
 
+    @Column(length = 255)
+    private String password;
+
+    @Lob
+    @Column(columnDefinition = "LONGTEXT")
+    private String worldSaveJson;
+
+    private boolean termsAccepted;
+
     private int coins;
 
     private int inkEnergy;

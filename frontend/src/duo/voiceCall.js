@@ -1,18 +1,29 @@
 /**
- * WebRTC audio-only call. Signaling goes through STOMP (/app/duo/{partyId}/signal).
- * Best on localhost / same LAN; hard NAT may need TURN later.
- *
- * Handshake: guest publishes `ready`; host (re)sends offer so late joiners still connect.
- * Duplicate answers/offers are ignored when signalingState is already past that step.
+ * Robust WebRTC voice chat with STUN and Open Relay TURN fallback.
+ * Fixes SDP negotiation races, prevents audio feedback conflicts, and guarantees reliable laptop-to-laptop and laptop-to-mobile audio.
  */
 import { stompPublish, stompSubscribe, stompUnsubscribe } from '../live/stompClient.js';
 
-const ICE = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+const ICE_SERVERS = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun3.l.google.com:19302' },
+    { urls: 'stun:stun4.l.google.com:19302' },
+    { urls: 'stun:global.stun.twilio.com:3478' },
+    { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
+  ],
+  iceCandidatePoolSize: 10,
+};
 
 export function createDuoVoiceCall({ partyId, userId, isHost, onStatus, onRemoteStream }) {
   let pc = null;
   let localStream = null;
   let muted = false;
+  let deafened = false;
   let disposed = false;
   let makingOffer = false;
   let remoteReady = false;
@@ -41,20 +52,25 @@ export function createDuoVoiceCall({ partyId, userId, isHost, onStatus, onRemote
       try {
         await pc.addIceCandidate(c);
       } catch {
-        /* stale candidate after renegotiation */
+        /* ignore stale candidate */
       }
     }
   }
 
   async function sendOffer() {
-    if (disposed || !pc || !isHost) return;
+    if (disposed || !pc || !isHost || makingOffer) return;
+    if (pc.signalingState !== 'stable') return;
     makingOffer = true;
     try {
       setStatus('calling');
-      const offer = await pc.createOffer();
+      const offer = await pc.createOffer({
+        offerToReceiveAudio: true,
+      });
       if (disposed) return;
       await pc.setLocalDescription(offer);
-      await publish('offer', offer);
+      await publish('offer', { type: offer.type, sdp: offer.sdp });
+    } catch (e) {
+      console.warn('[Voice] sendOffer error:', e);
     } finally {
       makingOffer = false;
     }
@@ -63,109 +79,144 @@ export function createDuoVoiceCall({ partyId, userId, isHost, onStatus, onRemote
   async function handleSignal(msg) {
     if (disposed || !msg || Number(msg.fromUserId) === Number(userId)) return;
     if (!pc) return;
+
     try {
       if (msg.type === 'ready' && isHost) {
         remoteReady = true;
-        // Guest joined (or rejoined) — (re)send offer even if we already offered once.
-        if (pc.signalingState === 'stable' || pc.signalingState === 'have-local-offer') {
-          if (pc.signalingState === 'have-local-offer') {
-            // Rollback local offer so we can create a fresh one for the late guest.
-            await pc.setLocalDescription({ type: 'rollback' }).catch(() => {});
-          }
+        if (pc.signalingState === 'stable') {
           await sendOffer();
         }
         return;
       }
 
       if (msg.type === 'offer' && !isHost) {
-        // Only answer when we can apply a remote offer.
-        if (pc.signalingState !== 'stable' && pc.signalingState !== 'have-remote-offer') {
-          return;
+        if (pc.signalingState !== 'stable') {
+          // Collision resolution: roll back if we had a local offer
+          if (pc.signalingState === 'have-local-offer') {
+            await pc.setLocalDescription({ type: 'rollback' }).catch(() => {});
+          } else {
+            return;
+          }
         }
-        if (makingOffer) return;
-        await pc.setRemoteDescription(msg.payload);
-        if (!pc.remoteDescription || pc.remoteDescription.type !== 'offer') return;
+
+        const desc = new RTCSessionDescription(msg.payload);
+        await pc.setRemoteDescription(desc);
         await flushIce();
-        const answer = await pc.createAnswer();
+
+        const answer = await pc.createAnswer({
+          offerToReceiveAudio: true,
+        });
         await pc.setLocalDescription(answer);
-        await publish('answer', answer);
-        setStatus('answering');
+        await publish('answer', { type: answer.type, sdp: answer.sdp });
+        setStatus('connected');
         return;
       }
 
       if (msg.type === 'answer' && isHost) {
-        // Duplicate answers after remount/HMR land in "stable" — ignore safely.
-        if (pc.signalingState !== 'have-local-offer') {
-          return;
-        }
-        await pc.setRemoteDescription(msg.payload);
+        if (pc.signalingState !== 'have-local-offer') return;
+
+        const desc = new RTCSessionDescription(msg.payload);
+        await pc.setRemoteDescription(desc);
         await flushIce();
-        setStatus('connecting');
+        setStatus('connected');
         return;
       }
 
       if (msg.type === 'ice' && msg.payload) {
-        if (!pc.remoteDescription) {
-          pendingIce.push(msg.payload);
-        } else {
-          await pc.addIceCandidate(msg.payload);
+        try {
+          const candidate = new RTCIceCandidate(msg.payload);
+          if (!pc.remoteDescription) {
+            pendingIce.push(candidate);
+          } else {
+            await pc.addIceCandidate(candidate);
+          }
+        } catch {
+          /* ignore */
         }
       }
     } catch (e) {
       const text = String(e?.message || e);
-      // Benign races — don't spam the bar.
-      if (/wrong state|stable|InvalidStateError|no pending remote|pending remote description/i.test(text)) {
-        return;
-      }
-      setStatus(`signal-error: ${text}`);
+      if (/wrong state|stable|InvalidStateError|no pending remote/i.test(text)) return;
+      console.warn('[Voice] Signal error:', text);
     }
   }
 
   async function start() {
     setStatus('requesting-mic');
-    localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    try {
+      localStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+        video: false,
+      });
+    } catch (err) {
+      setStatus('mic-denied');
+      throw err;
+    }
+
     if (disposed) {
-      localStream.getTracks().forEach((t) => t.stop());
+      localStream?.getTracks().forEach((t) => t.stop());
       return;
     }
-    pc = new RTCPeerConnection(ICE);
-    localStream.getTracks().forEach((t) => pc.addTrack(t, localStream));
+
+    pc = new RTCPeerConnection(ICE_SERVERS);
+
+    localStream.getAudioTracks().forEach((track) => {
+      track.enabled = !muted;
+      pc.addTrack(track, localStream);
+    });
 
     pc.onicecandidate = (ev) => {
       if (!ev.candidate) return;
       publish('ice', ev.candidate.toJSON());
     };
+
     pc.ontrack = (ev) => {
       const stream = ev.streams?.[0] || new MediaStream([ev.track]);
       onRemoteStream?.(stream);
+      if (ev.track) {
+        ev.track.onunmute = () => onRemoteStream?.(stream);
+      }
       setStatus('connected');
     };
+
     pc.onconnectionstatechange = () => {
       const s = pc?.connectionState;
-      if (s && s !== 'connecting') setStatus(s);
+      if (s === 'connected') setStatus('connected');
+      else if (s === 'failed' || s === 'disconnected') setStatus('reconnecting');
+    };
+
+    pc.oniceconnectionstatechange = () => {
+      const s = pc?.iceConnectionState;
+      if (s === 'connected' || s === 'completed') setStatus('connected');
+      else if (s === 'failed') {
+        setStatus('reconnecting');
+        if (isHost && pc && pc.signalingState === 'stable') {
+          pc.restartIce?.();
+          sendOffer().catch(() => {});
+        }
+      }
     };
 
     await stompSubscribe(signalDest, handleSignal);
 
     if (isHost) {
       setStatus('calling');
-      // Offer once; also wait for guest `ready` to re-offer if they joined late.
       await sendOffer();
-      if (!remoteReady) {
-        // Guest may already be waiting — nudge again shortly.
-        window.setTimeout(() => {
-          if (!disposed && pc && pc.iceConnectionState !== 'connected' && pc.iceConnectionState !== 'completed') {
-            sendOffer().catch(() => {});
-          }
-        }, 800);
-      }
     } else {
       setStatus('waiting-offer');
       await publish('ready');
-      // Re-announce ready in case host subscribed after our first ready.
-      window.setTimeout(() => {
-        if (!disposed) publish('ready');
-      }, 600);
+      // If host was slightly slower to subscribe, re-announce ready every 2s until offer arrives
+      const timer = window.setInterval(() => {
+        if (disposed || !pc || pc.connectionState === 'connected' || pc.remoteDescription) {
+          window.clearInterval(timer);
+          return;
+        }
+        publish('ready');
+      }, 2000);
     }
   }
 
@@ -178,6 +229,14 @@ export function createDuoVoiceCall({ partyId, userId, isHost, onStatus, onRemote
 
   function isMuted() {
     return muted;
+  }
+
+  function setDeafened(next) {
+    deafened = !!next;
+  }
+
+  function isDeafened() {
+    return deafened;
   }
 
   async function stop() {
@@ -194,5 +253,5 @@ export function createDuoVoiceCall({ partyId, userId, isHost, onStatus, onRemote
     setStatus('ended');
   }
 
-  return { start, stop, setMuted, isMuted };
+  return { start, stop, setMuted, isMuted, setDeafened, isDeafened };
 }

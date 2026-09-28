@@ -4,6 +4,7 @@ import com.shadowpalette.dto.RaidCompleteRequest;
 import com.shadowpalette.dto.SessionLogTickDto;
 import com.shadowpalette.dto.ValidatedOutcomeDto;
 import com.shadowpalette.dto.WallBreakEventDto;
+import com.shadowpalette.exception.ApiException;
 import com.shadowpalette.observer.DetectionEvent;
 import com.shadowpalette.state.PatrolRobotContext;
 import com.shadowpalette.stealth.DetectionResult;
@@ -14,6 +15,7 @@ import com.shadowpalette.strategy.LootCalculationStrategy;
 import com.shadowpalette.util.Colors;
 import com.shadowpalette.util.StealthConstants;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -35,6 +37,12 @@ public class RaidValidator {
             int defenderCoins,
             int defenderInk
     ) {
+        // Reject null/empty session logs — a client cannot submit zero ticks
+        // and get a free payout.
+        if (request.getSessionLog() == null || request.getSessionLog().isEmpty()) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "EMPTY_SESSION_LOG");
+        }
+
         if (request.getLockedCamoColor() != null && request.getTileColors() != null) {
             return validateColorCamoSession(request, attackerCamoColor, defenderCoins, defenderInk);
         }

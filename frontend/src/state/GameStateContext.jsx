@@ -160,11 +160,13 @@ export function GameStateProvider({ children }) {
       return false;
     }
   })();
-  const startView = allowedViews.includes(initialView) ? initialView : introDone ? 'MAIN_MENU' : 'SPLASH';
+  const isAdminPath = typeof window !== 'undefined' && (window.location.pathname === '/admin' || window.location.pathname === '/admin/');
+  const startView = isAdminPath ? 'ADMIN' : (allowedViews.includes(initialView) ? initialView : 'SPLASH');
   const [gameState, setGameState] = useState(startView);
-  const [isFirstRun] = useState(!introDone);
+  const [isFirstRun, setIsFirstRun] = useState(!introDone);
 
   const markIntroDone = () => {
+    setIsFirstRun(false);
     try {
       window.localStorage.setItem(INTRO_DONE_KEY, '1');
     } catch (e) {
@@ -177,22 +179,95 @@ export function GameStateProvider({ children }) {
   const savedWorld = useRef(forceFullHome ? createMaxedHome() : readWorldSave()).current;
   const [userId, setUserId] = useState(() => {
     try {
+      // ?userId= query param override for local dev/testing
       const q = Number(new URLSearchParams(window.location.search).get('userId'));
-      if (Number.isFinite(q) && q > 0) return q;
+      if (Number.isFinite(q) && q >= 20161) return q;
       const tab = Number(window.sessionStorage.getItem('sp_userId'));
-      if (Number.isFinite(tab) && tab > 0) return tab;
-      const other = Number(window.localStorage.getItem('sp_userId'));
-      if (Number.isFinite(other) && other > 0) {
-        if (other === 12) return 34;
-        if (other === 34) return 12;
-        return other;
-      }
+      if (Number.isFinite(tab) && tab >= 20161) return tab;
+      const stored = Number(window.localStorage.getItem('sp_userId'));
+      if (Number.isFinite(stored) && stored >= 20161) return stored;
+    } catch {
+      /* ignore */
+    }
+    // Clean up any stale legacy id (< 20161) from local/session storage
+    try {
+      const legacyTab = Number(window.sessionStorage.getItem('sp_userId'));
+      if (Number.isFinite(legacyTab) && legacyTab < 20161) window.sessionStorage.removeItem('sp_userId');
+      const legacyStored = Number(window.localStorage.getItem('sp_userId'));
+      if (Number.isFinite(legacyStored) && legacyStored < 20161) window.localStorage.removeItem('sp_userId');
     } catch {
       /* ignore */
     }
     return Math.floor(10000 + Math.random() * 90000);
+    // null = new visitor/device — will be assigned a unique ID >= 20161 by /api/session/start
+    return null;
   });
+
+  // On first mount, resolve or allocate player identity via the server.
+  // If we already have a stored userId, the server validates it.
+  // If null (new device), the server generates the next unique ID >= 20161.
   useEffect(() => {
+    let cancelled = false;
+    const resolve = async () => {
+      try {
+        const { startSession } = await import('../api.js');
+        const res = await startSession(userId);
+        if (!cancelled && res?.success && res.userId) {
+          setUserId(res.userId);
+          if (res.username) setUsername(res.username);
+          try {
+            window.sessionStorage.setItem('sp_userId', String(res.userId));
+            window.localStorage.setItem('sp_userId', String(res.userId));
+            if (res.username) window.localStorage.setItem('sp_username', res.username);
+          } catch {
+            /* private mode */
+          }
+
+          if (res.worldSaveJson) {
+            try {
+              const data = JSON.parse(res.worldSaveJson);
+              window.localStorage.setItem(WORLD_SAVE_KEY, res.worldSaveJson);
+              if (Number.isFinite(data.coins)) setCoins(data.coins);
+              if (Number.isFinite(data.inkEnergy)) setInkEnergy(data.inkEnergy);
+              if (Number.isFinite(data.chips)) setChips(data.chips);
+              if (data.buildings) setBuildings(data.buildings);
+              if (data.paintedTiles) setPaintedTiles(data.paintedTiles);
+              if (data.defenses) setDefenses(data.defenses);
+              if (data.characterModel) setCharacterModel(data.characterModel);
+              if (data.camoColor) setCamoColor(data.camoColor);
+              if (data.prestigeLevel) setPrestigeLevel(data.prestigeLevel);
+            } catch {
+              /* ignore parse error */
+            }
+          }
+        }
+      } catch {
+        // Backend offline / unreachable:
+        // Assign a random unique ephemeral ID for this device so devices don't collide
+        if (!cancelled) {
+          setUserId((prev) => {
+            if (prev != null) return prev;
+            const fallbackId = 20161 + Math.floor(Math.random() * 9000);
+            try {
+              window.sessionStorage.setItem('sp_userId', String(fallbackId));
+              window.localStorage.setItem('sp_userId', String(fallbackId));
+            } catch {
+              /* ignore */
+            }
+            return fallbackId;
+          });
+        }
+      }
+    };
+    resolve();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (userId == null) return;
     try {
       window.sessionStorage.setItem('sp_userId', String(userId));
       window.localStorage.setItem('sp_userId', String(userId));
@@ -317,11 +392,75 @@ export function GameStateProvider({ children }) {
   const homeBackupRef = useRef(null);
   const visitSessionRef = useRef(null);
   const visitRoleRef = useRef(null);
-  const endVisitRef = useRef(async () => {});
+  const endVisitRef = useRef(async () => { });
   const snapshotRef = useRef({});
 
   const fmtUid = (id) => String(id).padStart(5, '0');
   const username = `Player${fmtUid(userId)}`;
+  const [username, setUsername] = useState(() => {
+    try {
+      const stored = window.localStorage.getItem('sp_username');
+      if (stored && stored.trim()) return stored.trim();
+    } catch {
+      /* ignore */
+    }
+    return `Player${userId}`;
+  });
+
+  useEffect(() => {
+    if (!username) return;
+    try {
+      window.localStorage.setItem('sp_username', username);
+    } catch {
+      /* ignore */
+    }
+  }, [username]);
+
+  const loginOrRegister = async (name, password) => {
+    const trimmed = (name || '').trim();
+    if (!trimmed) return false;
+    try {
+      const { startSession } = await import('../api.js');
+      const res = await startSession(null, trimmed, password);
+      if (res?.success && res.userId) {
+        setUserId(res.userId);
+        setUsername(res.username || trimmed);
+        try {
+          window.sessionStorage.setItem('sp_userId', String(res.userId));
+          window.localStorage.setItem('sp_userId', String(res.userId));
+          window.localStorage.setItem('sp_username', res.username || trimmed);
+        } catch {
+          /* ignore */
+        }
+
+        if (res.worldSaveJson) {
+          try {
+            const data = JSON.parse(res.worldSaveJson);
+            window.localStorage.setItem(WORLD_SAVE_KEY, res.worldSaveJson);
+            if (Number.isFinite(data.coins)) setCoins(data.coins);
+            if (Number.isFinite(data.inkEnergy)) setInkEnergy(data.inkEnergy);
+            if (Number.isFinite(data.chips)) setChips(data.chips);
+            if (data.buildings) setBuildings(data.buildings);
+            if (data.paintedTiles) setPaintedTiles(data.paintedTiles);
+            if (data.defenses) setDefenses(data.defenses);
+            if (data.characterModel) setCharacterModel(data.characterModel);
+            if (data.camoColor) setCamoColor(data.camoColor);
+            if (data.prestigeLevel) setPrestigeLevel(data.prestigeLevel);
+          } catch {
+            /* ignore parse error */
+          }
+        }
+        return res;
+      }
+      return res;
+    } catch (err) {
+      if (err?.message === 'INVALID_PASSWORD' || err?.data?.error === 'INVALID_PASSWORD') {
+        return { success: false, error: 'INVALID_PASSWORD' };
+      }
+      setUsername(trimmed);
+      return { success: true, offline: true };
+    }
+  };
   const isVisitGuest = visitRole === 'guest';
   visitSessionRef.current = visitSession;
   visitRoleRef.current = visitRole;
@@ -364,8 +503,25 @@ export function GameStateProvider({ children }) {
 
   const saveWorld = (message = 'Saved') => {
     try {
-      window.localStorage.setItem(WORLD_SAVE_KEY, JSON.stringify(worldRef.current));
+      const serialized = JSON.stringify(worldRef.current);
+      window.localStorage.setItem(WORLD_SAVE_KEY, serialized);
       if (message) showToast(message, 'success');
+
+      if (userId) {
+        import('../api.js').then(({ savePlayerProgress }) => {
+          savePlayerProgress({
+            userId,
+            worldSaveJson: serialized,
+            coins: worldRef.current.coins,
+            inkEnergy: worldRef.current.inkEnergy,
+            chips: worldRef.current.chips,
+            prestigeLevel: worldRef.current.prestigeLevel,
+            termsAccepted: true,
+          }).catch(() => {
+            /* local save preserved */
+          });
+        });
+      }
       return true;
     } catch {
       showToast('Save failed', 'error');
@@ -555,10 +711,10 @@ export function GameStateProvider({ children }) {
       const session = createRaidSession({ attackerId: userId, defenderId: defender, camoColor });
       const raidSessionObj = duoParty?.partyId
         ? Object.freeze({
-            ...session,
-            raidId: duoParty.raidId || session.raidId,
-            duoPartyId: duoParty.partyId,
-          })
+          ...session,
+          raidId: duoParty.raidId || session.raidId,
+          duoPartyId: duoParty.partyId,
+        })
         : session;
       setRaidSession(raidSessionObj);
       const mountRaid = async () => {
@@ -581,11 +737,11 @@ export function GameStateProvider({ children }) {
               setRaidSession((prev) =>
                 prev
                   ? {
-                      ...prev,
-                      raidId: live.raidId,
-                      liveInviteSent: !!live.liveInviteSent,
-                      joinDeadline: live.joinDeadline || null,
-                    }
+                    ...prev,
+                    raidId: live.raidId,
+                    liveInviteSent: !!live.liveInviteSent,
+                    joinDeadline: live.joinDeadline || null,
+                  }
                   : prev
               );
             }
@@ -1551,7 +1707,7 @@ export function GameStateProvider({ children }) {
         seated: true,
         gear: host ? 1 : undefined,
         trackT: host ? buggyTrackT : undefined,
-      }).catch(() => {});
+      }).catch(() => { });
     }
     if (role === 'passenger') {
       showToast('Passenger', 'success');
@@ -1570,7 +1726,7 @@ export function GameStateProvider({ children }) {
       visitId: visitSession.visitId,
       userId,
       reaction: rx,
-    }).catch(() => {});
+    }).catch(() => { });
     window.dispatchEvent(new CustomEvent('visit-reaction', { detail: { kind } }));
   };
 
@@ -1585,7 +1741,7 @@ export function GameStateProvider({ children }) {
         seated: false,
         gear: visitRole === 'guest' ? undefined : 0,
         trackT: visitRole === 'guest' ? undefined : buggyTrackT,
-      }).catch(() => {});
+      }).catch(() => { });
     }
     return true;
   };
@@ -1601,7 +1757,7 @@ export function GameStateProvider({ children }) {
         seated: buggySeated,
         gear,
         trackT: buggyTrackT,
-      }).catch(() => {});
+      }).catch(() => { });
     }
   };
 
@@ -1733,7 +1889,7 @@ export function GameStateProvider({ children }) {
         visitId: session.visitId,
         userId,
         seated: true,
-      }).catch(() => {});
+      }).catch(() => { });
       triggerLoading(
         `ARRIVING AT ${String(session.hostName || 'HOST').toUpperCase()} FORTRESS`,
         'You are in their base',
@@ -1936,6 +2092,8 @@ export function GameStateProvider({ children }) {
     toasts,
     showToast,
     username,
+    setUsername,
+    loginOrRegister,
     mountedParts,
     carriedPart,
     partSpawns,
@@ -2008,7 +2166,7 @@ export function GameStateProvider({ children }) {
           if (
             state.status === 'IN_RAID' &&
             state.defenderId != null &&
-            Number(state.guestId) === Number(userId) &&
+            (Number(state.guestId) === Number(userId) || Number(state.hostId) === Number(userId)) &&
             gameState !== 'STEALTH_RAID' &&
             gameState !== 'RAID_ENTER'
           ) {
@@ -2065,7 +2223,9 @@ export function GameStateProvider({ children }) {
             prev?.status === res.status &&
             prev?.alarmLatched === res.alarmLatched &&
             prev?.hostX === res.hostX &&
-            prev?.guestX === res.guestX
+            prev?.guestX === res.guestX &&
+            prev?.hostReady === res.hostReady &&
+            prev?.guestReady === res.guestReady
           ) {
             return prev;
           }
@@ -2075,7 +2235,7 @@ export function GameStateProvider({ children }) {
         if (
           res.status === 'IN_RAID' &&
           res.defenderId != null &&
-          iAmGuest &&
+          (iAmGuest || iAmHost) &&
           gameState !== 'STEALTH_RAID' &&
           gameState !== 'RAID_ENTER'
         ) {
@@ -2142,7 +2302,7 @@ export function GameStateProvider({ children }) {
         characterModel,
         camoColor,
         snapshot: snapshotRef.current,
-      }).catch(() => {});
+      }).catch(() => { });
     };
     beat();
     const id = window.setInterval(beat, 8000);
@@ -2248,7 +2408,7 @@ export function GameStateProvider({ children }) {
         seated: buggySeated,
         gear: buggyGear,
         trackT: buggyTrackT,
-      }).catch(() => {});
+      }).catch(() => { });
     }, 450);
     return () => window.clearInterval(id);
   }, [visitSession?.visitId, visitRole, buggySeated, buggyGear, buggyTrackT, userId]);
@@ -2260,7 +2420,7 @@ export function GameStateProvider({ children }) {
         visitId: visitSession.visitId,
         userId,
         seated: buggySeated,
-      }).catch(() => {});
+      }).catch(() => { });
     }, 800);
     return () => window.clearInterval(id);
   }, [visitSession?.visitId, visitRole, buggySeated, userId]);

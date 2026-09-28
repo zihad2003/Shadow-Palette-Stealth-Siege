@@ -16,9 +16,27 @@ async function request(url, options = {}) {
     throw fakeRes;
   });
   const data = await res.json().catch(() => ({ success: false, error: 'INVALID_JSON_RESPONSE' }));
+  const res = await fetch(fullUrl, { ...options, headers });
 
-  if (!res.ok) {
-    const errorMsg = data.error || `HTTP ${res.status}`;
+  const contentType = res.headers.get('content-type') || '';
+  let data = null;
+  if (contentType.includes('application/json')) {
+    data = await res.json().catch(() => null);
+  }
+
+  if (!data) {
+    const isVercel = typeof window !== 'undefined' && window.location.hostname.includes('vercel.app');
+    const errorMsg = !API_BASE_URL && isVercel
+      ? 'Backend URL not configured on Vercel (set VITE_API_BASE_URL)'
+      : 'Backend offline or returned non-JSON';
+    const err = new Error(errorMsg);
+    err.status = res.status;
+    err.data = { success: false, error: errorMsg };
+    throw err;
+  }
+
+  if (!res.ok || (data && data.success === false && data.error)) {
+    const errorMsg = data.error || data.message || `HTTP ${res.status}`;
     const err = new Error(errorMsg);
     err.status = res.status;
     err.data = data;
@@ -31,14 +49,35 @@ export async function fetchHealth() {
   return request('/api/health');
 }
 
+/** Resolve or create a player identity server-side. */
+export async function startSession(userId, username, password) {
+  const payload = {};
+  if (userId != null) payload.userId = userId;
+  if (username) payload.username = username;
+  if (password) payload.password = password;
+  return request('/api/session/start', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function savePlayerProgress(payload) {
+  return request('/api/player/save', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function fetchMap() {
   return request('/api/map');
 }
 
-export async function setupPlayer(userId, characterModel, camoColor) {
+export async function setupPlayer(userId, characterModel, camoColor, username) {
+  const payload = { userId, characterModel, camoColor };
+  if (username) payload.username = username;
   return request('/api/player/setup', {
     method: 'POST',
-    body: JSON.stringify({ userId, characterModel, camoColor }),
+    body: JSON.stringify(payload),
   });
 }
 
@@ -220,6 +259,10 @@ export async function duoMarkCaught(partyId, userId) {
     method: 'POST',
     body: JSON.stringify({ partyId, userId }),
   });
+}
+
+export async function duoSetReady(payload) {
+  return request('/api/duo/ready', { method: 'POST', body: JSON.stringify(payload) });
 }
 
 export async function duoForUser(userId) {

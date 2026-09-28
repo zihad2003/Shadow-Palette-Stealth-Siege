@@ -9,6 +9,7 @@ import RaidTargetCard from '../components/raid/RaidTargetCard.jsx';
 import { RAID_TARGETS } from '../data/raidTargets.js';
 import { useGameState } from '../state/GameStateContext.jsx';
 import { RefreshCw, Users } from 'lucide-react';
+import DuoLobbyView from '../duo/DuoLobbyView.jsx';
 
 export default function RaidFinderView() {
   const {
@@ -62,6 +63,10 @@ export default function RaidFinderView() {
 
   const inDuo = !!duoParty?.partyId && duoParty.status !== 'ENDED';
   const isDuoHost = inDuo && Number(duoParty.hostId) === Number(userId);
+
+  if (inDuo && duoParty?.status !== 'IN_RAID') {
+    return <DuoLobbyView />;
+  }
   const partnerLabel = inDuo
     ? isDuoHost
       ? duoParty.guestName || `Player ${fmtUid(duoParty.guestId)}`
@@ -91,6 +96,7 @@ export default function RaidFinderView() {
   const players = (onlinePlayers || []).filter((p) => Number(p.userId) !== Number(userId));
   const otherHint = Number(userId) === 12 ? 34 : 12;
   const otherHintFormatted = fmtUid(otherHint);
+  const otherHint = Number(userId) === 20161 ? 20162 : 20161;
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -106,7 +112,7 @@ export default function RaidFinderView() {
   const sendManualInvite = async () => {
     const gid = Number(manualId);
     if (!Number.isFinite(gid) || gid <= 0) {
-      showToast('Enter friend user id (e.g. 34)', 'error');
+      showToast(`Enter friend user id (e.g. ${otherHint})`, 'error');
       return;
     }
     const ok = await inviteDuoPlayer(gid);

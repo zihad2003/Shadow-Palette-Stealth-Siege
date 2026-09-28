@@ -4,6 +4,8 @@ import com.shadowpalette.dto.PlayerPrestigeRequest;
 import com.shadowpalette.dto.PlayerPrestigeResponse;
 import com.shadowpalette.dto.PlayerSetupRequest;
 import com.shadowpalette.dto.PlayerSetupResponse;
+import com.shadowpalette.dto.SessionStartRequest;
+import com.shadowpalette.dto.SessionStartResponse;
 import com.shadowpalette.entity.Building;
 import com.shadowpalette.entity.Plot;
 import com.shadowpalette.entity.User;
@@ -16,6 +18,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+
 import java.util.List;
 
 @Service
@@ -26,27 +29,151 @@ public class PlayerService {
     private final PlotRepository plotRepository;
     private final BuildingRepository buildingRepository;
 
+    public static final long MIN_PLAYER_ID = 20161L;
+
+    @Transactional
+    public SessionStartResponse startSession(SessionStartRequest request) {
+        String reqUsername = request != null && request.getUsername() != null ? request.getUsername().trim() : null;
+        String reqPassword = request != null && request.getPassword() != null ? request.getPassword().trim() : null;
+
+        if (reqUsername != null && !reqUsername.isEmpty()) {
+            return userRepository.findByUsernameIgnoreCase(reqUsername)
+                    .map(existing -> {
+                        if (existing.getPassword() != null && !existing.getPassword().isEmpty() && reqPassword != null && !reqPassword.isEmpty()) {
+                            if (!existing.getPassword().equals(reqPassword)) {
+                                throw new ApiException(HttpStatus.UNAUTHORIZED, "INVALID_PASSWORD");
+                            }
+                        }
+                        if (existing.getPassword() == null && reqPassword != null && !reqPassword.isEmpty()) {
+                            existing.setPassword(reqPassword);
+                            userRepository.save(existing);
+                        }
+                        return buildResponseFromUser(existing, false);
+                    })
+                    .orElseGet(() -> createNewUserWithUsername(reqUsername, reqPassword));
+        }
+
+        // If the client sends a valid userId (>= 20161), check if it exists in the DB.
+        if (request != null && request.getUserId() != null && request.getUserId() >= MIN_PLAYER_ID) {
+            return userRepository.findById(request.getUserId())
+                    .map(existing -> {
+                        if (existing.getPassword() != null && !existing.getPassword().isEmpty() && reqPassword != null && !reqPassword.isEmpty()) {
+                            if (!existing.getPassword().equals(reqPassword)) {
+                                throw new ApiException(HttpStatus.UNAUTHORIZED, "INVALID_PASSWORD");
+                            }
+                        }
+                        return buildResponseFromUser(existing, false);
+                    })
+                    // Client sent an ID that doesn't exist — generate a new one.
+                    .orElseGet(this::createNewUser);
+        }
+        // No valid userId supplied (first-time visitor or legacy ID < 20161) — server generates a new unique ID >= 20161.
+        return createNewUser();
+    }
+
+    private SessionStartResponse buildResponseFromUser(User user, boolean newUser) {
+        return SessionStartResponse.builder()
+                .success(true)
+                .userId(user.getId())
+                .username(user.getUsername())
+                .newUser(newUser)
+                .worldSaveJson(user.getWorldSaveJson())
+                .coins(user.getCoins())
+                .inkEnergy(user.getInkEnergy())
+                .chips(user.getChips())
+                .characterModel(user.getCharacterModel())
+                .camoColor(user.getCamoColor())
+                .prestigeLevel(user.getPrestigeLevel())
+                .termsAccepted(user.isTermsAccepted())
+                .build();
+    }
+
+    private SessionStartResponse createNewUserWithUsername(String username, String password) {
+        long nextId = Math.max(MIN_PLAYER_ID, userRepository.findMaxId() + 1);
+        User user = User.builder()
+                .id(nextId)
+                .username(username)
+                .password(password)
+                .coins(500)
+                .inkEnergy(100)
+                .chips(200)
+                .characterModel(1)
+                .camoColor("BLUE")
+                .prestigeLevel(0)
+                .termsAccepted(false)
+                .build();
+        user = userRepository.save(user);
+
+        ensureHomePlot(user);
+
+        return buildResponseFromUser(user, true);
+    }
+
+    private SessionStartResponse createNewUser() {
+        long nextId = Math.max(MIN_PLAYER_ID, userRepository.findMaxId() + 1);
+        return createNewUserWithUsername("Player" + nextId, null);
+    }
+
+    @Transactional
+    public com.shadowpalette.dto.PlayerSaveResponse saveProgress(com.shadowpalette.dto.PlayerSaveRequest request) {
+        if (request == null || request.getUserId() == null) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "USER_ID_REQUIRED");
+        }
+        User user = userRepository.findById(request.getUserId())
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "USER_NOT_FOUND"));
+
+        if (request.getWorldSaveJson() != null) {
+            user.setWorldSaveJson(request.getWorldSaveJson());
+        }
+        if (request.getCoins() != null) user.setCoins(request.getCoins());
+        if (request.getInkEnergy() != null) user.setInkEnergy(request.getInkEnergy());
+        if (request.getChips() != null) user.setChips(request.getChips());
+        if (request.getPrestigeLevel() != null) user.setPrestigeLevel(request.getPrestigeLevel());
+        if (request.getTermsAccepted() != null) user.setTermsAccepted(request.getTermsAccepted());
+
+        userRepository.save(user);
+        return com.shadowpalette.dto.PlayerSaveResponse.builder()
+                .success(true)
+                .userId(user.getId())
+                .message("PROGRESS_SAVED")
+                .build();
+    }
+
     @Transactional
     public PlayerSetupResponse setupPlayer(PlayerSetupRequest request) {
-        User user = userRepository.findById(request.getUserId())
+        Long effectiveUserId = (request.getUserId() != null && request.getUserId() >= MIN_PLAYER_ID)
+                ? request.getUserId()
+                : Math.max(MIN_PLAYER_ID, userRepository.findMaxId() + 1);
+
+        User user = userRepository.findById(effectiveUserId)
                 .orElse(null);
 
         boolean camoAlreadySet = user != null && user.getCamoColor() != null && !user.getCamoColor().trim().isEmpty();
+        String desiredName = request.getUsername() != null && !request.getUsername().trim().isEmpty()
+                ? request.getUsername().trim()
+                : ("Player" + effectiveUserId);
 
         if (user == null) {
             user = User.builder()
-                    .id(request.getUserId())
-                    .username("Player" + String.format("%05d", request.getUserId()))
+                    .id(effectiveUserId)
+                    .username(desiredName)
                     .coins(500)
                     .inkEnergy(100)
                     .chips(200)
                     .characterModel(clampModel(request.getCharacterModel()))
                     .camoColor(request.getCamoColor() != null ? request.getCamoColor().toUpperCase() : "BLUE")
                     .prestigeLevel(0)
+                    .termsAccepted(true)
                     .build();
-        } else if (!camoAlreadySet) {
-            user.setCharacterModel(clampModel(request.getCharacterModel()));
-            user.setCamoColor(request.getCamoColor() != null ? request.getCamoColor().toUpperCase() : "BLUE");
+        } else {
+            user.setTermsAccepted(true);
+            if (request.getUsername() != null && !request.getUsername().trim().isEmpty()) {
+                user.setUsername(desiredName);
+            }
+            if (!camoAlreadySet) {
+                user.setCharacterModel(clampModel(request.getCharacterModel()));
+                user.setCamoColor(request.getCamoColor() != null ? request.getCamoColor().toUpperCase() : "BLUE");
+            }
         }
 
         User saved = userRepository.save(user);

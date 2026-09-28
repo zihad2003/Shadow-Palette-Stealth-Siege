@@ -32,5 +32,13 @@ public class DuoParty {
     private boolean hostCaught;
     private boolean guestCaught;
 
+    private boolean hostReady;
+    private boolean guestReady;
+    private boolean guestJoined;
+    private Integer hostModel;
+    private Integer guestModel;
+    private String hostCamo;
+    private String guestCamo;
+
     private Instant createdAt;
 }

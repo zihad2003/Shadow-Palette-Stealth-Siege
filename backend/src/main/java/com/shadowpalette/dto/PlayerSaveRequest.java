@@ -10,13 +10,14 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class PlayerSetupRequest {
+public class PlayerSaveRequest {
     @NotNull(message = "userId is required")
     private Long userId;
 
-    private int characterModel; // 1 male, 2 female
-
-    private String camoColor; // RED/GREEN/BLUE/YELLOW/PURPLE
-
-    private String username;
+    private String worldSaveJson;
+    private Integer coins;
+    private Integer inkEnergy;
+    private Integer chips;
+    private Integer prestigeLevel;
+    private Boolean termsAccepted;
 }

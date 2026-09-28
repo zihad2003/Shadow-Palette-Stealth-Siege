@@ -9,8 +9,8 @@ import static org.junit.jupiter.api.Assertions.*;
 class ColorCamouflageTest {
 
     @Test
-    @DisplayName("Color match in beam does not expose the attacker")
-    void matchInBeamStaysHidden() {
+    @DisplayName("Color match in beam still exposes the attacker instantly (sync with FE)")
+    void matchInBeamStillExposesInstantly() {
         SearchlightColorEngine.BeamResult beam = SearchlightColorEngine.evaluateBeam(
                 5.5, 4.5, 0, 48, 4.6, 5.5, 6.5
         );
@@ -19,8 +19,8 @@ class ColorCamouflageTest {
                 beam, "RED", "RED", 0.25, 0, false
         );
         assertTrue(tick.colorMatch());
-        assertFalse(tick.exposed());
-        assertTrue(tick.meter() < StealthConstants.SUSPICIOUS_AT);
+        assertTrue(tick.exposed());
+        assertEquals(StealthConstants.ALARM_AT, tick.meter());
     }
 
     @Test
@@ -52,8 +52,8 @@ class ColorCamouflageTest {
     }
 
     @Test
-    @DisplayName("Brief mismatch does not instantly alarm")
-    void briefHitIsNotAlarm() {
+    @DisplayName("Brief hit is an instant alarm")
+    void briefHitIsInstantAlarm() {
         SearchlightColorEngine.BeamResult beam = SearchlightColorEngine.evaluateBeam(
                 5.5, 4.5, 0, 48, 4.6, 5.5, 6.5
         );
@@ -61,7 +61,7 @@ class ColorCamouflageTest {
                 beam, "GREEN", "RED", 0.2, 0, false
         );
         assertTrue(tick.exposed());
-        assertFalse(tick.alarmLatched());
+        assertTrue(tick.alarmLatched());
     }
 
     @Test
