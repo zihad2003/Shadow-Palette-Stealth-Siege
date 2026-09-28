@@ -1,5 +1,7 @@
 package com.shadowpalette.service;
 
+import com.shadowpalette.security.SecurityUtils;
+
 import com.shadowpalette.dto.DefensePlaceRequest;
 import com.shadowpalette.dto.DefensePlaceResponse;
 import com.shadowpalette.entity.Lighthouse;
@@ -51,7 +53,7 @@ public class DefenseService {
                 throw new ApiException(HttpStatus.CONFLICT, "PATROLROBOT_ALREADY_PLACED");
             }
 
-            long successfulRaids = raidLogRepository.countByAttackerIdAndOutcomeNot(request.getUserId(), "CAUGHT");
+            long successfulRaids = raidLogRepository.countByAttackerIdAndOutcomeNot(SecurityUtils.getCurrentUserId(), "CAUGHT");
             if (successfulRaids < 3) {
                 int needed = (int) (3 - successfulRaids);
                 throw new ApiException(HttpStatus.FORBIDDEN, "PATROLROBOT_NOT_UNLOCKED", needed);

@@ -10,7 +10,6 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class DuoInviteRequest {
-    private Long hostId;
     private Long guestId;
     private String hostName;
 }

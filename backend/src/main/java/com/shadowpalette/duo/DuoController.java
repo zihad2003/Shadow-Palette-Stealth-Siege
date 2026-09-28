@@ -60,7 +60,7 @@ public class DuoController {
             @PathVariable String partyId,
             @RequestBody DuoDecisionRequest request
     ) {
-        return ResponseEntity.ok(duoService.markCaught(partyId, request != null ? request.getUserId() : null));
+        return ResponseEntity.ok(duoService.markCaught(partyId, com.shadowpalette.security.SecurityUtils.getCurrentUserId()));
     }
 
     @MessageMapping("/duo/{partyId}/position")

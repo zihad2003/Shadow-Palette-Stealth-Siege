@@ -47,7 +47,7 @@ class LiveRaidFlowTest {
     void offlineNoInvite() {
         when(presenceService.isOnline(34L)).thenReturn(false);
         LiveRaidStartResponse res = liveRaidService.startRaid(LiveRaidStartRequest.builder()
-                .attackerId(12L)
+                
                 .defenderId(34L)
                 .raidId("r1")
                 .attackerName("Attacker")
@@ -63,7 +63,7 @@ class LiveRaidFlowTest {
         when(presenceService.isOnline(34L)).thenReturn(true);
 
         LiveRaidStartResponse start = liveRaidService.startRaid(LiveRaidStartRequest.builder()
-                .attackerId(12L)
+                
                 .defenderId(34L)
                 .raidId("raid-live-1")
                 .attackerName("Raider12")
@@ -73,7 +73,7 @@ class LiveRaidFlowTest {
 
         LiveRaidStateMessage joined = liveRaidService.join(
                 "raid-live-1",
-                LiveRaidJoinRequest.builder().userId(34L).role("DEFENDER").build(),
+                LiveRaidJoinRequest.builder().role("DEFENDER").build(),
                 "ws-def"
         );
         assertTrue(joined.isJoined());
@@ -82,12 +82,12 @@ class LiveRaidFlowTest {
         // Place both on same tile — server must emit CAUGHT and call completeLiveCaught.
         liveRaidService.updatePosition(
                 "raid-live-1",
-                LiveRaidPositionMessage.builder().userId(12L).role("ATTACKER").x(10).y(10).build(),
+                LiveRaidPositionMessage.builder().role("ATTACKER").x(10).y(10).build(),
                 "ws-atk"
         );
         LiveRaidStateMessage caught = liveRaidService.updatePosition(
                 "raid-live-1",
-                LiveRaidPositionMessage.builder().userId(34L).role("DEFENDER").x(10.2).y(10.1).build(),
+                LiveRaidPositionMessage.builder().role("DEFENDER").x(10.2).y(10.1).build(),
                 "ws-def"
         );
 
@@ -114,8 +114,8 @@ class LiveRaidFlowTest {
     void defenderDisconnectFallback() {
         when(presenceService.isOnline(34L)).thenReturn(true);
         liveRaidService.startRaid(LiveRaidStartRequest.builder()
-                .attackerId(12L).defenderId(34L).raidId("raid-d").attackerName("A").build());
-        liveRaidService.join("raid-d", LiveRaidJoinRequest.builder().userId(34L).build(), "ws-def");
+                .defenderId(34L).raidId("raid-d").attackerName("A").build());
+        liveRaidService.join("raid-d", LiveRaidJoinRequest.builder().build(), "ws-def");
         assertTrue(registry.get("raid-d").orElseThrow().isJoined());
 
         liveRaidService.onWsDisconnect("ws-def");

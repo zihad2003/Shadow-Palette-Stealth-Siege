@@ -26,6 +26,13 @@ public class HealthController {
     public ResponseEntity<Map<String, Object>> healthCheck() {
         Map<String, Object> status = new LinkedHashMap<>();
         status.put("status", "ok");
+        return ResponseEntity.ok(status);
+    }
+
+    @GetMapping("/admin/health")
+    public ResponseEntity<Map<String, Object>> adminHealthCheck() {
+        Map<String, Object> status = new LinkedHashMap<>();
+        status.put("status", "ok");
         try (Connection conn = dataSource.getConnection();
              Statement stmt = conn.createStatement()) {
             ResultSet rs = stmt.executeQuery("SELECT 1");

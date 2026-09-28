@@ -459,28 +459,28 @@ export default function StealthRaidView() {
 
       const channel = extractionArmedRef.current
         ? tickExtractionChannel({
-            channelProgress: channelProgressRef.current,
-            x: pos.column,
-            y: pos.row,
-            prevX: prevPosRef.current.column,
-            prevY: prevPosRef.current.row,
-            dt,
-            robotX: robotPos?.column,
-            robotY: robotPos?.row,
-            beamHit:
-              !chaseLatchedRef.current &&
-              !result.alarmLatched &&
-              !!(result.exposed && result.beam?.canSee),
-            robotChasing,
-          })
+          channelProgress: channelProgressRef.current,
+          x: pos.column,
+          y: pos.row,
+          prevX: prevPosRef.current.column,
+          prevY: prevPosRef.current.row,
+          dt,
+          robotX: robotPos?.column,
+          robotY: robotPos?.row,
+          beamHit:
+            !chaseLatchedRef.current &&
+            !result.alarmLatched &&
+            !!(result.exposed && result.beam?.canSee),
+          robotChasing,
+        })
         : {
-            channelProgress: 0,
-            channeling: false,
-            complete: false,
-            interrupted: false,
-            inZone: inExtractionZone(pos.column, pos.row),
-            percent: 0,
-          };
+          channelProgress: 0,
+          channeling: false,
+          complete: false,
+          interrupted: false,
+          inZone: inExtractionZone(pos.column, pos.row),
+          percent: 0,
+        };
       channelProgressRef.current = channel.channelProgress;
       prevPosRef.current = { column: pos.column, row: pos.row };
 
@@ -523,7 +523,7 @@ export default function StealthRaidView() {
       if (stateChanged) lastDetectState.current = robotHudState;
 
       if (robotCaught && !hudRef.current.outcome) {
-        if (duoPartyId) duoMarkCaught(duoPartyId, userId).catch(() => {});
+        if (duoPartyId) duoMarkCaught(duoPartyId, userId).catch(() => { });
         setStolen((prev) => ({ coins: prev.coins, ink: prev.ink }));
         hudRef.current = { ...hudRef.current, outcome: 'CAUGHT' };
         setHud((prev) => ({
@@ -670,7 +670,7 @@ export default function StealthRaidView() {
             role: 'ATTACKER',
             x: pos.column,
             y: pos.row,
-          }).catch(() => {});
+          }).catch(() => { });
         }, 120);
       } catch {
         /* backend / ws down — stay on async AI path */
@@ -704,7 +704,7 @@ export default function StealthRaidView() {
             x: pos.column,
             y: pos.row,
             alarm: duoAlarmRef.current || chaseLatchedRef.current || gateLockedRef.current,
-          }).catch(() => {});
+          }).catch(() => { });
         }, 120);
       } catch {
         /* offline */
@@ -869,7 +869,7 @@ export default function StealthRaidView() {
     const greedCoins = Math.round(greed.coins * share);
     const greedInk = Math.round(greed.ink * share);
     if (outcome === 'CAUGHT' && duoPartyId) {
-      duoMarkCaught(duoPartyId, userId).catch(() => {});
+      duoMarkCaught(duoPartyId, userId).catch(() => { });
     }
     setStolen((prev) => ({
       coins: prev.coins + (outcome === 'CAUGHT' || outcome === 'INCOMPLETE' ? 0 : greedCoins),
@@ -911,7 +911,7 @@ export default function StealthRaidView() {
     if (outcome === 'SILENT' || outcome === 'ESCAPED') {
       soundEngine.playRaidExitSound();
       sceneApi.current?.playBump?.();
-      
+
       const coins = greedCoins ?? stolenRef.current.coins;
       const ink = greedInk ?? stolenRef.current.ink;
       const drops = [];

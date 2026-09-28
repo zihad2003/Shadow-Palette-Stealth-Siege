@@ -14,8 +14,6 @@ import java.util.Map;
 @AllArgsConstructor
 @Builder
 public class RaidCompleteRequest {
-    @NotNull(message = "attackerId is required")
-    private Long attackerId;
 
     @NotNull(message = "defenderId is required")
     private Long defenderId;

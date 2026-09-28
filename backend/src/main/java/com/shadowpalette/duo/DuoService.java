@@ -1,5 +1,7 @@
 package com.shadowpalette.duo;
 
+import com.shadowpalette.security.SecurityUtils;
+
 import com.shadowpalette.duo.dto.*;
 import com.shadowpalette.service.PresenceService;
 import com.shadowpalette.util.StealthConstants;
@@ -19,10 +21,10 @@ public class DuoService {
     private final SimpMessagingTemplate messaging;
 
     public DuoPartyState invite(DuoInviteRequest request) {
-        if (request == null || request.getHostId() == null || request.getGuestId() == null) {
+        if (request == null || SecurityUtils.getCurrentUserId() == null || request.getGuestId() == null) {
             return fail("HOST_AND_GUEST_REQUIRED");
         }
-        if (request.getHostId().equals(request.getGuestId())) {
+        if (SecurityUtils.getCurrentUserId().equals(request.getGuestId())) {
             return fail("CANNOT_DUO_SELF");
         }
         // Prefer online guests, but still create the lobby so REST poll can deliver the invite
@@ -30,17 +32,17 @@ public class DuoService {
         boolean guestOnline = presenceService.isOnline(request.getGuestId());
 
         // Drop stale LOBBY parties so a re-invite works after a failed/ignored invite.
-        clearLobbyFor(request.getHostId());
+        clearLobbyFor(SecurityUtils.getCurrentUserId());
         clearLobbyFor(request.getGuestId());
-        if (registry.forUser(request.getHostId()).isPresent() || registry.forUser(request.getGuestId()).isPresent()) {
+        if (registry.forUser(SecurityUtils.getCurrentUserId()).isPresent() || registry.forUser(request.getGuestId()).isPresent()) {
             return fail("ALREADY_IN_PARTY");
         }
 
         String partyId = "duo_" + UUID.randomUUID();
-        String hostName = blankTo(request.getHostName(), "Player" + request.getHostId());
+        String hostName = blankTo(request.getHostName(), "Player" + SecurityUtils.getCurrentUserId());
         DuoParty party = DuoParty.builder()
                 .partyId(partyId)
-                .hostId(request.getHostId())
+                .hostId(SecurityUtils.getCurrentUserId())
                 .guestId(request.getGuestId())
                 .hostName(hostName)
                 .guestName("Player" + request.getGuestId())
@@ -77,7 +79,7 @@ public class DuoService {
     public DuoPartyState accept(DuoDecisionRequest request) {
         DuoParty party = requireParty(request != null ? request.getPartyId() : null);
         if (party == null) return fail("PARTY_GONE");
-        if (request.getUserId() == null || !request.getUserId().equals(party.getGuestId())) {
+        if (SecurityUtils.getCurrentUserId() == null || !SecurityUtils.getCurrentUserId().equals(party.getGuestId())) {
             return fail("NOT_GUEST");
         }
         if (!"LOBBY".equals(party.getStatus())) {
@@ -93,7 +95,7 @@ public class DuoService {
     public DuoPartyState decline(DuoDecisionRequest request) {
         DuoParty party = requireParty(request != null ? request.getPartyId() : null);
         if (party == null) return fail("PARTY_GONE");
-        Long uid = request.getUserId();
+        Long uid = SecurityUtils.getCurrentUserId();
         if (uid == null || (!uid.equals(party.getGuestId()) && !uid.equals(party.getHostId()))) {
             return fail("NOT_PARTY");
         }
@@ -110,8 +112,8 @@ public class DuoService {
         DuoParty party = requireParty(request != null ? request.getPartyId() : null);
         if (party == null) {
             // Also allow leave by userId alone
-            if (request != null && request.getUserId() != null) {
-                party = registry.forUser(request.getUserId()).orElse(null);
+            if (request != null && SecurityUtils.getCurrentUserId() != null) {
+                party = registry.forUser(SecurityUtils.getCurrentUserId()).orElse(null);
             }
         }
         if (party == null) return fail("PARTY_GONE");
@@ -125,7 +127,7 @@ public class DuoService {
     public DuoPartyState startRaid(DuoRaidStartRequest request) {
         DuoParty party = requireParty(request != null ? request.getPartyId() : null);
         if (party == null) return fail("PARTY_GONE");
-        if (request.getHostId() == null || !request.getHostId().equals(party.getHostId())) {
+        if (SecurityUtils.getCurrentUserId() == null || !SecurityUtils.getCurrentUserId().equals(party.getHostId())) {
             return fail("NOT_HOST");
         }
         if (request.getDefenderId() == null) return fail("DEFENDER_REQUIRED");
@@ -146,7 +148,7 @@ public class DuoService {
 
     public DuoPartyState updatePosition(String partyId, DuoPositionMessage msg) {
         DuoParty party = requireParty(partyId);
-        if (party == null || msg == null || msg.getUserId() == null) return fail("BAD_PAYLOAD");
+        if (party == null || msg == null || SecurityUtils.getCurrentUserId() == null) return fail("BAD_PAYLOAD");
         if (!"IN_RAID".equals(party.getStatus()) && !"LOBBY".equals(party.getStatus())) {
             return fail("PARTY_ENDED");
         }
@@ -154,8 +156,8 @@ public class DuoService {
         Instant now = Instant.now();
         double x = clampX(msg.getX());
         double y = clampY(msg.getY());
-        boolean isHost = msg.getUserId().equals(party.getHostId());
-        boolean isGuest = msg.getUserId().equals(party.getGuestId());
+        boolean isHost = SecurityUtils.getCurrentUserId().equals(party.getHostId());
+        boolean isGuest = SecurityUtils.getCurrentUserId().equals(party.getGuestId());
         if (!isHost && !isGuest) return fail("NOT_PARTY");
 
         if (isHost) {
@@ -223,14 +225,14 @@ public class DuoService {
     }
 
     public DuoPartyState setReady(DuoReadyRequest request) {
-        if (request == null || request.getPartyId() == null || request.getUserId() == null) {
+        if (request == null || request.getPartyId() == null || SecurityUtils.getCurrentUserId() == null) {
             return fail("INVALID_READY_REQUEST");
         }
         DuoParty party = requireParty(request.getPartyId());
         if (party == null) return fail("PARTY_GONE");
 
-        boolean isHost = request.getUserId().equals(party.getHostId());
-        boolean isGuest = request.getUserId().equals(party.getGuestId());
+        boolean isHost = SecurityUtils.getCurrentUserId().equals(party.getHostId());
+        boolean isGuest = SecurityUtils.getCurrentUserId().equals(party.getGuestId());
         if (!isHost && !isGuest) return fail("NOT_IN_PARTY");
 
         if (isHost) {

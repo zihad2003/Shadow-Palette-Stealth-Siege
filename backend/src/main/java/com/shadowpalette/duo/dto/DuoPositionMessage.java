@@ -10,7 +10,6 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class DuoPositionMessage {
-    private Long userId;
     private double x;
     private double y;
     private boolean alarm;

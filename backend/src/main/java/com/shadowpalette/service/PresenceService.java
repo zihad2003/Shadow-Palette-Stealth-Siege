@@ -1,5 +1,7 @@
 package com.shadowpalette.service;
 
+import com.shadowpalette.security.SecurityUtils;
+
 import com.shadowpalette.dto.*;
 import com.shadowpalette.entity.User;
 import com.shadowpalette.entity.VisitInvite;
@@ -42,10 +44,10 @@ public class PresenceService {
     private final ConcurrentHashMap<Long, VisitSession> sessions = new ConcurrentHashMap<>();
 
     public PresenceHeartbeatResponse heartbeat(PresenceHeartbeatRequest request) {
-        if (request == null || request.getUserId() == null) {
+        if (request == null || SecurityUtils.getCurrentUserId() == null) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "USER_ID_REQUIRED");
         }
-        Long id = request.getUserId();
+        Long id = SecurityUtils.getCurrentUserId();
         PresenceRecord rec = new PresenceRecord();
         rec.userId = id;
         rec.username = resolveName(id, request.getUsername());
@@ -81,10 +83,10 @@ public class PresenceService {
 
     @Transactional
     public VisitInviteDto createInvite(VisitInviteRequest request) {
-        if (request == null || request.getHostId() == null || request.getGuestId() == null) {
+        if (request == null || SecurityUtils.getCurrentUserId() == null || request.getGuestId() == null) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "HOST_AND_GUEST_REQUIRED");
         }
-        Long hostId = request.getHostId();
+        Long hostId = SecurityUtils.getCurrentUserId();
         Long guestId = request.getGuestId();
         if (hostId.equals(guestId)) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "CANNOT_INVITE_SELF");
@@ -116,7 +118,7 @@ public class PresenceService {
     @Transactional
     public VisitSessionDto acceptInvite(VisitDecisionRequest request) {
         VisitInvite invite = requireInvite(request != null ? request.getInviteId() : null);
-        Long guestId = request.getUserId();
+        Long guestId = SecurityUtils.getCurrentUserId();
         if (guestId == null || !guestId.equals(invite.getGuestId())) {
             throw new ApiException(HttpStatus.FORBIDDEN, "NOT_INVITE_GUEST");
         }
@@ -160,7 +162,7 @@ public class PresenceService {
     @Transactional
     public VisitInviteDto declineInvite(VisitDecisionRequest request) {
         VisitInvite invite = requireInvite(request != null ? request.getInviteId() : null);
-        Long userId = request.getUserId();
+        Long userId = SecurityUtils.getCurrentUserId();
         if (userId == null || (!userId.equals(invite.getGuestId()) && !userId.equals(invite.getHostId()))) {
             throw new ApiException(HttpStatus.FORBIDDEN, "NOT_INVITE_PARTY");
         }
@@ -202,14 +204,14 @@ public class PresenceService {
     }
 
     public VisitSessionDto updateState(VisitStateRequest request) {
-        if (request == null || request.getVisitId() == null || request.getUserId() == null) {
+        if (request == null || request.getVisitId() == null || SecurityUtils.getCurrentUserId() == null) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "VISIT_STATE_REQUIRED");
         }
         VisitSession session = sessions.get(request.getVisitId());
         if (session == null || !"ACTIVE".equals(session.status)) {
             return VisitSessionDto.builder().success(false).status("ENDED").message("Visit ended").build();
         }
-        Long userId = request.getUserId();
+        Long userId = SecurityUtils.getCurrentUserId();
         boolean host = userId.equals(session.hostId);
         boolean guest = userId.equals(session.guestId);
         if (!host && !guest) {
@@ -234,7 +236,7 @@ public class PresenceService {
 
     public VisitSessionDto endVisit(VisitDecisionRequest request) {
         Long visitId = request != null ? request.getVisitId() : null;
-        Long userId = request != null ? request.getUserId() : null;
+        Long userId = request != null ? SecurityUtils.getCurrentUserId() : null;
         if (visitId == null && userId != null) {
             VisitSession found = findSessionFor(userId);
             if (found != null) visitId = found.visitId;

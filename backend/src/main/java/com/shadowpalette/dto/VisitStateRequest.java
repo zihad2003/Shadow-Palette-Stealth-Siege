@@ -11,7 +11,6 @@ import lombok.NoArgsConstructor;
 @Builder
 public class VisitStateRequest {
     private Long visitId;
-    private Long userId;
     private Boolean seated;
     private Integer gear;
     private Double trackT;

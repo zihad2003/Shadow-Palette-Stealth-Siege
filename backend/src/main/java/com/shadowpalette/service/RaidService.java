@@ -1,5 +1,7 @@
 package com.shadowpalette.service;
 
+import com.shadowpalette.security.SecurityUtils;
+
 import com.shadowpalette.dto.*;
 import com.shadowpalette.entity.*;
 import com.shadowpalette.exception.ApiException;
@@ -74,10 +76,10 @@ public class RaidService {
 
     @Transactional
     public RaidCompleteResponse completeRaid(RaidCompleteRequest request) {
-        User attacker = userRepository.findById(request.getAttackerId())
+        User attacker = userRepository.findById(SecurityUtils.getCurrentUserId())
                 .orElseGet(() -> User.builder()
-                        .id(request.getAttackerId())
-                        .username("Player" + String.format("%05d", request.getAttackerId()))
+                        .id(SecurityUtils.getCurrentUserId())
+                        .username("Player" + String.format("%05d", SecurityUtils.getCurrentUserId()))
                         .camoColor("BLUE")
                         .coins(500)
                         .inkEnergy(100)

@@ -11,8 +11,6 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 @Builder
 public class DefensePlaceRequest {
-    @NotNull(message = "userId is required")
-    private Long userId;
 
     @NotNull(message = "plotId is required")
     private Long plotId;

@@ -11,8 +11,6 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 @Builder
 public class BuildingUpgradeRequest {
-    @NotNull(message = "userId is required")
-    private Long userId;
 
     @NotNull(message = "targetId is required")
     private Long targetId;

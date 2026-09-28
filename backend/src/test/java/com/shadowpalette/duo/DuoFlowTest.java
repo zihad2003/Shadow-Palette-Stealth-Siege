@@ -38,7 +38,7 @@ class DuoFlowTest {
     void offlineGuestStillInvited() {
         when(presenceService.isOnline(34L)).thenReturn(false);
         DuoPartyState res = duoService.invite(DuoInviteRequest.builder()
-                .hostId(12L).guestId(34L).hostName("H").build());
+                .guestId(34L).hostName("H").build());
         assertTrue(res.isSuccess());
         assertEquals("INVITE_SENT_MAYBE_OFFLINE", res.getMessage());
         assertEquals("LOBBY", res.getStatus());
@@ -52,18 +52,18 @@ class DuoFlowTest {
     void inviteAcceptRaid() {
         when(presenceService.isOnline(34L)).thenReturn(true);
         DuoPartyState invited = duoService.invite(DuoInviteRequest.builder()
-                .hostId(12L).guestId(34L).hostName("Host12").build());
+                .guestId(34L).hostName("Host12").build());
         assertTrue(invited.isSuccess());
         assertEquals("LOBBY", invited.getStatus());
         verify(messaging).convertAndSend(eq("/topic/duo-invite/34"), any(Object.class));
 
         DuoPartyState accepted = duoService.accept(DuoDecisionRequest.builder()
-                .partyId(invited.getPartyId()).userId(34L).build());
+                .partyId(invited.getPartyId()).build());
         assertTrue(accepted.isSuccess());
 
         DuoPartyState raid = duoService.startRaid(DuoRaidStartRequest.builder()
                 .partyId(invited.getPartyId())
-                .hostId(12L)
+                
                 .defenderId(55L)
                 .raidId("raid-duo-1")
                 .build());
@@ -71,9 +71,9 @@ class DuoFlowTest {
         assertEquals(55L, raid.getDefenderId());
 
         duoService.updatePosition(invited.getPartyId(), DuoPositionMessage.builder()
-                .userId(12L).x(10).y(10).alarm(false).build());
+                .x(10).y(10).alarm(false).build());
         DuoPartyState after = duoService.updatePosition(invited.getPartyId(), DuoPositionMessage.builder()
-                .userId(34L).x(11).y(10).alarm(true).build());
+                .x(11).y(10).alarm(true).build());
         assertTrue(after.isAlarmLatched());
         assertEquals(10.0, after.getHostX());
         assertEquals(11.0, after.getGuestX());

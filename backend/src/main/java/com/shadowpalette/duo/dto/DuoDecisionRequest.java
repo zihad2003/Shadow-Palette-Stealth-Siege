@@ -11,5 +11,4 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class DuoDecisionRequest {
     private String partyId;
-    private Long userId;
 }

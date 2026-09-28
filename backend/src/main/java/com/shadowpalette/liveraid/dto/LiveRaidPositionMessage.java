@@ -10,7 +10,6 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class LiveRaidPositionMessage {
-    private Long userId;
     /** ATTACKER or DEFENDER */
     private String role;
     private double x;

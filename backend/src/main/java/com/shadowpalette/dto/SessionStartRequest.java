@@ -20,4 +20,7 @@ public class SessionStartRequest {
 
     /** Optional passcode for the player account. */
     private String password;
+
+    /** Recovery token for guest accounts. */
+    private String recoveryToken;
 }

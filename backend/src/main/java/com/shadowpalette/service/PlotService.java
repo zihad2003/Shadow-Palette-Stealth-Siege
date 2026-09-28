@@ -1,5 +1,7 @@
 package com.shadowpalette.service;
 
+import com.shadowpalette.security.SecurityUtils;
+
 import com.shadowpalette.dto.PlotClaimRequest;
 import com.shadowpalette.dto.PlotClaimResponse;
 import com.shadowpalette.dto.PlotDto;
@@ -29,10 +31,10 @@ public class PlotService {
             throw new ApiException(HttpStatus.CONFLICT, "PLOT_ALREADY_OWNED");
         }
 
-        User user = userRepository.findById(request.getUserId())
+        User user = userRepository.findById(SecurityUtils.getCurrentUserId())
                 .orElseGet(() -> userRepository.save(User.builder()
-                        .id(request.getUserId())
-                        .username("Player_" + String.format("%05d", request.getUserId()))
+                        .id(SecurityUtils.getCurrentUserId())
+                        .username("Player_" + String.format("%05d", SecurityUtils.getCurrentUserId()))
                         .coins(500)
                         .inkEnergy(100)
                         .chips(0)

@@ -12,5 +12,4 @@ import lombok.NoArgsConstructor;
 public class VisitDecisionRequest {
     private Long inviteId;
     private Long visitId;
-    private Long userId;
 }

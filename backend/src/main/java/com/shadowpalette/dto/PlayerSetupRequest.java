@@ -11,9 +11,6 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 @Builder
 public class PlayerSetupRequest {
-    @NotNull(message = "userId is required")
-    private Long userId;
-
     private int characterModel; // 1 male, 2 female
 
     private String camoColor; // RED/GREEN/BLUE/YELLOW/PURPLE

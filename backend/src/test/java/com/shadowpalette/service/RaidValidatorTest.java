@@ -45,7 +45,7 @@ class RaidValidatorTest {
         // 4s * 60fps = 240 frames → enough samples for CHANNEL_DURATION
         List<SessionLogTickDto> ticks = stationaryGateChannel(280);
         RaidCompleteRequest request = RaidCompleteRequest.builder()
-                .attackerId(12L)
+                
                 .defenderId(34L)
                 .durationSeconds(40)
                 .sessionLog(ticks)
@@ -69,7 +69,7 @@ class RaidValidatorTest {
             ticks.add(SessionLogTickDto.builder().tick(i * 8).xPos(10.0).yPos(10.0).build());
         }
         RaidCompleteRequest request = RaidCompleteRequest.builder()
-                .attackerId(12L)
+                
                 .defenderId(34L)
                 .durationSeconds(30)
                 .sessionLog(ticks)
@@ -91,7 +91,7 @@ class RaidValidatorTest {
             ticks.add(SessionLogTickDto.builder().tick(f).xPos(x).yPos(StealthConstants.GATE_Y).build());
         }
         RaidCompleteRequest request = RaidCompleteRequest.builder()
-                .attackerId(12L)
+                
                 .defenderId(34L)
                 .durationSeconds(20)
                 .sessionLog(ticks)
@@ -279,7 +279,7 @@ class RaidValidatorTest {
     @DisplayName("Null sessionLog → EMPTY_SESSION_LOG rejection")
     void testNullSessionLogRejected() {
         RaidCompleteRequest request = RaidCompleteRequest.builder()
-                .attackerId(12L)
+                
                 .defenderId(34L)
                 .durationSeconds(40)
                 .sessionLog(null)
@@ -296,7 +296,7 @@ class RaidValidatorTest {
     @DisplayName("Empty sessionLog → EMPTY_SESSION_LOG rejection")
     void testEmptySessionLogRejected() {
         RaidCompleteRequest request = RaidCompleteRequest.builder()
-                .attackerId(12L)
+                
                 .defenderId(34L)
                 .durationSeconds(40)
                 .sessionLog(new ArrayList<>())
