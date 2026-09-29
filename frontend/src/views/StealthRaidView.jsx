@@ -726,8 +726,19 @@ export default function StealthRaidView() {
           if (liveDefenderRef.current && state.robotX != null && state.robotY != null) {
             sceneApi.current?.setLivePatrolPosition?.(state.robotX, state.robotY);
           }
-          if (state.terminal && state.outcome === 'CAUGHT') {
+          if (state.terminal && state.outcome === 'CAUGHT' && !imprisonedRef.current) {
             liveCaughtRef.current = true;
+            imprisonedRef.current = true;
+            setImprisoned(true);
+            setShowRansomModal(true);
+            const jailBuilding = raidBuildings?.find((b) => b.buildingType === 'JAIL');
+            const jailPos = jailBuilding
+              ? { column: jailBuilding.xPos ?? jailBuilding.column ?? 10, row: jailBuilding.yPos ?? jailBuilding.row ?? 10 }
+              : { column: 10, row: 10 };
+            setAttacker((prev) => ({ ...prev, ...jailPos }));
+            attackerRef.current = { ...attackerRef.current, ...jailPos };
+            showToastRef.current?.('Captured by Base Owner! Imprisoned in Base Jail — Voice Intercom & Ransom Active', 'warning');
+            soundEngine.playWallHitSound?.();
           }
         });
         pubTimer = window.setInterval(() => {
@@ -1024,15 +1035,20 @@ export default function StealthRaidView() {
     if (paidCoins > 0) {
       setCoins((c) => Math.max(0, c - paidCoins));
     }
-    showToast(`Ransom agreed (${paidCoins} coins)! Jail unlocked — escape to the gate!`, 'success');
-    robotStunnedUntilRef.current = Date.now() + 8000;
+    showToast(`Ransom settled (${paidCoins} coins). Base owner released you! Returning to your base...`, 'success');
+    window.setTimeout(() => {
+      transitionTo('BASE_BUILDER');
+    }, 1200);
   };
 
   const handleRansomDeclined = () => {
     setShowRansomModal(false);
     imprisonedRef.current = false;
     setImprisoned(false);
-    endRaid('CAUGHT');
+    showToast('Ransom negotiation ended. Released and expelled back to your home base.', 'info');
+    window.setTimeout(() => {
+      transitionTo('BASE_BUILDER');
+    }, 1200);
   };
 
   /** End the run and show the results card. */

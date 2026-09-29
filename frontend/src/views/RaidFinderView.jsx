@@ -95,7 +95,15 @@ export default function RaidFinderView() {
     });
   };
 
-  const handleSendVisit = async (targetId) => {
+  const handleSendVisit = async (targetId, targetPlayer) => {
+    if (!garageComplete) {
+      showToast('Construct your vehicle in the garage first to enable base visits!', 'warning');
+      return;
+    }
+    if (targetPlayer && targetPlayer.garageComplete === false) {
+      showToast(`${targetPlayer.username || `Player ${fmtUid(targetId)}`} has not built their base vehicle yet!`, 'warning');
+      return;
+    }
     try {
       await sendVisitInvite(userId, targetId);
       setSentVisit((s) => ({ ...s, [targetId]: true }));
@@ -133,27 +141,51 @@ export default function RaidFinderView() {
     }
   };
 
-  // Build live player raid targets
+  // Build real player raid targets (both online live PvP and offline registered bases)
   const livePlayerTargets = players.map((p) => ({
     id: p.userId,
     name: p.username || `Player ${fmtUid(p.userId)}'s Base`,
     ownerId: p.userId,
     isRealPlayer: true,
+    isOnline: true,
     level: 2,
     difficulty: 'PvP Live',
     coins: 500,
     ink: 100,
     chips: 250,
     camo: p.camoColor || 'BLUE',
-    primaryColor: '#E53E3E',
+    primaryColor: '#EF4444',
     buildings: 5,
     lighthouse: true,
     patrol: true,
     jail: true,
-    description: 'Active player base! Defender can counter-siege and lock you in their Jail.',
+    description: 'Real player base! Defender is currently ONLINE — live counter-siege & Base Jail active.',
   }));
 
-  const allTargets = [...livePlayerTargets, ...RAID_TARGETS];
+  const knownRealIds = [otherHint];
+  const offlineRealTargets = knownRealIds
+    .filter((id) => !players.some((p) => Number(p.userId) === Number(id)))
+    .map((id) => ({
+      id: id,
+      name: `Player ${fmtUid(id)}'s Base`,
+      ownerId: id,
+      isRealPlayer: true,
+      isOnline: false,
+      level: 2,
+      difficulty: 'PvP Offline',
+      coins: 450,
+      ink: 90,
+      chips: 220,
+      camo: 'BLUE',
+      primaryColor: '#6366F1',
+      buildings: 5,
+      lighthouse: true,
+      patrol: true,
+      jail: true,
+      description: 'Real player base! Automated AI patrol defense. If owner logs in, live siege alert triggers.',
+    }));
+
+  const allTargets = [...livePlayerTargets, ...offlineRealTargets, ...RAID_TARGETS];
 
   return (
     <div className="relative w-full h-full overflow-hidden bg-clay-bg flex flex-col">
@@ -251,10 +283,16 @@ export default function RaidFinderView() {
                             {sentDuo[p.userId] ? 'Sent' : 'Duo'}
                           </ClayButton>
                           <ClayButton
-                            variant={sentVisit[p.userId] ? 'ghost' : 'primary'}
-                            className="h-7 px-2 rounded-lg text-[10px] font-semibold shadow-sm"
-                            title="Invite to Visit Base"
-                            onClick={() => handleSendVisit(p.userId)}
+                            variant={sentVisit[p.userId] ? 'ghost' : (!garageComplete || p.garageComplete === false) ? 'ghost' : 'primary'}
+                            className={`h-7 px-2 rounded-lg text-[10px] font-semibold shadow-sm ${(!garageComplete || p.garageComplete === false) ? 'opacity-50' : ''}`}
+                            title={
+                              !garageComplete
+                                ? 'Build vehicle in garage first'
+                                : p.garageComplete === false
+                                ? 'Target player has no vehicle built'
+                                : 'Invite to Visit Base'
+                            }
+                            onClick={() => handleSendVisit(p.userId, p)}
                           >
                             <Eye size={12} />
                           </ClayButton>

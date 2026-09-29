@@ -14,4 +14,5 @@ public class PresencePlayerDto {
     private String username;
     private Integer characterModel;
     private String camoColor;
+    private Boolean garageComplete;
 }

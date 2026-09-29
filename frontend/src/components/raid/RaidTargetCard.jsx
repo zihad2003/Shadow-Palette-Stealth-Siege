@@ -35,13 +35,39 @@ export default function RaidTargetCard({ target, onRaid }) {
 
       <div className="flex items-start justify-between gap-2">
         <div>
-          <h3 className="font-heading font-extrabold text-sm text-clay-text">{target.name}</h3>
-          <p className="text-[11px] text-clay-muted">Owner #{target.ownerId} · Lv {target.level}</p>
+          <div className="flex items-center gap-1.5">
+            <h3 className="font-heading font-extrabold text-sm text-clay-text">{target.name}</h3>
+            {target.isRealPlayer && (
+              <span
+                className={`inline-block w-2 h-2 rounded-full ${
+                  target.isOnline ? 'bg-emerald-400 animate-pulse' : 'bg-indigo-400'
+                }`}
+                title={target.isOnline ? 'Defender is Online' : 'Defender is Offline'}
+              />
+            )}
+          </div>
+          <p className="text-[11px] text-clay-muted">
+            Owner #{target.ownerId} · {target.isRealPlayer ? (target.isOnline ? 'Real Player (Live)' : 'Real Player (Base)') : `Lv ${target.level}`}
+          </p>
         </div>
-        <span className={`text-[10px] font-heading font-bold uppercase ${DIFFICULTY_TONE[target.difficulty] || ''}`}>
+        <span
+          className={`text-[10px] font-heading font-bold uppercase ${
+            target.isRealPlayer && target.isOnline
+              ? 'text-emerald-400 font-extrabold tracking-wider animate-pulse'
+              : target.isRealPlayer
+              ? 'text-indigo-400 font-bold'
+              : (DIFFICULTY_TONE[target.difficulty] || '')
+          }`}
+        >
           {target.difficulty}
         </span>
       </div>
+
+      {target.description && (
+        <p className="text-[10.5px] text-clay-muted leading-tight line-clamp-2 px-1">
+          {target.description}
+        </p>
+      )}
 
       <div className="grid grid-cols-3 gap-2">
         <div className="clay-inset rounded-xl px-2 py-2 flex flex-col items-center gap-0.5">
@@ -70,6 +96,7 @@ export default function RaidTargetCard({ target, onRaid }) {
           <Shield size={12} />
           {target.lighthouse ? 'Lighthouse' : 'No light'}
           {target.patrol ? ' · Patrol' : ''}
+          {target.jail ? ' · Jail' : ''}
         </span>
       </div>
 

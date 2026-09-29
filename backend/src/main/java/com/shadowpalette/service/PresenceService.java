@@ -64,11 +64,13 @@ public class PresenceService {
         List<PresencePlayerDto> players = new ArrayList<>();
         for (PresenceRecord rec : presence.values()) {
             if (userId != null && rec.userId.equals(userId)) continue;
+            boolean gc = rec.snapshot != null && Boolean.TRUE.equals(rec.snapshot.get("garageComplete"));
             players.add(PresencePlayerDto.builder()
                     .userId(rec.userId)
                     .username(rec.username)
                     .characterModel(rec.characterModel)
                     .camoColor(rec.camoColor)
+                    .garageComplete(gc)
                     .build());
         }
         return PresenceOnlineResponse.builder().success(true).players(players).build();
@@ -95,6 +97,11 @@ public class PresenceService {
         expireStaleInvites();
         if (!presence.containsKey(guestId)) {
             throw new ApiException(HttpStatus.CONFLICT, "GUEST_OFFLINE");
+        }
+        PresenceRecord host = presence.get(hostId);
+        boolean hostHasVehicle = host != null && host.snapshot != null && Boolean.TRUE.equals(host.snapshot.get("garageComplete"));
+        if (!hostHasVehicle) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "HOST_VEHICLE_INCOMPLETE");
         }
         if (findSessionFor(hostId) != null || findSessionFor(guestId) != null) {
             throw new ApiException(HttpStatus.CONFLICT, "ALREADY_IN_VISIT");
