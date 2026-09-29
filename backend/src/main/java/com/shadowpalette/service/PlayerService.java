@@ -77,20 +77,29 @@ public class PlayerService {
         if (request != null && request.getUserId() != null && request.getUserId() >= MIN_PLAYER_ID) {
             return userRepository.findById(request.getUserId())
                     .map(existing -> {
-                        // Resuming guest
+                        // Resuming guest device account
                         if (existing.getGuestSecretHash() != null && !existing.getGuestSecretHash().isEmpty()) {
-                            if (reqRecoveryToken == null || !passwordEncoder.matches(reqRecoveryToken, existing.getGuestSecretHash())) {
-                                throw new ApiException(HttpStatus.UNAUTHORIZED, "INVALID_RECOVERY_TOKEN");
+                            if (reqRecoveryToken != null && passwordEncoder.matches(reqRecoveryToken, existing.getGuestSecretHash())) {
+                                return buildResponseFromUser(existing, false, null);
                             }
+                            // Fallback to fresh user if token doesn't match
+                            return createNewUser(reqRecoveryToken);
+                        } else if (reqRecoveryToken != null && !reqRecoveryToken.isEmpty()) {
+                            // First time associating persistent device token
+                            existing.setGuestSecretHash(passwordEncoder.encode(reqRecoveryToken));
+                            userRepository.save(existing);
+                            return buildResponseFromUser(existing, false, reqRecoveryToken);
                         } else {
-                            throw new ApiException(HttpStatus.UNAUTHORIZED, "CANNOT_RESUME_WITHOUT_TOKEN");
+                            String token = UUID.randomUUID().toString();
+                            existing.setGuestSecretHash(passwordEncoder.encode(token));
+                            userRepository.save(existing);
+                            return buildResponseFromUser(existing, false, token);
                         }
-                        return buildResponseFromUser(existing, false, null);
                     })
-                    .orElseGet(this::createNewUser);
+                    .orElseGet(() -> createNewUser(reqRecoveryToken));
         }
         
-        return createNewUser();
+        return createNewUser(reqRecoveryToken);
     }
 
     private SessionStartResponse buildResponseFromUser(User user, boolean newUser, String plainRecoveryToken) {
@@ -135,13 +144,17 @@ public class PlayerService {
     }
 
     private SessionStartResponse createNewUser() {
+        return createNewUser(null);
+    }
+
+    private SessionStartResponse createNewUser(String existingToken) {
         long nextId = Math.max(MIN_PLAYER_ID, userRepository.findMaxId() + 1);
-        String recoveryToken = UUID.randomUUID().toString();
+        String recoveryToken = (existingToken != null && !existingToken.isEmpty()) ? existingToken : UUID.randomUUID().toString();
         String recoveryHash = passwordEncoder.encode(recoveryToken);
         
         User user = User.builder()
                 .id(nextId)
-                .username("Player" + nextId)
+                .username("Player" + String.format("%05d", nextId))
                 .guestSecretHash(recoveryHash)
                 .coins(500)
                 .inkEnergy(100)

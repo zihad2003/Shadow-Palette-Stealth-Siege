@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import java.util.*;
 
 @Service
@@ -26,6 +27,7 @@ public class RaidService {
     private final WallBlockRepository wallBlockRepository;
     private final RaidLogRepository raidLogRepository;
     private final RaidValidator raidValidator;
+    private final SimpMessagingTemplate messagingTemplate;
 
     @Transactional(readOnly = true)
     public RaidTargetResponse getRaidTarget(Long defenderId, Long attackerId) {
@@ -222,6 +224,74 @@ public class RaidService {
                 .raidLogId(saved.getId())
                 .attackerCoins(attacker.getCoins())
                 .attackerInk(attacker.getInkEnergy())
+                .build();
+    }
+
+    @Transactional
+    public RansomResponse handleRansomOffer(RansomOfferRequest request) {
+        Long callerId = SecurityUtils.getCurrentUserId();
+        if (callerId == null) throw new ApiException(HttpStatus.UNAUTHORIZED, "UNAUTHORIZED");
+
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("type", "RANSOM_OFFER");
+        payload.put("attackerId", request.getAttackerId());
+        payload.put("defenderId", request.getDefenderId());
+        payload.put("coins", request.getCoins());
+        payload.put("chips", request.getChips());
+        payload.put("message", request.getMessage());
+        payload.put("voiceRequested", request.isVoiceRequested());
+
+        if (messagingTemplate != null) {
+            messagingTemplate.convertAndSend("/topic/raid-ransom/" + request.getDefenderId(), (Object) payload);
+            messagingTemplate.convertAndSend("/topic/raid-ransom/" + request.getAttackerId(), (Object) payload);
+        }
+
+        return RansomResponse.builder()
+                .success(true)
+                .status("OFFERED")
+                .attackerId(request.getAttackerId())
+                .defenderId(request.getDefenderId())
+                .coinsTransferred(0)
+                .message("Ransom offered successfully")
+                .build();
+    }
+
+    @Transactional
+    public RansomResponse handleRansomSettle(RansomSettleRequest request) {
+        Long callerId = SecurityUtils.getCurrentUserId();
+        if (callerId == null) throw new ApiException(HttpStatus.UNAUTHORIZED, "UNAUTHORIZED");
+
+        int transfer = 0;
+        if (request.isAccepted()) {
+            User attacker = userRepository.findById(request.getAttackerId()).orElse(null);
+            User defender = userRepository.findById(request.getDefenderId()).orElse(null);
+            if (attacker != null && defender != null) {
+                transfer = Math.min(attacker.getCoins(), Math.max(0, request.getAgreedCoins()));
+                attacker.setCoins(attacker.getCoins() - transfer);
+                defender.setCoins(defender.getCoins() + transfer);
+                userRepository.save(attacker);
+                userRepository.save(defender);
+            }
+        }
+
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("type", request.isAccepted() ? "RANSOM_ACCEPTED" : "RANSOM_REJECTED");
+        payload.put("attackerId", request.getAttackerId());
+        payload.put("defenderId", request.getDefenderId());
+        payload.put("coinsTransferred", transfer);
+
+        if (messagingTemplate != null) {
+            messagingTemplate.convertAndSend("/topic/raid-ransom/" + request.getDefenderId(), (Object) payload);
+            messagingTemplate.convertAndSend("/topic/raid-ransom/" + request.getAttackerId(), (Object) payload);
+        }
+
+        return RansomResponse.builder()
+                .success(true)
+                .status(request.isAccepted() ? "ACCEPTED" : "REJECTED")
+                .attackerId(request.getAttackerId())
+                .defenderId(request.getDefenderId())
+                .coinsTransferred(transfer)
+                .message(request.isAccepted() ? "Ransom accepted! Hostage released." : "Ransom rejected.")
                 .build();
     }
 }

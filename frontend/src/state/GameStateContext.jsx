@@ -180,50 +180,40 @@ export function GameStateProvider({ children }) {
   const savedWorld = useRef(forceFullHome ? createMaxedHome() : readWorldSave()).current;
   const [userId, setUserId] = useState(() => {
     try {
-      // ?userId= query param override for local dev/testing
       const q = Number(new URLSearchParams(window.location.search).get('userId'));
-      if (Number.isFinite(q) && q >= 20161) return q;
+      if (Number.isFinite(q) && q > 0) return q;
       const tab = Number(window.sessionStorage.getItem('sp_userId'));
-      if (Number.isFinite(tab) && tab >= 20161) return tab;
+      if (Number.isFinite(tab) && tab > 0) return tab;
       const stored = Number(window.localStorage.getItem('sp_userId'));
-      if (Number.isFinite(stored) && stored >= 20161) return stored;
+      if (Number.isFinite(stored) && stored > 0) return stored;
     } catch {
       /* ignore */
     }
-    // Clean up any stale legacy id (< 20161) from local/session storage
-    try {
-      const legacyTab = Number(window.sessionStorage.getItem('sp_userId'));
-      if (Number.isFinite(legacyTab) && legacyTab < 20161) window.sessionStorage.removeItem('sp_userId');
-      const legacyStored = Number(window.localStorage.getItem('sp_userId'));
-      if (Number.isFinite(legacyStored) && legacyStored < 20161) window.localStorage.removeItem('sp_userId');
-    } catch {
-      /* ignore */
-    }
-    return Math.floor(10000 + Math.random() * 90000);
-    // null = new visitor/device — will be assigned a unique ID >= 20161 by /api/session/start
     return null;
   });
 
   // On first mount, resolve or allocate player identity via the server.
-  // If we already have a stored userId, the server validates it.
-  // If null (new device), the server generates the next unique ID >= 20161.
+  // One device is guaranteed one persistent account.
   useEffect(() => {
     let cancelled = false;
     const resolve = async () => {
       try {
-        const { startSession } = await import('../api.js');
-        const res = await startSession(userId);
+        const { startSession, getOrCreateDeviceToken } = await import('../api.js');
+        const deviceToken = getOrCreateDeviceToken();
+        const res = await startSession(userId, undefined, undefined, deviceToken);
         if (!cancelled && res?.success && res.userId) {
           setUserId(res.userId);
           if (res.username) setUsername(res.username);
           if (res.jwt) {
             setJwtToken(res.jwt);
-            // Reconnect STOMP with new credentials
             disconnectStomp().catch(() => {});
           }
           try {
             window.sessionStorage.setItem('sp_userId', String(res.userId));
             window.localStorage.setItem('sp_userId', String(res.userId));
+            if (res.recoveryToken) {
+              window.localStorage.setItem('sp_device_token', res.recoveryToken);
+            }
             if (res.username) window.localStorage.setItem('sp_username', res.username);
           } catch {
             /* private mode */

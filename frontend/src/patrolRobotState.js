@@ -6,6 +6,7 @@ export const ROBOT_STATES = {
   ALERT: 'ALERT',
   CHASING: 'CHASING',
   SEARCHING: 'SEARCHING',
+  DISABLED: 'DISABLED',
 };
 
 export class PatrolRobotContext {
@@ -17,13 +18,34 @@ export class PatrolRobotContext {
     this.lastSeenPlayerY = null;
     this.suspiciousTicks = 0;
     this.searchTimerSeconds = 0;
+    this.stunTimer = 0;
+    this.previousState = ROBOT_STATES.PATROL;
   }
 
   setState(newState) {
     this.state = newState;
   }
 
+  stun(durationSeconds = 12) {
+    if (this.state !== ROBOT_STATES.DISABLED) {
+      this.previousState = this.state;
+    }
+    this.stunTimer = Math.max(this.stunTimer, durationSeconds);
+    this.setState(ROBOT_STATES.DISABLED);
+  }
+
+  tickStun(dt = 0.016) {
+    if (this.stunTimer > 0) {
+      this.stunTimer -= dt;
+      if (this.stunTimer <= 0) {
+        this.stunTimer = 0;
+        this.setState(this.previousState || ROBOT_STATES.PATROL);
+      }
+    }
+  }
+
   processDetection(event) {
+    if (this.state === ROBOT_STATES.DISABLED) return;
     if (!event) return;
 
     if (this.state === ROBOT_STATES.PATROL) {

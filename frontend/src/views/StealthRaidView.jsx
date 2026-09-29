@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Plus, Minus, DoorOpen, Hammer, Bot, Coins, Droplet } from 'lucide-react';
+import { Plus, Minus, DoorOpen, Hammer, Bot, Coins, Droplet, Zap, ZapOff } from 'lucide-react';
 import TopResourceBar from '../components/hud/TopResourceBar.jsx';
 import NavigationTabs from '../components/hud/NavigationTabs.jsx';
 import SideRaidPanel from '../components/hud/SideRaidPanel.jsx';
@@ -33,6 +33,7 @@ import { duoMarkCaught } from '../api.js';
 import LootFloatFX from '../components/raid/LootFloatFX.jsx';
 import RaidTransitionOverlay, { RAID_CINEMATIC_MS } from '../components/raid/RaidTransitionOverlay.jsx';
 import { findRepairedNear } from '../gamemap/starterRuins.js';
+import RansomModal from '../components/raid/RansomModal.jsx';
 
 const WALL_BREAK_HITS = 4;
 const RAID_DECOR_SEED = 41;
@@ -111,10 +112,10 @@ export default function StealthRaidView() {
 
   const lockedCamo = raidSession?.camoColor || camoColor;
   const sceneApi = useRef(null);
-  const targetMeta = useMemo(
-    () => RAID_TARGETS.find((t) => t.id === raidTargetId) || RAID_TARGETS[0],
-    [raidTargetId]
-  );
+  const targetMeta = useMemo(() => {
+    if (raidLoot && (raidLoot.name || raidLoot.ownerId)) return raidLoot;
+    return RAID_TARGETS.find((t) => t.id === raidTargetId) || RAID_TARGETS[0];
+  }, [raidTargetId, raidLoot]);
   const defenderBase = useMemo(
     () =>
       generateDefenderBase(raidTargetId || 34, {
@@ -157,8 +158,31 @@ export default function StealthRaidView() {
   const raidStartedRef = useRef(Date.now());
   const keys = useRef(new Set());
   const actionRef = useRef(null);
+  const hitRobotRef = useRef(null);
+  const robotStunnedUntilRef = useRef(0);
+  const [robotStunCountdown, setRobotStunCountdown] = useState(0);
+  const [nearRobotDist, setNearRobotDist] = useState(Infinity);
   const sprintMeter = useRef(createSprintMeter());
   const [stamina, setStamina] = useState({ stamina: 1, sprinting: false, exhausted: false });
+
+  const [isLooting, setIsLooting] = useState(false);
+  const isLootingRef = useRef(false);
+  isLootingRef.current = isLooting;
+  const [lootProgress, setLootProgress] = useState(0);
+  const [lootingTarget, setLootingTarget] = useState(null);
+  const lootTimerRef = useRef(null);
+
+  const [showRansomModal, setShowRansomModal] = useState(false);
+  const [imprisoned, setImprisoned] = useState(false);
+  const imprisonedRef = useRef(false);
+  imprisonedRef.current = imprisoned;
+  const ransomPaidRef = useRef(false);
+
+  useEffect(() => {
+    return () => {
+      if (lootTimerRef.current) clearInterval(lootTimerRef.current);
+    };
+  }, []);
 
   const [attacker, setAttacker] = useState(() => {
     const baseCol = GATE_SPAWN_TILE.column;
@@ -281,7 +305,7 @@ export default function StealthRaidView() {
       moveCooldown = Math.max(0, moveCooldown - dt);
       bumpCooldown = Math.max(0, bumpCooldown - dt);
 
-      const canMove = !hudRef.current.outcome && !hudRef.current.breaking;
+      const canMove = !hudRef.current.outcome && !hudRef.current.breaking && !isLootingRef.current && !imprisonedRef.current;
       const { forward, turn } = canMove ? walkAxes(keys.current) : { forward: 0, turn: 0 };
 
       // Shift = limited sprint; meter drains while moving, refills after a short pause
@@ -391,12 +415,28 @@ export default function StealthRaidView() {
         sceneApi.current?.flashSearchlightDetect?.(0.55);
       }
 
-      // Skip robot SM while chase is latched — never drop back to SEARCHING/PATROL.
+      // Advance stun timer on robot context
+      robotContext.current.tickStun(dt);
+
+      const patrolState = sceneApi.current?.getPatrolState?.() || {};
+      const robotPos = patrolState.position || null;
+      const robotDist =
+        robotPos != null
+          ? Math.hypot(pos.column - robotPos.column, pos.row - robotPos.row)
+          : Infinity;
+      setNearRobotDist(robotDist);
+
+      const isRobotStunned =
+        !!patrolState.stunned ||
+        robotContext.current.state === ROBOT_STATES.DISABLED ||
+        Date.now() < (robotStunnedUntilRef.current || 0);
+
+      // Skip robot SM while chase is latched or robot is stunned offline
       robotTickAccumRef.current += dt;
       const robotTickDue = robotTickAccumRef.current >= 1 / ROBOT_TICK_HZ;
       if (robotTickDue) {
         robotTickAccumRef.current = 0;
-        if (!chaseLatchedRef.current) {
+        if (!chaseLatchedRef.current && !isRobotStunned) {
           robotContext.current.processDetection({
             reason: result.robotReason || 'OUTSIDE_RANGE',
             playerX: pos.column,
@@ -405,12 +445,14 @@ export default function StealthRaidView() {
         }
       }
 
-      const robotState = robotContext.current.state;
-      const robotHudState = chaseLatchedRef.current
+      const robotState = isRobotStunned ? ROBOT_STATES.DISABLED : robotContext.current.state;
+      const robotHudState = isRobotStunned
+        ? DETECTION_STATES.NORMAL
+        : chaseLatchedRef.current
         ? DETECTION_STATES.ALARM
         : hudStateFromRobot(robotState);
 
-      if (!chaseLatchedRef.current && !liveDefenderRef.current && raidDefenses.length > 0) {
+      if (!isRobotStunned && !chaseLatchedRef.current && !liveDefenderRef.current && raidDefenses.length > 0) {
         const lastSeen = {
           column: robotContext.current.lastSeenPlayerX ?? pos.column,
           row: robotContext.current.lastSeenPlayerY ?? pos.row,
@@ -428,28 +470,26 @@ export default function StealthRaidView() {
       const robotStateChanged = robotState !== lastRobotStateRef.current;
       if (robotStateChanged) lastRobotStateRef.current = robotState;
 
-      const patrolState = sceneApi.current?.getPatrolState?.() || {};
-      const robotPos = patrolState.position || null;
-      const robotDist =
-        robotPos != null
-          ? Math.hypot(pos.column - robotPos.column, pos.row - robotPos.row)
-          : Infinity;
+      // Stunned robot CANNOT hit, tag, or catch raiders for the 12s duration.
       // Must be on top of the player (catch radius) — distant chase never auto-CAUGHT.
       // Live takeover: server is source of truth for CAUGHT (liveCaughtRef).
       const robotTagged =
+        !isRobotStunned &&
         !liveDefenderRef.current &&
         !!patrolState.hitting &&
         robotDist <= ROBOT_CATCH_DISTANCE + 0.2;
       const robotCaught =
+        !isRobotStunned &&
         !hudRef.current.outcome &&
         (liveCaughtRef.current ||
           (!liveDefenderRef.current &&
             (!!patrolState.caught || (!!patrolState.tagged && robotDist <= ROBOT_CATCH_DISTANCE + 0.2))));
       const robotChasing =
-        chaseLatchedRef.current ||
-        liveDefenderRef.current ||
-        robotState === ROBOT_STATES.CHASING ||
-        !!patrolState.chasing;
+        !isRobotStunned &&
+        (chaseLatchedRef.current ||
+          liveDefenderRef.current ||
+          robotState === ROBOT_STATES.CHASING ||
+          !!patrolState.chasing);
 
       // Arm extraction only after the attacker has left the gate zone once
       // (prevents spawn/nudge onto the corridor from auto-completing a Silent extract).
@@ -522,23 +562,38 @@ export default function StealthRaidView() {
       // lastDetectState tracks robot HUD ladder for vignette pulses
       if (stateChanged) lastDetectState.current = robotHudState;
 
-      if (robotCaught && !hudRef.current.outcome) {
-        if (duoPartyId) duoMarkCaught(duoPartyId, userId).catch(() => { });
-        setStolen((prev) => ({ coins: prev.coins, ink: prev.ink }));
-        hudRef.current = { ...hudRef.current, outcome: 'CAUGHT' };
-        setHud((prev) => ({
-          ...prev,
-          outcome: 'CAUGHT',
-          remaining: 0,
-          channeling: false,
-          greedPercent: 0,
-          greedCoins: 0,
-          greedInk: 0,
-          elapsed,
-          alarm: true,
-          robotHitting: true,
-        }));
-        showToastRef.current('Caught by patrol', 'error');
+      if (robotCaught && !hudRef.current.outcome && !imprisonedRef.current) {
+        const jailBuilding = raidBuildings?.find((b) => b.buildingType === 'JAIL');
+        const hasJail = !!jailBuilding || targetMeta?.jail || targetMeta?.hasJail || targetMeta?.isRealPlayer || raidTargetId === 105;
+        if (hasJail && !ransomPaidRef.current) {
+          imprisonedRef.current = true;
+          setImprisoned(true);
+          setShowRansomModal(true);
+          const jailPos = jailBuilding
+            ? { column: jailBuilding.xPos ?? jailBuilding.column ?? 10, row: jailBuilding.yPos ?? jailBuilding.row ?? 10 }
+            : { column: 10, row: 10 };
+          setAttacker((prev) => ({ ...prev, ...jailPos }));
+          attackerRef.current = { ...attackerRef.current, ...jailPos };
+          showToastRef.current('Captured! Locked in Base Jail — Negotiate ransom or voice intercom', 'warning');
+          soundEngine.playWallHitSound?.();
+        } else {
+          if (duoPartyId) duoMarkCaught(duoPartyId, userId).catch(() => { });
+          setStolen((prev) => ({ coins: prev.coins, ink: prev.ink }));
+          hudRef.current = { ...hudRef.current, outcome: 'CAUGHT' };
+          setHud((prev) => ({
+            ...prev,
+            outcome: 'CAUGHT',
+            remaining: 0,
+            channeling: false,
+            greedPercent: 0,
+            greedCoins: 0,
+            greedInk: 0,
+            elapsed,
+            alarm: true,
+            robotHitting: true,
+          }));
+          showToastRef.current('Caught by patrol', 'error');
+        }
       } else if (channel.complete && !hudRef.current.outcome) {
         const outcome = resolveRaidOutcome({
           alarmTriggered: result.alarmLatched || gateLockedRef.current || chaseLatchedRef.current,
@@ -777,9 +832,69 @@ export default function StealthRaidView() {
     }
   }, [duoPartyId, duoParty?.hostCaught, duoParty?.guestCaught, duoParty?.hostId, userId, showToast]);
 
+  // Duo Signal Listener for shared Robot Stun events
+  useEffect(() => {
+    if (!duoPartyId) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        await ensureStompConnected();
+        if (cancelled) return;
+        await stompSubscribe(`/topic/duo/${duoPartyId}/signal`, (msg) => {
+          if (!msg || Number(msg.fromUserId) === Number(userId)) return;
+          if (msg.type === 'ROBOT_HIT') {
+            const secs = Number(msg.payload?.stunSeconds) || 12;
+            soundEngine.playWallHitSound();
+            sceneApi.current?.stunPatrolRobot?.(secs);
+            robotContext.current?.stun?.(secs);
+            robotStunnedUntilRef.current = Date.now() + (secs * 1000);
+            setRobotStunCountdown(secs);
+            showToastRef.current?.(`⚡ Teammate disabled the robot for ${secs}s!`, 'success');
+          }
+        });
+      } catch {
+        /* offline */
+      }
+    })();
+    return () => {
+      cancelled = true;
+      stompUnsubscribe(`/topic/duo/${duoPartyId}/signal`);
+    };
+  }, [duoPartyId, userId]);
+
+  // Smooth countdown ticker for the 12s robot stun badge
+  useEffect(() => {
+    if (robotStunCountdown <= 0) return undefined;
+    const interval = window.setInterval(() => {
+      const left = Math.max(0, (robotStunnedUntilRef.current - Date.now()) / 1000);
+      setRobotStunCountdown(left);
+      if (left <= 0) {
+        showToastRef.current?.('⚠️ Patrol robot rebooted! Watch out!', 'warning');
+      }
+    }, 100);
+    return () => window.clearInterval(interval);
+  }, [robotStunCountdown > 0]);
+
   useEffect(() => {
     const down = (e) => {
       noteKeyDown(keys.current, e);
+      if ((e.code === 'KeyF' || e.code === 'Space') && !e.repeat) {
+        const patrolState = sceneApi.current?.getPatrolState?.() || {};
+        const robotPos = patrolState.position || null;
+        const robotDist =
+          robotPos != null
+            ? Math.hypot(attackerRef.current.column - robotPos.column, attackerRef.current.row - robotPos.row)
+            : Infinity;
+        const isRobotStunned =
+          !!patrolState.stunned ||
+          robotContext.current.state === ROBOT_STATES.DISABLED ||
+          Date.now() < (robotStunnedUntilRef.current || 0);
+        if (robotDist <= 2.5 && !isRobotStunned) {
+          e.preventDefault();
+          hitRobotRef.current?.();
+          return;
+        }
+      }
       if (e.code === 'KeyF' && !e.repeat) {
         e.preventDefault();
         actionRef.current?.();
@@ -854,6 +969,58 @@ export default function StealthRaidView() {
       return true;
     }
     return false;
+  };
+
+  /** Start channeling loot from a house with 3D ground spinning animation. */
+  const startLootChannel = (house) => {
+    if (!house || hudRef.current.outcome || isLootingRef.current || imprisonedRef.current) return;
+    const id = house.id;
+    const isCoin = house.buildingType === 'COIN_GENERATOR';
+    const amount = isCoin ? Number(stashRef.current.coins[id] || 0) : Number(stashRef.current.ink[id] || 0);
+    if (amount <= 0) {
+      showToast(isCoin ? 'Empty vault' : 'Empty ink', 'info');
+      return;
+    }
+
+    setIsLooting(true);
+    setLootingTarget(house);
+    setLootProgress(0);
+    soundEngine.playFootstepSound?.(false);
+
+    const startTime = Date.now();
+    const duration = 1100;
+    if (lootTimerRef.current) clearInterval(lootTimerRef.current);
+    lootTimerRef.current = setInterval(() => {
+      const elapsed = Date.now() - startTime;
+      const progress = Math.min(100, Math.floor((elapsed / duration) * 100));
+      setLootProgress(progress);
+      if (progress >= 100) {
+        clearInterval(lootTimerRef.current);
+        lootTimerRef.current = null;
+        setIsLooting(false);
+        setLootingTarget(null);
+        stealFromHouse(house);
+      }
+    }, 40);
+  };
+
+  const handleRansomReleased = (paidCoins) => {
+    ransomPaidRef.current = true;
+    imprisonedRef.current = false;
+    setImprisoned(false);
+    setShowRansomModal(false);
+    if (paidCoins > 0) {
+      setCoins((c) => Math.max(0, c - paidCoins));
+    }
+    showToast(`Ransom agreed (${paidCoins} coins)! Jail unlocked — escape to the gate!`, 'success');
+    robotStunnedUntilRef.current = Date.now() + 8000;
+  };
+
+  const handleRansomDeclined = () => {
+    setShowRansomModal(false);
+    imprisonedRef.current = false;
+    setImprisoned(false);
+    endRaid('CAUGHT');
   };
 
   /** End the run and show the results card. */
@@ -999,15 +1166,72 @@ export default function StealthRaidView() {
     }, final ? 900 : 420);
   };
 
+  const hitRobot = () => {
+    if (hudRef.current.outcome) return;
+    const patrolState = sceneApi.current?.getPatrolState?.() || {};
+    const robotPos = patrolState.position || null;
+    const robotDist =
+      robotPos != null
+        ? Math.hypot(attackerRef.current.column - robotPos.column, attackerRef.current.row - robotPos.row)
+        : Infinity;
+    if (robotDist > 2.8) {
+      showToast('Too far to hit robot', 'info');
+      return;
+    }
+    const isRobotStunned =
+      !!patrolState.stunned ||
+      robotContext.current.state === ROBOT_STATES.DISABLED ||
+      Date.now() < (robotStunnedUntilRef.current || 0);
+    if (isRobotStunned) {
+      showToast('Robot already disabled', 'info');
+      return;
+    }
+
+    soundEngine.playWallHitSound();
+    sceneApi.current?.stunPatrolRobot?.(12);
+    robotContext.current?.stun?.(12);
+    robotStunnedUntilRef.current = Date.now() + 12000;
+    setRobotStunCountdown(12);
+    showToast('⚡ Robot STUNNED for 12s! Safe to perform tasks!', 'success');
+
+    if (duoPartyId) {
+      stompPublish(`/app/duo/${duoPartyId}/signal`, {
+        fromUserId: userId,
+        type: 'ROBOT_HIT',
+        payload: { stunSeconds: 12 },
+      }).catch(() => {});
+    }
+  };
+  hitRobotRef.current = hitRobot;
+
   const tryAction = () => {
     if (hudRef.current.outcome) return;
     const { column, row } = attackerRef.current;
+
+    // Melee range attack on patrol robot
+    const patrolState = sceneApi.current?.getPatrolState?.() || {};
+    const robotPos = patrolState.position || null;
+    const robotDist =
+      robotPos != null
+        ? Math.hypot(column - robotPos.column, row - robotPos.row)
+        : Infinity;
+    const isRobotStunned =
+      !!patrolState.stunned ||
+      robotContext.current.state === ROBOT_STATES.DISABLED ||
+      Date.now() < (robotStunnedUntilRef.current || 0);
+
+    if (robotDist <= 2.5 && !isRobotStunned) {
+      hitRobot();
+      return;
+    }
+
     const house = findRepairedNear(raidBuildings, column, row);
     if (
       house &&
       (house.buildingType === 'COIN_GENERATOR' || house.buildingType === 'INK_HOUSE')
     ) {
-      if (stealFromHouse(house)) return;
+      startLootChannel(house);
+      return;
     }
     if (isAtGate(column, row) && !hudRef.current.gateLocked && !hudRef.current.alarm) {
       climbGate();
@@ -1025,10 +1249,11 @@ export default function StealthRaidView() {
   };
   actionRef.current = tryAction;
   stealRef.current = () => {
-    if (hudRef.current.outcome) return;
+    if (hudRef.current.outcome || isLootingRef.current) return;
     const house = findRepairedNear(raidBuildings, attackerRef.current.column, attackerRef.current.row);
-    if (!stealFromHouse(house)) {
-      if (house?.buildingType === 'COIN_GENERATOR' || house?.buildingType === 'INK_HOUSE') return;
+    if (house?.buildingType === 'COIN_GENERATOR' || house?.buildingType === 'INK_HOUSE') {
+      startLootChannel(house);
+    } else {
       showToast('Stand by coin or ink house', 'info');
     }
   };
@@ -1068,6 +1293,7 @@ export default function StealthRaidView() {
         searchlightLevel={targetMeta?.level || 1}
         showMakeupHouse
         attacker={attacker}
+        looting={isLooting}
       />
 
       {leaveFx && (
@@ -1417,20 +1643,60 @@ export default function StealthRaidView() {
             <ClayButton
               variant={nearCoin ? 'primary' : 'success'}
               magnetic
-              disabled={nearCoin ? coinLeft <= 0 : inkLeft <= 0}
-              onClick={() => stealFromHouse(nearCoin || nearInk)}
+              disabled={(nearCoin ? coinLeft <= 0 : inkLeft <= 0) || isLooting}
+              onClick={() => startLootChannel(nearCoin || nearInk)}
               className="h-9 rounded-xl text-[11px] flex items-center justify-center gap-1.5"
             >
               {nearCoin ? <Coins size={13} /> : <Droplet size={13} />}
-              {nearCoin ? `Collect ${coinLeft}c` : `Collect ${inkLeft} ink`}
+              {isLooting ? `Looting (${lootProgress}%)` : nearCoin ? `Loot ${coinLeft}c` : `Sip ${inkLeft} ink`}
             </ClayButton>
           </ClayPanel>
+        </div>
+      )}
+
+      {/* 12s Robot Stun Action Button & Countdown Badge */}
+      {!hud.outcome && (
+        <div className="fixed top-20 right-16 z-[160] flex flex-col items-end gap-2 pointer-events-none">
+          {nearRobotDist <= 2.8 && robotStunCountdown <= 0 && (
+            <button
+              onClick={hitRobot}
+              className="pointer-events-auto px-4 py-2 rounded-2xl bg-gradient-to-r from-amber-500 to-yellow-400 text-black font-extrabold text-xs shadow-[0_0_20px_rgba(245,158,11,0.6)] hover:brightness-110 flex items-center gap-2 animate-bounce transition-all active:scale-95"
+            >
+              <Zap size={15} className="fill-black" />
+              <span>[F / SPACE] HIT ROBOT (12s STUN)</span>
+            </button>
+          )}
+
+          {robotStunCountdown > 0 && (
+            <div className="pointer-events-auto px-4 py-2 rounded-2xl bg-cyan-950/90 border border-cyan-400/60 shadow-[0_0_25px_rgba(6,182,212,0.4)] backdrop-blur-md flex flex-col gap-1.5 animate-pulse min-w-[210px]">
+              <div className="flex items-center justify-between gap-3 text-cyan-300 text-xs font-mono font-bold">
+                <div className="flex items-center gap-1.5">
+                  <ZapOff size={14} className="text-cyan-400" />
+                  <span>ROBOT OFFLINE</span>
+                </div>
+                <span className="text-white text-sm tabular-nums">
+                  {robotStunCountdown.toFixed(1)}s
+                </span>
+              </div>
+              <div className="w-full h-1.5 bg-black/60 rounded-full overflow-hidden border border-cyan-500/30">
+                <div
+                  className="h-full bg-gradient-to-r from-cyan-400 to-blue-400 transition-all duration-100 ease-linear rounded-full"
+                  style={{ width: `${Math.min(100, (robotStunCountdown / 12) * 100)}%` }}
+                />
+              </div>
+              <p className="text-[10px] text-cyan-200/70 font-sans">
+                Safe to loot vaults & perform tasks
+              </p>
+            </div>
+          )}
         </div>
       )}
 
       {!hud.outcome && (
         <ActionPrompt
           lines={[
+            nearRobotDist <= 2.5 && robotStunCountdown <= 0 ? 'F / Space · HIT ROBOT (12s Stun)' : null,
+            robotStunCountdown > 0 ? `⚡ Robot Offline: ${robotStunCountdown.toFixed(1)}s (Safe to loot)` : null,
             nearCoin && coinLeft > 0 ? 'E · steal coins' : null,
             nearInk && inkLeft > 0 ? 'E · steal ink' : null,
             nearCoin && coinLeft <= 0 ? 'Vault empty' : null,
@@ -1454,6 +1720,45 @@ export default function StealthRaidView() {
         outcome={hud.outcome}
         wallHits={hud.wallHits}
         elapsedSeconds={hud.elapsed}
+      />
+
+      {isLooting && (
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 pointer-events-none">
+          <div className="flex flex-col items-center gap-2 px-6 py-4 rounded-3xl bg-black/85 backdrop-blur-md border border-amber-400/50 shadow-[0_0_35px_rgba(245,158,11,0.5)] text-amber-300">
+            <div className="relative w-16 h-16 flex items-center justify-center">
+              <svg className="w-16 h-16 -rotate-90">
+                <circle cx="32" cy="32" r="26" stroke="#222" strokeWidth="5" fill="none" />
+                <circle
+                  cx="32"
+                  cy="32"
+                  r="26"
+                  stroke="#f59e0b"
+                  strokeWidth="5"
+                  strokeDasharray={163}
+                  strokeDashoffset={163 - (163 * lootProgress) / 100}
+                  strokeLinecap="round"
+                  fill="none"
+                />
+              </svg>
+              <span className="absolute font-mono text-sm font-bold text-amber-200">{lootProgress}%</span>
+            </div>
+            <span className="text-xs font-bold tracking-wider uppercase text-amber-300">
+              Looting Vault...
+            </span>
+          </div>
+        </div>
+      )}
+
+      <RansomModal
+        isOpen={showRansomModal}
+        isPrisoner={true}
+        attackerId={userId}
+        defenderId={targetMeta?.ownerId || raidTargetId || 105}
+        attackerName={`Player ${String(userId).padStart(5, '0')}`}
+        defenderName={targetMeta?.name || 'Base Warden'}
+        playerCoins={1000}
+        onRelease={handleRansomReleased}
+        onDecline={handleRansomDeclined}
       />
     </div>
   );

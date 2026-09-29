@@ -12,6 +12,7 @@ import * as sleepHouse from './houses/sleepHouse.js';
 import * as craftHouse from './houses/craftHouse.js';
 import * as inkHouse from './houses/inkHouse.js';
 import * as coinGenerator from './houses/coinGenerator.js';
+import * as jailHouse from './houses/jailHouse.js';
 import { HOUSE_HEIGHT_SCALE } from './houseKit.js';
 
 function clay(color, extras = {}) {
@@ -36,6 +37,8 @@ const HOUSE_BUILDERS = {
   CRAFT_HOUSE: craftHouse,
   INK_HOUSE: inkHouse,
   COIN_GENERATOR: coinGenerator,
+  JAIL: jailHouse,
+  BASE_JAIL: jailHouse,
 };
 
 /** Concept-art clay houses. Paint (`hexColor`) tints cloth only. */
@@ -292,6 +295,7 @@ export function createGamePatrolRobot() {
     chase: { eye: GAME_COLORS.RED, body: '#8A4545', lean: 0.14, bob: 0.08 },
     searching: { eye: '#5B8DEF', body: '#5A6570', lean: 0.04, bob: 0.06 },
     hit: { eye: GAME_COLORS.RED, body: '#A03030', lean: 0.18, bob: 0.12 },
+    disabled: { eye: '#38BDF8', body: '#3A3A3A', lean: -0.22, bob: 0.005 },
   };
 
   // Idle in front of the searchlight tower (toward the gate), far enough that
@@ -317,13 +321,16 @@ export function createGamePatrolRobot() {
   let primed = false;
   /** When true, pose comes from live defender updates — skip waypoint/chase AI. */
   let liveDriven = false;
+  let stunTimer = 0;
+  let preStunMode = 'patrol';
 
   const applyTint = (key) => {
     const tint = STATE_TINT[key] || STATE_TINT.patrol;
     if (eye.material) {
       eye.material.color.set(tint.eye);
       eye.material.emissive.set(tint.eye);
-      eye.material.emissiveIntensity = key === 'chase' || key === 'hit' ? 1.35 : key === 'alert' ? 1.0 : 0.55;
+      eye.material.emissiveIntensity =
+        key === 'chase' || key === 'hit' ? 1.35 : key === 'alert' ? 1.0 : key === 'disabled' ? 0.3 : 0.55;
     }
     if (tip.material) {
       tip.material.color.set(tint.eye);
@@ -346,10 +353,24 @@ export function createGamePatrolRobot() {
       return { column: col, row };
     },
     get chasing() {
-      return mode === 'chase' || mode === 'hit' || liveDriven;
+      return (mode === 'chase' || mode === 'hit' || liveDriven) && stunTimer <= 0;
     },
     get liveDriven() {
       return liveDriven;
+    },
+    get isStunned() {
+      return stunTimer > 0;
+    },
+    get stunRemaining() {
+      return Math.max(0, stunTimer);
+    },
+    stun(seconds = 12) {
+      if (mode !== 'disabled') {
+        preStunMode = mode;
+      }
+      stunTimer = Math.max(stunTimer, Number(seconds) || 12);
+      mode = 'disabled';
+      applyTint('disabled');
     },
     /** Absolute pose from a live defender (lerp in update). */
     setLivePosition(column, rowNum, snap = false) {
@@ -377,6 +398,7 @@ export function createGamePatrolRobot() {
       if (rowNum != null && Number.isFinite(Number(rowNum))) targetRow = Number(rowNum);
     },
     setMode(next, target) {
+      if (stunTimer > 0) return; // Keep offline while stunned
       const key = String(next || 'patrol').toLowerCase();
       const nextMode = key === 'chasing' ? 'chase' : key;
       if (target) {
@@ -400,6 +422,38 @@ export function createGamePatrolRobot() {
     },
     update(elapsed, dt = 0.016) {
       tickBuildingMotion(bot, elapsed);
+
+      // 12-second stun/offline state: zero movement, disabled vision, sparking electric short
+      if (stunTimer > 0) {
+        stunTimer -= dt;
+        if (eye.material) {
+          const spark = Math.sin(elapsed * 28) > 0.35;
+          eye.material.emissiveIntensity = spark ? 0.9 : 0.05;
+          eye.material.color.set(spark ? '#38BDF8' : '#1E293B');
+          eye.material.emissive.set(spark ? '#38BDF8' : '#000000');
+        }
+        body.rotation.z = Math.sin(elapsed * 25) * 0.035;
+        body.rotation.x = -0.22;
+        chest.rotation.x = -0.15;
+        if (primed) {
+          bot.position.set(worldX, TILE_HEIGHT, worldZ);
+        }
+        if (stunTimer <= 0) {
+          stunTimer = 0;
+          mode = preStunMode || 'patrol';
+          applyTint(mode);
+        }
+        return {
+          caught: false,
+          tagged: false,
+          hitting: false,
+          state: 'disabled',
+          chasing: false,
+          stunned: true,
+          stunRemaining: Math.max(0, stunTimer),
+        };
+      }
+
       const tint = STATE_TINT[mode] || STATE_TINT.patrol;
 
       // Live defender drives the mesh — smooth lerp toward last reported tile.

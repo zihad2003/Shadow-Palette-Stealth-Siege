@@ -30,4 +30,14 @@ public class RaidController {
         RaidCompleteResponse response = raidService.completeRaid(request);
         return ResponseEntity.ok(response);
     }
+
+    @PostMapping("/ransom/offer")
+    public ResponseEntity<com.shadowpalette.dto.RansomResponse> offerRansom(@Valid @RequestBody com.shadowpalette.dto.RansomOfferRequest request) {
+        return ResponseEntity.ok(raidService.handleRansomOffer(request));
+    }
+
+    @PostMapping("/ransom/settle")
+    public ResponseEntity<com.shadowpalette.dto.RansomResponse> settleRansom(@Valid @RequestBody com.shadowpalette.dto.RansomSettleRequest request) {
+        return ResponseEntity.ok(raidService.handleRansomSettle(request));
+    }
 }

@@ -73,6 +73,21 @@ public class BuildingFactory {
                         .footprintHeight(3)
                         .build();
 
+            case "JAIL":
+            case "BASE_JAIL":
+                return Jail.builder()
+                        .plotId(plotId)
+                        .buildingType("JAIL")
+                        .modelVariant(variant)
+                        .level(1)
+                        .hexColor(normalizedColor)
+                        .xPos(xPos)
+                        .yPos(yPos)
+                        .footprintWidth(3)
+                        .footprintHeight(3)
+                        .prisonerCapacity(1)
+                        .build();
+
             default:
                 throw new IllegalArgumentException("INVALID_BUILDING_TYPE");
         }

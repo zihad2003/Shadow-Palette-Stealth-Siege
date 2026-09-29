@@ -79,8 +79,11 @@ export default function GameMap({
   pickupAnim = null,
   coinBanks = null,
   dayNight = true,
+  looting = false,
 }) {
   const mountRef = useRef(null);
+  const lootingRef = useRef(looting);
+  lootingRef.current = looting;
   const callbacksRef = useRef({});
   callbacksRef.current = { onTileClick, onTileHover, onMakeupHouseClick, onBuildingClick };
   const paintedRef = useRef(paintedTiles);
@@ -1347,11 +1350,16 @@ export default function GameMap({
             patrol.setMode(key, { column: patrolCmd.column, row: patrolCmd.row });
           }
         },
+        stunPatrolRobot: (seconds = 12) => {
+          patrol?.stun?.(seconds);
+        },
         getPatrolState: () => ({
           ...lastPatrolHit,
-          chasing: patrolCmd.chasing || !!patrol?.chasing,
+          chasing: (patrolCmd.chasing || !!patrol?.chasing) && !patrol?.isStunned,
           live: !!patrol?.liveDriven,
           position: patrol?.position || null,
+          stunned: !!patrol?.isStunned,
+          stunRemaining: patrol?.stunRemaining || 0,
         }),
         /** Apply a live-defender robot pose (disables AI until clearLivePatrol). */
         setLivePatrolPosition: (column, row, snap = false) => {
@@ -1700,12 +1708,14 @@ export default function GameMap({
         const picking = !!(vehNow.pickupAnim && vehNow.pickupAnim.t < 1);
         const seated = !!vehNow.ride?.seated;
         const carrying = !!vehNow.carriedPart && !seated;
+        const isLooting = !!lootingRef.current;
         tickCharacter(attackerMesh, elapsed, {
           dt,
-          speed: picking || seated ? 0 : attackerSmooth.speed,
+          speed: picking || seated || isLooting ? 0 : attackerSmooth.speed,
           carrying,
           picking,
           seated,
+          looting: isLooting,
         });
         const baseScale = seated ? SEATED_CHAR_SCALE : cameraModeRef.current === 'chase' ? 0.78 : 0.42;
         if (attackerSmooth.scale == null) attackerSmooth.scale = baseScale;

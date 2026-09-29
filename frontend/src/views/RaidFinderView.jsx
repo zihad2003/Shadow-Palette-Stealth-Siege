@@ -8,8 +8,9 @@ import ClayButton from '../components/ui/ClayButton.jsx';
 import RaidTargetCard from '../components/raid/RaidTargetCard.jsx';
 import { RAID_TARGETS } from '../data/raidTargets.js';
 import { useGameState } from '../state/GameStateContext.jsx';
-import { RefreshCw, Users } from 'lucide-react';
+import { RefreshCw, Users, Eye, Swords, ShieldAlert, Car } from 'lucide-react';
 import DuoLobbyView from '../duo/DuoLobbyView.jsx';
+import { sendVisitInvite } from '../api.js';
 
 export default function RaidFinderView() {
   const {
@@ -25,10 +26,12 @@ export default function RaidFinderView() {
     leaveDuoParty,
     refreshOnlinePlayers,
     userId,
+    garageComplete,
   } = useGameState();
   const [cooldownLeft, setCooldownLeft] = useState(0);
   const [duoOpen, setDuoOpen] = useState(true);
   const [sentDuo, setSentDuo] = useState({});
+  const [sentVisit, setSentVisit] = useState({});
   const [refreshing, setRefreshing] = useState(false);
   const [manualId, setManualId] = useState('');
 
@@ -56,7 +59,6 @@ export default function RaidFinderView() {
       cancelled = true;
       window.clearInterval(id);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [duoOpen, duoParty?.partyId, duoParty?.status]);
 
   const fmtUid = (id) => String(id).padStart(5, '0');
@@ -93,6 +95,16 @@ export default function RaidFinderView() {
     });
   };
 
+  const handleSendVisit = async (targetId) => {
+    try {
+      await sendVisitInvite(userId, targetId);
+      setSentVisit((s) => ({ ...s, [targetId]: true }));
+      showToast(`Base visit invite sent to Player ${fmtUid(targetId)}!`, 'success');
+    } catch {
+      showToast('Could not send visit invite', 'error');
+    }
+  };
+
   const players = (onlinePlayers || []).filter((p) => Number(p.userId) !== Number(userId));
   const otherHint = Number(userId) === 20161 ? 20162 : 20161;
   const otherHintFormatted = fmtUid(otherHint);
@@ -102,7 +114,7 @@ export default function RaidFinderView() {
     try {
       const list = await refreshOnlinePlayers?.();
       const others = (list || []).filter((p) => Number(p.userId) !== Number(userId));
-      showToast(others.length ? `${others.length} online` : 'Nobody else online yet', 'info');
+      showToast(others.length ? `${others.length} players online` : 'No other players online', 'info');
     } finally {
       setRefreshing(false);
     }
@@ -121,14 +133,37 @@ export default function RaidFinderView() {
     }
   };
 
+  // Build live player raid targets
+  const livePlayerTargets = players.map((p) => ({
+    id: p.userId,
+    name: p.username || `Player ${fmtUid(p.userId)}'s Base`,
+    ownerId: p.userId,
+    isRealPlayer: true,
+    level: 2,
+    difficulty: 'PvP Live',
+    coins: 500,
+    ink: 100,
+    chips: 250,
+    camo: p.camoColor || 'BLUE',
+    primaryColor: '#E53E3E',
+    buildings: 5,
+    lighthouse: true,
+    patrol: true,
+    jail: true,
+    description: 'Active player base! Defender can counter-siege and lock you in their Jail.',
+  }));
+
+  const allTargets = [...livePlayerTargets, ...RAID_TARGETS];
+
   return (
     <div className="relative w-full h-full overflow-hidden bg-clay-bg flex flex-col">
       <HudHeader
-        left={<HudBanner title="Raids" />}
+        left={<HudBanner title="Tactical Raid Radar" />}
         right={
           <>
-            <ClayPanel className="h-11 px-3.5 rounded-2xl text-[11px] font-semibold text-clay-accent flex items-center">
-              Camo {camoColor}
+            <ClayPanel className="h-11 px-3.5 rounded-2xl text-[11px] font-semibold text-clay-accent flex items-center gap-1.5">
+              {garageComplete ? <Car size={13} className="text-clay-success" /> : null}
+              {garageComplete ? 'Vehicle Online' : 'Vehicle Incomplete'}
             </ClayPanel>
             <ClayButton
               variant={duoOpen || inDuo ? 'success' : 'primary'}
@@ -136,7 +171,7 @@ export default function RaidFinderView() {
               onClick={() => setDuoOpen((v) => !v)}
             >
               <Users size={14} />
-              {inDuo ? 'Duo ready' : players.length ? `Duo · ${players.length}` : 'Duo'}
+              {inDuo ? 'Duo ready' : players.length ? `Network (${players.length})` : 'Network'}
             </ClayButton>
             <NavigationTabs />
             <TopResourceBar />
@@ -145,10 +180,13 @@ export default function RaidFinderView() {
       />
 
       {(duoOpen || inDuo) && (
-        <div className="absolute top-[4.75rem] right-4 z-40 w-[18rem] pointer-events-auto">
-          <ClayPanel depth="deep" className="px-3 py-3 rounded-2xl">
+        <div className="absolute top-[4.75rem] right-4 z-40 w-[20rem] pointer-events-auto">
+          <ClayPanel depth="deep" className="px-3.5 py-3 rounded-2xl">
             <div className="flex items-center justify-between gap-2 mb-1">
-              <p className="text-[12px] font-semibold">Duo raid</p>
+              <p className="text-[12px] font-semibold flex items-center gap-1.5">
+                <Users size={14} className="text-clay-accent" />
+                Live Player Comms
+              </p>
               <ClayButton
                 variant="ghost"
                 className="!h-8 !w-8 !min-w-8 !p-0 !rounded-full !gap-0 shrink-0"
@@ -159,18 +197,18 @@ export default function RaidFinderView() {
               </ClayButton>
             </div>
             <p className="text-[10px] text-clay-muted mb-2">
-              You are <span className="text-clay-text font-semibold">Player {fmtUid(userId)}</span>
+              Your device account: <span className="text-clay-text font-semibold">Player {fmtUid(userId)}</span>
             </p>
 
             {inDuo ? (
               <div className="space-y-2">
                 <p className="text-[11px] text-clay-text">
-                  With <span className="font-semibold">{partnerLabel}</span>
+                  Duo Partner: <span className="font-semibold">{partnerLabel}</span>
                 </p>
                 <p className="text-[10px] text-clay-muted">
                   {isDuoHost
-                    ? 'Pick a base below — friend joins with voice.'
-                    : 'Waiting for host to pick a base…'}
+                    ? 'Select a raid target below — partner joins with voice.'
+                    : 'Waiting for duo host to pick a target…'}
                 </p>
                 <ClayButton
                   variant="danger"
@@ -182,51 +220,62 @@ export default function RaidFinderView() {
               </div>
             ) : (
               <>
-                <p className="text-[10px] text-clay-muted mb-1.5">Available now ({players.length})</p>
+                <p className="text-[10px] text-clay-muted mb-1.5">Online Players Nearby ({players.length})</p>
                 {players.length === 0 ? (
                   <p className="text-[11px] text-clay-muted leading-snug mb-2">
-                    No one listed yet — both stay on Raid Finder, then refresh, or invite by id below.
+                    No other players online yet. You can raid the 5 faction bot bases below or invite a friend by ID.
                   </p>
                 ) : (
-                  <div className="flex flex-col gap-1.5 max-h-40 overflow-y-auto mb-2">
+                  <div className="flex flex-col gap-1.5 max-h-48 overflow-y-auto mb-2">
                     {players.map((p) => (
                       <div
                         key={p.userId}
-                        className="flex items-center justify-between gap-2 rounded-xl bg-black/10 px-2 py-1.5"
+                        className="flex items-center justify-between gap-1.5 rounded-xl bg-black/15 px-2.5 py-2"
                       >
-                        <div className="min-w-0">
+                        <div className="min-w-0 flex-1">
                           <p className="text-[12px] font-medium truncate">
                             {p.username || `Player ${fmtUid(p.userId)}`}
                           </p>
-                          <p className="text-[9px] text-clay-muted">id {fmtUid(p.userId)} · online</p>
+                          <p className="text-[9px] text-clay-muted">#{fmtUid(p.userId)} · Camo {p.camoColor || 'BLUE'}</p>
                         </div>
-                        <ClayButton
-                          variant={sentDuo[p.userId] ? 'ghost' : 'success'}
-                          className="h-8 px-3 rounded-xl text-[11px] font-semibold shrink-0 shadow-sm"
-                          onClick={async () => {
-                            const ok = await inviteDuoPlayer(p.userId);
-                            if (ok) setSentDuo((s) => ({ ...s, [p.userId]: true }));
-                          }}
-                        >
-                          {sentDuo[p.userId] ? 'Sent' : 'Invite'}
-                        </ClayButton>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <ClayButton
+                            variant={sentDuo[p.userId] ? 'ghost' : 'success'}
+                            className="h-7 px-2.5 rounded-lg text-[10px] font-semibold shadow-sm"
+                            title="Invite to Duo Co-op Raid"
+                            onClick={async () => {
+                              const ok = await inviteDuoPlayer(p.userId);
+                              if (ok) setSentDuo((s) => ({ ...s, [p.userId]: true }));
+                            }}
+                          >
+                            {sentDuo[p.userId] ? 'Sent' : 'Duo'}
+                          </ClayButton>
+                          <ClayButton
+                            variant={sentVisit[p.userId] ? 'ghost' : 'primary'}
+                            className="h-7 px-2 rounded-lg text-[10px] font-semibold shadow-sm"
+                            title="Invite to Visit Base"
+                            onClick={() => handleSendVisit(p.userId)}
+                          >
+                            <Eye size={12} />
+                          </ClayButton>
+                        </div>
                       </div>
                     ))}
                   </div>
                 )}
 
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1.5 mt-2">
                   <input
                     type="number"
                     min={1}
-                    placeholder={`Friend id (e.g. ${otherHintFormatted})`}
+                    placeholder={`Friend id (${otherHintFormatted})`}
                     value={manualId}
                     onChange={(e) => setManualId(e.target.value)}
                     className="flex-1 h-8 rounded-lg bg-black/15 px-2 text-[11px] text-clay-text outline-none border border-white/10"
                   />
                   <ClayButton
                     variant="success"
-                    className="h-9 px-3.5 rounded-xl text-[11px] font-semibold shrink-0"
+                    className="h-8 px-3 rounded-xl text-[11px] font-semibold shrink-0"
                     onClick={sendManualInvite}
                   >
                     Invite
@@ -238,9 +287,15 @@ export default function RaidFinderView() {
         </div>
       )}
 
-<div className="flex-1 overflow-y-auto px-4 pb-16 pt-28">
+      <div className="flex-1 overflow-y-auto px-4 pb-16 pt-28">
+        <div className="max-w-4xl mx-auto mb-4">
+          <h2 className="font-heading font-extrabold text-base text-clay-text">Available Targets</h2>
+          <p className="text-xs text-clay-muted">
+            Solo or Co-op Raids: infiltrate the 5 faction bot strongholds or raid live player bases.
+          </p>
+        </div>
         <div className="grid gap-5 sm:grid-cols-2 max-w-4xl mx-auto">
-          {RAID_TARGETS.map((t) => (
+          {allTargets.map((t) => (
             <RaidTargetCard key={t.id} target={t} onRaid={() => handleRaid(t)} />
           ))}
         </div>

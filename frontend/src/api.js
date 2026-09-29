@@ -73,9 +73,25 @@ export async function fetchHealth() {
   return request('/api/health');
 }
 
-/** Resolve or create a player identity server-side. */
-export async function startSession(userId, username, password) {
-  const payload = {};
+export function getOrCreateDeviceToken() {
+  try {
+    let token = window.localStorage.getItem('sp_device_token');
+    if (!token) {
+      token = (typeof crypto !== 'undefined' && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : 'dev_' + Math.random().toString(36).substring(2) + Date.now().toString(36);
+      window.localStorage.setItem('sp_device_token', token);
+    }
+    return token;
+  } catch {
+    return 'temp_device_' + Date.now();
+  }
+}
+
+/** Resolve or create a player identity server-side locked to device token. */
+export async function startSession(userId, username, password, recoveryToken) {
+  const deviceToken = recoveryToken || getOrCreateDeviceToken();
+  const payload = { recoveryToken: deviceToken };
   if (userId != null) payload.userId = userId;
   if (username) payload.username = username;
   if (password) payload.password = password;
@@ -291,5 +307,19 @@ export async function duoSetReady(payload) {
 
 export async function duoForUser(userId) {
   return request(`/api/duo/user/${userId}`);
+}
+
+export async function postRansomOffer(payload) {
+  return request('/api/raid/ransom/offer', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function postRansomSettle(payload) {
+  return request('/api/raid/ransom/settle', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
 }
 
