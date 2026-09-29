@@ -2,9 +2,35 @@
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '');
 
+/* ---- JWT token management ---- */
+let _jwtToken = null;
+try {
+  _jwtToken = window.sessionStorage.getItem('sp_jwt') || window.localStorage.getItem('sp_jwt') || null;
+} catch { /* private mode */ }
+
+export function setJwtToken(token) {
+  _jwtToken = token || null;
+  try {
+    if (token) {
+      window.sessionStorage.setItem('sp_jwt', token);
+      window.localStorage.setItem('sp_jwt', token);
+    } else {
+      window.sessionStorage.removeItem('sp_jwt');
+      window.localStorage.removeItem('sp_jwt');
+    }
+  } catch { /* private mode */ }
+}
+
+export function getJwtToken() {
+  return _jwtToken;
+}
+
 async function request(url, options = {}) {
   const fullUrl = url.startsWith('http') ? url : `${API_BASE_URL}${url}`;
   const headers = { 'Content-Type': 'application/json', ...options.headers };
+  if (_jwtToken) {
+    headers['Authorization'] = `Bearer ${_jwtToken}`;
+  }
   // Add a timeout so the UI doesn't hang if backend proxy is unresponsive
   const signal = options.signal || (typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(5000) : undefined);
   const res = await fetch(fullUrl, { ...options, headers, signal }).catch((err) => {

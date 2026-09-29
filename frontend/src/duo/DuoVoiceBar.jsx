@@ -11,30 +11,50 @@ import ClayPanel from '../components/ui/ClayPanel.jsx';
  * Features ONLY Mic On/Off and Sound On/Off with zero UI overlap.
  */
 export default function DuoVoiceBar() {
-  const { duoParty, userId, showToast } = useGameState();
+  const { duoParty, userId, showToast, gameState } = useGameState();
   const [voiceStatus, setVoiceStatus] = useState('idle');
   const [muted, setMuted] = useState(false);
   const [deafened, setDeafened] = useState(false);
   const [autoplayBlocked, setAutoplayBlocked] = useState(false);
-
-  const partyId = duoParty?.partyId;
-  const isHost = Number(duoParty?.hostId) === Number(userId);
-  const fmtUid = (id) => String(id).padStart(5, '0');
-  const partnerName =
-    isHost ? duoParty?.guestName || `Player ${fmtUid(duoParty?.guestId)}` : duoParty?.hostName || `Player ${fmtUid(duoParty?.hostId)}`;
 
   const callRef = useRef(null);
   const audioRef = useRef(null);
   const showToastRef = useRef(showToast);
   showToastRef.current = showToast;
 
+  const partyId = duoParty?.partyId;
+  const isHost = Number(duoParty?.hostUserId || duoParty?.hostId) === Number(userId);
+  const fmtUid = (id) => String(id).padStart(5, '0');
+  const partnerName = isHost
+    ? (duoParty?.guestName || duoParty?.guestUsername || `Player ${fmtUid(duoParty?.guestId)}`)
+    : (duoParty?.hostName || duoParty?.hostUsername || `Player ${fmtUid(duoParty?.hostId)}`);
+
+  // Strict session constraint: Voice is ONLY permitted during active Duo Lobby or Raid.
+  // Returning to Base, Main Menu, Splash, or leaving the party immediately terminates the call.
+  const inDuoGameSession =
+    gameState === 'RAID_FINDER' ||
+    gameState === 'RAID_ENTER' ||
+    gameState === 'STEALTH_RAID';
+
   const bothInLobby =
-    !!duoParty?.partyId &&
+    inDuoGameSession &&
+    !!partyId &&
     duoParty.status !== 'ENDED' &&
-    (duoParty.guestJoined || duoParty.status === 'IN_RAID');
+    (duoParty.guestJoined || duoParty.status === 'IN_RAID' || duoParty.status === 'LOBBY');
 
   useEffect(() => {
-    if (!bothInLobby || !userId) return undefined;
+    if (!bothInLobby || !userId || !partyId) {
+      if (callRef.current) {
+        callRef.current.stop();
+        callRef.current = null;
+        if (audioRef.current) {
+          audioRef.current.pause();
+          audioRef.current.srcObject = null;
+        }
+        setVoiceStatus('idle');
+      }
+      return undefined;
+    }
     let cancelled = false;
     let call = null;
 
@@ -90,6 +110,10 @@ export default function DuoVoiceBar() {
       window.removeEventListener('pointerdown', unlockAudio);
       window.removeEventListener('keydown', unlockAudio);
       call?.stop();
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.srcObject = null;
+      }
       callRef.current = null;
       setVoiceStatus('idle');
       setAutoplayBlocked(false);

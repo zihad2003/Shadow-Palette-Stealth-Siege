@@ -22,6 +22,7 @@ import {
   fetchVisitSession,
   postVisitState,
   endVisitSession,
+  setJwtToken,
 } from '../api.js';
 import {
   CART_PARTS,
@@ -35,7 +36,7 @@ import {
 } from '../gamemap/paletteBuggy.js';
 import { soundEngine } from '../soundEngine.js';
 import { createRaidSession, rejectColorChange } from '../raid/RaidSession.js';
-import { ensureStompConnected, stompSubscribe, stompUnsubscribe } from '../live/stompClient.js';
+import { ensureStompConnected, stompSubscribe, stompUnsubscribe, disconnectStomp } from '../live/stompClient.js';
 import { MAP_COLS, MAP_ROWS } from '../gamemap/mapConfig.js';
 import { canPlaceOnGameMap, getGameFootprint, migrateHouseFootprints } from '../gamemap/placeUtils.js';
 import {
@@ -215,6 +216,11 @@ export function GameStateProvider({ children }) {
         if (!cancelled && res?.success && res.userId) {
           setUserId(res.userId);
           if (res.username) setUsername(res.username);
+          if (res.jwt) {
+            setJwtToken(res.jwt);
+            // Reconnect STOMP with new credentials
+            disconnectStomp().catch(() => {});
+          }
           try {
             window.sessionStorage.setItem('sp_userId', String(res.userId));
             window.localStorage.setItem('sp_userId', String(res.userId));
@@ -425,6 +431,10 @@ export function GameStateProvider({ children }) {
       if (res?.success && res.userId) {
         setUserId(res.userId);
         setUsername(res.username || trimmed);
+        if (res.jwt) {
+          setJwtToken(res.jwt);
+          disconnectStomp().catch(() => {});
+        }
         try {
           window.sessionStorage.setItem('sp_userId', String(res.userId));
           window.localStorage.setItem('sp_userId', String(res.userId));

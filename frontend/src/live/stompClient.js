@@ -4,6 +4,7 @@
  */
 import { Client } from '@stomp/stompjs';
 import SockJS from 'sockjs-client';
+import { getJwtToken } from '../api.js';
 
 let client = null;
 let connectPromise = null;
@@ -28,8 +29,14 @@ export function ensureStompConnected() {
   if (connectPromise) return connectPromise;
 
   connectPromise = new Promise((resolve, reject) => {
+    const connectHeaders = {};
+    const jwt = getJwtToken();
+    if (jwt) {
+      connectHeaders['Authorization'] = `Bearer ${jwt}`;
+    }
     const c = new Client({
       webSocketFactory: () => new SockJS(wsUrl()),
+      connectHeaders,
       reconnectDelay: 3000,
       heartbeatIncoming: 10000,
       heartbeatOutgoing: 10000,
