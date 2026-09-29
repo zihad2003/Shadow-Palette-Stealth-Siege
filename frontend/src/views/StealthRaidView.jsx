@@ -804,12 +804,12 @@ export default function StealthRaidView() {
   const [leaveFx, setLeaveFx] = useState(null); // null | 'exit' | 'caught'
 
   // Auto-finish raid when outcome is set (after results panel shows briefly)
+  // NOTE: do NOT set settled.current here — finishRaid() owns that guard.
   useEffect(() => {
     if (hud.outcome && !settled.current) {
-      settled.current = true;
       const timer = window.setTimeout(() => {
         finishRaid();
-      }, 1500);
+      }, 4000);
       return () => window.clearTimeout(timer);
     }
   }, [hud.outcome]);
@@ -906,7 +906,6 @@ export default function StealthRaidView() {
     if (!outcome) return;
     settled.current = true;
     recordRaidResult(outcome);
-    setLeaveFx(outcome === 'CAUGHT' ? 'caught' : 'exit');
 
     if (outcome === 'SILENT' || outcome === 'ESCAPED') {
       soundEngine.playRaidExitSound();
@@ -918,15 +917,16 @@ export default function StealthRaidView() {
       if (coins > 0) drops.push({ id: `win-c`, kind: 'coin', amount: coins, x: 0.45, y: 0.4 });
       if (ink > 0) drops.push({ id: `win-i`, kind: 'ink', amount: ink, x: 0.55, y: 0.4 });
       if (drops.length) setFloatingLoot((p) => [...p, ...drops]);
+    } else if (outcome === 'CAUGHT') {
+      soundEngine.playRaidCaughtSound?.();
     }
 
-    window.setTimeout(() => {
-      transitionTo('BASE_BUILDER', {
-        loadingTitle: outcome === 'CAUGHT' ? 'Caught' : outcome === 'INCOMPLETE' ? 'Incomplete' : 'Extracted',
-        loadingSubtitle: outcome === 'CAUGHT' ? 'Cooldown applied' : 'Returning to base',
-        loadingMs: 400,
-      });
-    }, RAID_CINEMATIC_MS);
+    // Go straight to base — no cinematic overlay delay
+    transitionTo('BASE_BUILDER', {
+      loadingTitle: 'Base',
+      loadingSubtitle: '',
+      loadingMs: 300,
+    });
   };
 
   const climbGate = () => {

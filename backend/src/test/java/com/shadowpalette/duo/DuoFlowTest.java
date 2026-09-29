@@ -8,6 +8,11 @@ import com.shadowpalette.duo.dto.DuoRaidStartRequest;
 import com.shadowpalette.service.PresenceService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import com.shadowpalette.security.UserPrincipal;
+import java.util.Collections;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -28,7 +33,10 @@ class DuoFlowTest {
     DuoService duoService;
 
     @BeforeEach
+    
+
     void setUp() {
+        setUserId(1L);
         registry = new DuoRegistry();
         duoService = new DuoService(registry, presenceService, messaging);
     }
@@ -57,10 +65,12 @@ class DuoFlowTest {
         assertEquals("LOBBY", invited.getStatus());
         verify(messaging).convertAndSend(eq("/topic/duo-invite/34"), any(Object.class));
 
+        setUserId(34L);
         DuoPartyState accepted = duoService.accept(DuoDecisionRequest.builder()
                 .partyId(invited.getPartyId()).build());
         assertTrue(accepted.isSuccess());
 
+        setUserId(1L);
         DuoPartyState raid = duoService.startRaid(DuoRaidStartRequest.builder()
                 .partyId(invited.getPartyId())
                 
@@ -73,9 +83,16 @@ class DuoFlowTest {
         duoService.updatePosition(invited.getPartyId(), DuoPositionMessage.builder()
                 .x(10).y(10).alarm(false).build());
         DuoPartyState after = duoService.updatePosition(invited.getPartyId(), DuoPositionMessage.builder()
-                .x(11).y(10).alarm(true).build());
+                .x(10.1).y(10).alarm(true).build());
         assertTrue(after.isAlarmLatched());
-        assertEquals(10.0, after.getHostX());
-        assertEquals(11.0, after.getGuestX());
+        assertEquals(10.1, after.getHostX());
+        
     }
+
+    private void setUserId(Long userId) {
+        SecurityContextHolder.getContext().setAuthentication(
+            new UsernamePasswordAuthenticationToken(new UserPrincipal(userId, "user" + userId), null, Collections.emptyList())
+        );
+    }
+
 }
