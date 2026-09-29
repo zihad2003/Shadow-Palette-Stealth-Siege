@@ -37,8 +37,8 @@ export function evaluateDetectionTick({
   const beam = evaluateBeam(light, player);
   const colorMatch = isMatch(attackerColor, tileColor);
   const stealthScore = computeStealthScore({ colorMatch, shadowTile });
-  // Spotted = under the light at all. Chase latches on first contact in StealthRaidView.
-  const exposed = !!beam.canSee;
+  // If plot color matches character color, the light CANNOT find the player!
+  const exposed = !!beam.canSee && !colorMatch;
   const robotReason = robotDetectionReason(beam, colorMatch);
 
   let nextMeter = meter;

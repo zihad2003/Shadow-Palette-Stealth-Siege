@@ -47,7 +47,7 @@ import {
   DAILY_TASK_REWARD,
   ensureToday,
 } from '../daily/dailyTasks.js';
-import { createStarterRuins, createMaxedHome, REPAIR_BUILDING_COST, findRuinNear, findRepairedNear, nextGuideRuin, STARTER_HOUSE_COUNT, REBUILD_SECONDS, houseLabel } from '../gamemap/starterRuins.js';
+import { createStarterRuins, createMaxedHome, generate5ColorTechniqueTiles, REPAIR_BUILDING_COST, findRuinNear, findRepairedNear, nextGuideRuin, STARTER_HOUSE_COUNT, REBUILD_SECONDS, houseLabel } from '../gamemap/starterRuins.js';
 import { GATE_SPAWN_TILE } from '../gamemap/mapConfig.js';
 import {
   DEFAULT_SEARCHLIGHT_LEVEL,
@@ -334,7 +334,9 @@ export function GameStateProvider({ children }) {
   );
   const [defenses, setDefenses] = useState(() => (Array.isArray(savedWorld?.defenses) ? savedWorld.defenses : []));
   const [paintedTiles, setPaintedTiles] = useState(() =>
-    savedWorld?.paintedTiles && typeof savedWorld.paintedTiles === 'object' ? savedWorld.paintedTiles : {}
+    savedWorld?.paintedTiles && typeof savedWorld.paintedTiles === 'object' && Object.keys(savedWorld.paintedTiles).length > 0
+      ? savedWorld.paintedTiles
+      : generate5ColorTechniqueTiles(userIdStored || 1)
   );
   const [selectedBuildingId, setSelectedBuildingId] = useState(null);
   const [movingBuildingId, setMovingBuildingId] = useState(null);

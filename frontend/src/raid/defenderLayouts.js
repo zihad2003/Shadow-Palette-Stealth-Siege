@@ -13,53 +13,14 @@ function keyAt(column, row) {
 const HOUSE_TYPES = ['SLEEP_HOUSE', 'INK_HOUSE', 'CRAFT_HOUSE', 'COIN_GENERATOR', 'JAIL'];
 const HOUSE_GRAY = ['#C8C8C8', '#B0B0B0', '#9A9A9A', '#D0D0D0'];
 
+import { generate5ColorTechniqueTiles } from '../gamemap/starterRuins.js';
+
 /**
- * Deterministic defender paint layout for raid targets.
+ * Deterministic defender paint layout for raid targets using the 5-color block technique.
  * Colors are gameplay-only; raid renderer keeps tiles gray until the beam hits.
  */
 export function generateDefenderTiles(seed = 34) {
-  const tiles = {};
-  const sx = MAP_COLS / 12;
-  const sy = MAP_ROWS / 10;
-  
-  // Custom dominant colors for the 5 bot bases
-  let dominantColor = null;
-  if (seed === 101) dominantColor = 'RED';
-  else if (seed === 102) dominantColor = 'GREEN';
-  else if (seed === 103) dominantColor = 'BLUE';
-  else if (seed === 104) dominantColor = 'YELLOW';
-  else if (seed === 105) dominantColor = 'PURPLE';
-
-  const baseColors = dominantColor
-    ? [dominantColor, dominantColor, dominantColor, 'WHITE', GAME_COLOR_KEYS[Math.floor(hashSeed(seed) * 5)]]
-    : GAME_COLOR_KEYS;
-
-  const blobs = [
-    { color: baseColors[0], cx: 2 * sx, cy: 2 * sy, r: 2.8 * Math.min(sx, sy) },
-    { color: baseColors[1 % baseColors.length], cx: 9 * sx, cy: 2 * sy, r: 2.6 * Math.min(sx, sy) },
-    { color: dominantColor || baseColors[2 % baseColors.length], cx: 5 * sx, cy: 5 * sy, r: 3.2 * Math.min(sx, sy) },
-    { color: baseColors[3 % baseColors.length], cx: 2 * sx, cy: 7 * sy, r: 2.4 * Math.min(sx, sy) },
-    { color: dominantColor || baseColors[4 % baseColors.length], cx: 9 * sx, cy: 7 * sy, r: 2.8 * Math.min(sx, sy) },
-    { color: dominantColor || baseColors[0], cx: 5 * sx, cy: 3 * sy, r: 2.5 * Math.min(sx, sy) },
-    { color: baseColors[1 % baseColors.length], cx: 3 * sx, cy: 5 * sy, r: 2.2 * Math.min(sx, sy) },
-    { color: baseColors[2 % baseColors.length], cx: 8 * sx, cy: 5 * sy, r: 2.3 * Math.min(sx, sy) },
-  ];
-
-  for (let row = 0; row < MAP_ROWS; row++) {
-    for (let column = 0; column < MAP_COLS; column++) {
-      let best = null;
-      let bestD = 99;
-      blobs.forEach((b) => {
-        const d = Math.hypot(column - b.cx, row - b.cy);
-        if (d < b.r && d < bestD) {
-          bestD = d;
-          best = b.color;
-        }
-      });
-      if (best) tiles[keyAt(column, row)] = best;
-    }
-  }
-  return tiles;
+  return generate5ColorTechniqueTiles(seed);
 }
 
 /**

@@ -377,11 +377,10 @@ export default function StealthRaidView() {
         elapsedSeconds: elapsed,
       });
 
-      // Any beam contact (even once) latches chase for the rest of the raid.
-      // After that we do NOT care whether the player is still under the light.
-      // Also latch if detection already alarmed (survives rare tick edge cases).
-      const firstLightHit = !!result.beam?.canSee && !chaseLatchedRef.current;
-      if (result.beam?.canSee || result.alarmLatched) {
+      // If plot color matches character color, the light will NOT find the player!
+      const lightSpotted = !!result.beam?.canSee && !result.colorMatch;
+      const firstLightHit = lightSpotted && !chaseLatchedRef.current;
+      if (lightSpotted || result.alarmLatched) {
         chaseLatchedRef.current = true;
       }
 
@@ -396,7 +395,7 @@ export default function StealthRaidView() {
         });
       }
 
-      if (firstLightHit || result.justAlarmed) {
+      if (firstLightHit || (result.justAlarmed && !result.colorMatch)) {
         duoAlarmRef.current = true;
         alarmSystem.current.trigger({
           playerX: pos.column,
@@ -411,7 +410,7 @@ export default function StealthRaidView() {
         sceneApi.current?.lockGate?.();
         sceneApi.current?.flashSearchlightDetect?.(1.2);
         showToastRef.current('Siren · break wall or hold gate', 'error');
-      } else if (result.beam?.canSee) {
+      } else if (lightSpotted) {
         sceneApi.current?.flashSearchlightDetect?.(0.55);
       }
 
@@ -431,6 +430,19 @@ export default function StealthRaidView() {
         robotContext.current.state === ROBOT_STATES.DISABLED ||
         Date.now() < (robotStunnedUntilRef.current || 0);
 
+      // Robot proximity detection: fixes on the intruder within a 4-block circular radius
+      const inRobotProximity = robotDist <= 4.0 && !isRobotStunned;
+      if (inRobotProximity && !liveDefenderRef.current && !chaseLatchedRef.current) {
+        robotContext.current.setState(ROBOT_STATES.CHASING);
+        robotContext.current.lastSeenPlayerX = pos.column;
+        robotContext.current.lastSeenPlayerY = pos.row;
+        lastRobotStateRef.current = ROBOT_STATES.CHASING;
+        sceneApi.current?.setPatrolChase?.(true, {
+          column: pos.column,
+          row: pos.row,
+        });
+      }
+
       // Skip robot SM while chase is latched or robot is stunned offline
       robotTickAccumRef.current += dt;
       const robotTickDue = robotTickAccumRef.current >= 1 / ROBOT_TICK_HZ;
@@ -438,7 +450,7 @@ export default function StealthRaidView() {
         robotTickAccumRef.current = 0;
         if (!chaseLatchedRef.current && !isRobotStunned) {
           robotContext.current.processDetection({
-            reason: result.robotReason || 'OUTSIDE_RANGE',
+            reason: inRobotProximity ? 'CORE_ZONE' : (result.robotReason || 'OUTSIDE_RANGE'),
             playerX: pos.column,
             playerY: pos.row,
           });

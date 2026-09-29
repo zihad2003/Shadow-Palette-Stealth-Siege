@@ -6,6 +6,7 @@ export const STARTER_HOUSE_COUNT = 6;
 export const REBUILD_SECONDS = 2;
 
 export function houseLabel(type) {
+  if (type === 'JAIL' || type === 'BASE_JAIL') return 'Base Jail (Holding Cell)';
   return String(type || 'HOUSE').replace(/_/g, ' ');
 }
 
@@ -15,7 +16,7 @@ export function createStarterRuins() {
     { buildingType: 'INK_HOUSE', xPos: MAP_COLS - 5, yPos: 3 },
     { buildingType: 'CRAFT_HOUSE', xPos: 3, yPos: MAP_ROWS - 5 },
     { buildingType: 'COIN_GENERATOR', xPos: MAP_COLS - 5, yPos: MAP_ROWS - 5 },
-    { buildingType: 'SLEEP_HOUSE', xPos: Math.floor(MAP_COLS * 0.35), yPos: Math.floor(MAP_ROWS * 0.4) },
+    { buildingType: 'JAIL', xPos: Math.floor(MAP_COLS * 0.35), yPos: Math.floor(MAP_ROWS * 0.4) },
     { buildingType: 'INK_HOUSE', xPos: Math.floor(MAP_COLS * 0.55), yPos: Math.floor(MAP_ROWS * 0.55) },
   ];
 
@@ -41,6 +42,103 @@ const MAX_HOUSE_COLORS = [
   { hexColor: '#536DDE', colorKey: 'BLUE' },
 ];
 
+/**
+ * 5-Color Technique generator for player and bot bases.
+ * Allocates 5 colors in distinct 10-tile strategic patches per base technique.
+ */
+export function generate5ColorTechniqueTiles(seed = 1) {
+  const paintedTiles = {};
+  const technique = Math.abs(Number(seed) || 1) % 5;
+
+  if (technique === 0) {
+    // Technique: Sector Hub (Central core + 4 quadrant zones of 10 tiles each)
+    const centers = [
+      { color: 'RED', cx: 12, cy: 10 },
+      { color: 'GREEN', cx: 34, cy: 10 },
+      { color: 'BLUE', cx: 12, cy: 28 },
+      { color: 'YELLOW', cx: 34, cy: 28 },
+      { color: 'PURPLE', cx: 23, cy: 19 },
+    ];
+    centers.forEach(({ color, cx, cy }) => {
+      let count = 0;
+      for (let dx = -2; dx <= 2 && count < 10; dx++) {
+        for (let dy = -2; dy <= 2 && count < 10; dy++) {
+          if (Math.abs(dx) + Math.abs(dy) <= 3) {
+            paintedTiles[`${cx + dx},${cy + dy}`] = color;
+            count++;
+          }
+        }
+      }
+    });
+  } else if (technique === 1) {
+    // Technique: Building Sanctuaries (10-tile tactical clusters defending key houses)
+    const centers = [
+      { color: 'YELLOW', cx: 34, cy: 28 }, // Coin Vault sanctuary
+      { color: 'PURPLE', cx: 19, cy: 18 }, // Base Jail holding cell
+      { color: 'BLUE', cx: 34, cy: 8 },   // Ink House generator
+      { color: 'GREEN', cx: 8, cy: 8 },    // Sleep House quarters
+      { color: 'RED', cx: 8, cy: 28 },     // Craft Workshop
+    ];
+    centers.forEach(({ color, cx, cy }) => {
+      let count = 0;
+      for (let dx = -2; dx <= 2 && count < 10; dx++) {
+        for (let dy = -2; dy <= 2 && count < 10; dy++) {
+          paintedTiles[`${cx + dx},${cy + dy}`] = color;
+          count++;
+        }
+      }
+    });
+  } else if (technique === 2) {
+    // Technique: Strategic Corridors (Linear 10-tile stealth runways)
+    const strips = [
+      { color: 'RED', startX: 10, startY: 12, dx: 1, dy: 0 },
+      { color: 'GREEN', startX: 28, startY: 12, dx: 1, dy: 0 },
+      { color: 'BLUE', startX: 10, startY: 26, dx: 1, dy: 0 },
+      { color: 'YELLOW', startX: 28, startY: 26, dx: 1, dy: 0 },
+      { color: 'PURPLE', startX: 19, startY: 19, dx: 1, dy: 0 },
+    ];
+    strips.forEach(({ color, startX, startY, dx, dy }) => {
+      for (let i = 0; i < 10; i++) {
+        paintedTiles[`${startX + i * dx},${startY + i * dy}`] = color;
+      }
+    });
+  } else if (technique === 3) {
+    // Technique: Fortified Rings (Concentric defensive perimeter bands)
+    const rings = [
+      { color: 'RED', points: [[14,14],[15,14],[16,14],[17,14],[18,14],[14,15],[18,15],[14,16],[18,16],[14,17]] },
+      { color: 'GREEN', points: [[30,14],[31,14],[32,14],[33,14],[34,14],[30,15],[34,15],[30,16],[34,16],[30,17]] },
+      { color: 'BLUE', points: [[14,24],[15,24],[16,24],[17,24],[18,24],[14,25],[18,25],[14,26],[18,26],[14,27]] },
+      { color: 'YELLOW', points: [[30,24],[31,24],[32,24],[33,24],[34,24],[30,25],[34,25],[30,26],[34,26],[30,27]] },
+      { color: 'PURPLE', points: [[20,18],[21,18],[22,18],[23,18],[24,18],[20,20],[21,20],[22,20],[23,20],[24,20]] },
+    ];
+    rings.forEach(({ color, points }) => {
+      points.forEach(([x, y]) => {
+        paintedTiles[`${x},${y}`] = color;
+      });
+    });
+  } else {
+    // Technique: Tactical Staggered Clusters (Checkerboard islands of 10 tiles)
+    const islands = [
+      { color: 'RED', cx: 14, cy: 11 },
+      { color: 'GREEN', cx: 28, cy: 11 },
+      { color: 'BLUE', cx: 21, cy: 20 },
+      { color: 'YELLOW', cx: 14, cy: 28 },
+      { color: 'PURPLE', cx: 28, cy: 28 },
+    ];
+    islands.forEach(({ color, cx, cy }) => {
+      let count = 0;
+      for (let dx = -2; dx <= 2 && count < 10; dx++) {
+        for (let dy = -2; dy <= 2 && count < 10; dy++) {
+          paintedTiles[`${cx + dx},${cy + dy}`] = color;
+          count++;
+        }
+      }
+    });
+  }
+
+  return paintedTiles;
+}
+
 /** Fully repaired L3 home — used to jump into the complete loop. */
 export function createMaxedHome() {
   const ruins = createStarterRuins();
@@ -56,14 +154,7 @@ export function createMaxedHome() {
       ruined: false,
     };
   });
-  const colors = ['RED', 'GREEN', 'BLUE', 'YELLOW', 'PURPLE'];
-  const paintedTiles = {};
-  for (let c = 6; c < MAP_COLS - 6; c += 1) {
-    for (let r = 6; r < MAP_ROWS - 6; r += 1) {
-      if ((c + r) % 4 !== 0) continue;
-      paintedTiles[`${c},${r}`] = colors[(c + r) % colors.length];
-    }
-  }
+  const paintedTiles = generate5ColorTechniqueTiles(1);
   return {
     coins: 50000,
     inkEnergy: 100,

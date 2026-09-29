@@ -226,6 +226,7 @@ export default function BaseBuilderView() {
   const nearCoin = !makeupStation && nearRepaired?.buildingType === 'COIN_GENERATOR' ? nearRepaired : null;
   const nearInk = !makeupStation && nearRepaired?.buildingType === 'INK_HOUSE' ? nearRepaired : null;
   const nearCraft = !makeupStation && nearRepaired?.buildingType === 'CRAFT_HOUSE' ? nearRepaired : null;
+  const nearJail = !makeupStation && (nearRepaired?.buildingType === 'JAIL' || nearRepaired?.buildingType === 'BASE_JAIL') ? nearRepaired : null;
   const nearPart = findPartNear(partSpawns, walker.column, walker.row);
   const peekHouse = nearRuin || stationHouse;
   const nearActive = !!(activeRuin && nearRuin && nearRuin.id === activeRuin.id);
@@ -618,6 +619,11 @@ export default function BaseBuilderView() {
             else rk.showToast('Workshop max', 'info');
             return;
           }
+          if (house.buildingType === 'JAIL' || house.buildingType === 'BASE_JAIL') {
+            rk.showToast('Base Jail: Holding cell for intruders captured in your fortress', 'info');
+            soundEngine.playGateSlamSound?.();
+            return;
+          }
         }
         if (!rk.isVisitGuest) {
           brushKeysRef.current.setSelectedTool('PAINT');
@@ -762,6 +768,7 @@ export default function BaseBuilderView() {
           nearCoin && !nearRuin ? 'E collect coins' : null,
           nearInk && !nearRuin ? 'E next color' : null,
           nearCraft && !nearRuin ? 'E upgrade' : null,
+          nearJail && !nearRuin ? 'E Base Jail (Holding Cell)' : null,
           makeupStation ? 'E change camo' : null,
           nearRepaired && !nearSleep && !nearCoin && !nearInk && !nearCraft && !movingBuilding ? 'M move house' : null,
           nearCar && garageComplete && !carriedPart ? 'F enter' : null,

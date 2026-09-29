@@ -18,3 +18,5 @@ Thumbs.db
 *.log
 .vercel
 .jdk-17/
+backend/data/
+data/
