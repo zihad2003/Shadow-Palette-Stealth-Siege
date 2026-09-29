@@ -12,7 +12,6 @@ import java.util.Map;
 @AllArgsConstructor
 @Builder
 public class PresenceHeartbeatRequest {
-    private Long userId;
     private String username;
     private Integer characterModel;
     private String camoColor;

@@ -11,9 +11,6 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 @Builder
 public class PlayerSaveRequest {
-    @NotNull(message = "userId is required")
-    private Long userId;
-
     private String worldSaveJson;
     private Integer coins;
     private Integer inkEnergy;

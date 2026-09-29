@@ -1,0 +1,16 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE;MODE=MySQL;NON_KEYWORDS=USER
+    driverClassName: org.h2.Driver
+    username: sa
+    password: ""
+  flyway:
+    enabled: true
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.H2Dialect
+JWT_SECRET: super-secret-test-key-which-needs-to-be-at-least-256-bits-long
+ADMIN_API_KEY: dev-admin-key

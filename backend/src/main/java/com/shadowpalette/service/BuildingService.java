@@ -1,5 +1,7 @@
 package com.shadowpalette.service;
 
+import com.shadowpalette.security.SecurityUtils;
+
 import com.shadowpalette.dto.*;
 import com.shadowpalette.entity.Building;
 import com.shadowpalette.entity.User;
@@ -65,10 +67,10 @@ public class BuildingService {
             }
         }
 
-        User user = userRepository.findById(request.getUserId())
+        User user = userRepository.findById(SecurityUtils.getCurrentUserId())
                 .orElseGet(() -> userRepository.save(User.builder()
-                        .id(request.getUserId())
-                        .username("Player_" + String.format("%05d", request.getUserId()))
+                        .id(SecurityUtils.getCurrentUserId())
+                        .username("Player_" + String.format("%05d", SecurityUtils.getCurrentUserId()))
                         .coins(500)
                         .inkEnergy(100)
                         .chips(0)
@@ -105,10 +107,10 @@ public class BuildingService {
         Building building = buildingRepository.findById(request.getTargetId())
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "BUILDING_NOT_FOUND"));
 
-        User user = userRepository.findById(request.getUserId())
+        User user = userRepository.findById(SecurityUtils.getCurrentUserId())
                 .orElseGet(() -> userRepository.save(User.builder()
-                        .id(request.getUserId())
-                        .username("Player_" + String.format("%05d", request.getUserId()))
+                        .id(SecurityUtils.getCurrentUserId())
+                        .username("Player_" + String.format("%05d", SecurityUtils.getCurrentUserId()))
                         .coins(500)
                         .inkEnergy(100)
                         .chips(0)

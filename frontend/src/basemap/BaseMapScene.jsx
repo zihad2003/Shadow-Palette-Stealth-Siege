@@ -179,6 +179,10 @@ export default function BaseMapScene({
         const ok = canPlaceAt(st.buildings, hover.cell.x, hover.cell.y, 1, 1);
         const { wx, wz } = cellToWorld(hover.cell.x, hover.cell.y);
         ghost.showBuilding(wx, wz, 1, 1, ok);
+      } else if (hover.cell) {
+        // No tool selected — still show a subtle cell indicator
+        const { wx, wz } = cellToWorld(hover.cell.x, hover.cell.y);
+        ghost.showCell(wx, wz);
       } else {
         ghost.hide();
       }
@@ -233,6 +237,7 @@ export default function BaseMapScene({
       beamSweep.update(elapsed);
       dust.update(elapsed);
       clouds.update(elapsed);
+      ghost.update(elapsed);
       if (patrol) patrol.update(elapsed);
       selectRing.rotation.z = elapsed * 0.6;
       if (upgradeBadge.visible) {

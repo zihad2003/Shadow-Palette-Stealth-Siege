@@ -641,6 +641,10 @@ export function GameStateProvider({ children }) {
       setLoadingScreen({ active: false, title: '', subtitle: '', progress: 0 });
       if (onDone) onDone();
     }, durationMs);
+    // Safety fallback: force-clear if still stuck after 3s
+    window.setTimeout(() => {
+      setLoadingScreen((prev) => prev.active ? { active: false, title: '', subtitle: '', progress: 0 } : prev);
+    }, 3000);
   };
 
   /** Bind the auto-assigned home fortress after character/camo setup. */

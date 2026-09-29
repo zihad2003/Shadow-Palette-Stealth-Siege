@@ -459,28 +459,28 @@ export default function StealthRaidView() {
 
       const channel = extractionArmedRef.current
         ? tickExtractionChannel({
-            channelProgress: channelProgressRef.current,
-            x: pos.column,
-            y: pos.row,
-            prevX: prevPosRef.current.column,
-            prevY: prevPosRef.current.row,
-            dt,
-            robotX: robotPos?.column,
-            robotY: robotPos?.row,
-            beamHit:
-              !chaseLatchedRef.current &&
-              !result.alarmLatched &&
-              !!(result.exposed && result.beam?.canSee),
-            robotChasing,
-          })
+          channelProgress: channelProgressRef.current,
+          x: pos.column,
+          y: pos.row,
+          prevX: prevPosRef.current.column,
+          prevY: prevPosRef.current.row,
+          dt,
+          robotX: robotPos?.column,
+          robotY: robotPos?.row,
+          beamHit:
+            !chaseLatchedRef.current &&
+            !result.alarmLatched &&
+            !!(result.exposed && result.beam?.canSee),
+          robotChasing,
+        })
         : {
-            channelProgress: 0,
-            channeling: false,
-            complete: false,
-            interrupted: false,
-            inZone: inExtractionZone(pos.column, pos.row),
-            percent: 0,
-          };
+          channelProgress: 0,
+          channeling: false,
+          complete: false,
+          interrupted: false,
+          inZone: inExtractionZone(pos.column, pos.row),
+          percent: 0,
+        };
       channelProgressRef.current = channel.channelProgress;
       prevPosRef.current = { column: pos.column, row: pos.row };
 
@@ -523,7 +523,7 @@ export default function StealthRaidView() {
       if (stateChanged) lastDetectState.current = robotHudState;
 
       if (robotCaught && !hudRef.current.outcome) {
-        if (duoPartyId) duoMarkCaught(duoPartyId, userId).catch(() => {});
+        if (duoPartyId) duoMarkCaught(duoPartyId, userId).catch(() => { });
         setStolen((prev) => ({ coins: prev.coins, ink: prev.ink }));
         hudRef.current = { ...hudRef.current, outcome: 'CAUGHT' };
         setHud((prev) => ({
@@ -670,7 +670,7 @@ export default function StealthRaidView() {
             role: 'ATTACKER',
             x: pos.column,
             y: pos.row,
-          }).catch(() => {});
+          }).catch(() => { });
         }, 120);
       } catch {
         /* backend / ws down — stay on async AI path */
@@ -704,7 +704,7 @@ export default function StealthRaidView() {
             x: pos.column,
             y: pos.row,
             alarm: duoAlarmRef.current || chaseLatchedRef.current || gateLockedRef.current,
-          }).catch(() => {});
+          }).catch(() => { });
         }, 120);
       } catch {
         /* offline */
@@ -804,12 +804,12 @@ export default function StealthRaidView() {
   const [leaveFx, setLeaveFx] = useState(null); // null | 'exit' | 'caught'
 
   // Auto-finish raid when outcome is set (after results panel shows briefly)
+  // NOTE: do NOT set settled.current here — finishRaid() owns that guard.
   useEffect(() => {
     if (hud.outcome && !settled.current) {
-      settled.current = true;
       const timer = window.setTimeout(() => {
         finishRaid();
-      }, 1500);
+      }, 4000);
       return () => window.clearTimeout(timer);
     }
   }, [hud.outcome]);
@@ -869,7 +869,7 @@ export default function StealthRaidView() {
     const greedCoins = Math.round(greed.coins * share);
     const greedInk = Math.round(greed.ink * share);
     if (outcome === 'CAUGHT' && duoPartyId) {
-      duoMarkCaught(duoPartyId, userId).catch(() => {});
+      duoMarkCaught(duoPartyId, userId).catch(() => { });
     }
     setStolen((prev) => ({
       coins: prev.coins + (outcome === 'CAUGHT' || outcome === 'INCOMPLETE' ? 0 : greedCoins),
@@ -906,27 +906,27 @@ export default function StealthRaidView() {
     if (!outcome) return;
     settled.current = true;
     recordRaidResult(outcome);
-    setLeaveFx(outcome === 'CAUGHT' ? 'caught' : 'exit');
 
     if (outcome === 'SILENT' || outcome === 'ESCAPED') {
       soundEngine.playRaidExitSound();
       sceneApi.current?.playBump?.();
-      
+
       const coins = greedCoins ?? stolenRef.current.coins;
       const ink = greedInk ?? stolenRef.current.ink;
       const drops = [];
       if (coins > 0) drops.push({ id: `win-c`, kind: 'coin', amount: coins, x: 0.45, y: 0.4 });
       if (ink > 0) drops.push({ id: `win-i`, kind: 'ink', amount: ink, x: 0.55, y: 0.4 });
       if (drops.length) setFloatingLoot((p) => [...p, ...drops]);
+    } else if (outcome === 'CAUGHT') {
+      soundEngine.playRaidCaughtSound?.();
     }
 
-    window.setTimeout(() => {
-      transitionTo('BASE_BUILDER', {
-        loadingTitle: outcome === 'CAUGHT' ? 'Caught' : outcome === 'INCOMPLETE' ? 'Incomplete' : 'Extracted',
-        loadingSubtitle: outcome === 'CAUGHT' ? 'Cooldown applied' : 'Returning to base',
-        loadingMs: 400,
-      });
-    }, RAID_CINEMATIC_MS);
+    // Go straight to base — no cinematic overlay delay
+    transitionTo('BASE_BUILDER', {
+      loadingTitle: 'Base',
+      loadingSubtitle: '',
+      loadingMs: 300,
+    });
   };
 
   const climbGate = () => {

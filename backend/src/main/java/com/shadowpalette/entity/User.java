@@ -25,6 +25,12 @@ public class User {
     @Column(length = 255)
     private String password;
 
+    @Column(length = 255)
+    private String passwordHash;
+
+    @Column(length = 255)
+    private String guestSecretHash;
+
     @Lob
     @Column(columnDefinition = "LONGTEXT")
     private String worldSaveJson;

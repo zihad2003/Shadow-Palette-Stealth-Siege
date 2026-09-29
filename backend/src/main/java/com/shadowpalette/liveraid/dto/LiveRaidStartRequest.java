@@ -10,7 +10,6 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class LiveRaidStartRequest {
-    private Long attackerId;
     private Long defenderId;
     /** Optional client-generated id; server generates one if blank. */
     private String raidId;

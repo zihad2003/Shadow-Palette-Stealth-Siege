@@ -11,7 +11,6 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class DuoRaidStartRequest {
     private String partyId;
-    private Long hostId;
     private Long defenderId;
     private String raidId;
 }

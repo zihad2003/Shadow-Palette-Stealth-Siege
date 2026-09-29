@@ -25,4 +25,6 @@ public class SessionStartResponse {
     private String camoColor;
     private Integer prestigeLevel;
     private Boolean termsAccepted;
+    private String jwt;
+    private String recoveryToken;
 }

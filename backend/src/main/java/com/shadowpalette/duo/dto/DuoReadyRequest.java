@@ -5,7 +5,6 @@ import lombok.Data;
 @Data
 public class DuoReadyRequest {
     private String partyId;
-    private Long userId;
     private boolean ready;
     private Integer model;
     private String camo;

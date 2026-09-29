@@ -1,5 +1,7 @@
 package com.shadowpalette.builder;
 
+import com.shadowpalette.security.SecurityUtils;
+
 import com.shadowpalette.dto.RaidCompleteRequest;
 import com.shadowpalette.dto.SessionLogTickDto;
 
@@ -38,7 +40,6 @@ public class RaidSessionBuilder {
 
     public RaidCompleteRequest build() {
         return RaidCompleteRequest.builder()
-                .attackerId(this.attackerId)
                 .defenderId(this.defenderId)
                 .durationSeconds(this.durationSeconds)
                 .sessionLog(this.sessionLog)

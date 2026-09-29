@@ -1,5 +1,7 @@
 package com.shadowpalette.liveraid;
 
+import com.shadowpalette.security.SecurityUtils;
+
 import com.shadowpalette.liveraid.dto.*;
 import com.shadowpalette.service.PresenceService;
 import com.shadowpalette.service.RaidService;
@@ -25,13 +27,13 @@ public class LiveRaidService {
     private final RaidService raidService;
 
     public LiveRaidStartResponse startRaid(LiveRaidStartRequest request) {
-        if (request == null || request.getAttackerId() == null || request.getDefenderId() == null) {
+        if (request == null || SecurityUtils.getCurrentUserId() == null || request.getDefenderId() == null) {
             return LiveRaidStartResponse.builder()
                     .success(false)
                     .message("ATTACKER_AND_DEFENDER_REQUIRED")
                     .build();
         }
-        if (request.getAttackerId().equals(request.getDefenderId())) {
+        if (SecurityUtils.getCurrentUserId().equals(request.getDefenderId())) {
             return LiveRaidStartResponse.builder()
                     .success(false)
                     .message("CANNOT_RAID_SELF")
@@ -56,11 +58,11 @@ public class LiveRaidService {
         Instant deadline = now.plus(StealthConstants.LIVE_RAID_JOIN_SECONDS, ChronoUnit.SECONDS);
         String attackerName = request.getAttackerName() != null && !request.getAttackerName().isBlank()
                 ? request.getAttackerName().trim()
-                : "Player" + request.getAttackerId();
+                : "Player" + SecurityUtils.getCurrentUserId();
 
         LiveRaidSession session = LiveRaidSession.builder()
                 .raidId(raidId)
-                .attackerUserId(request.getAttackerId())
+                .attackerUserId(SecurityUtils.getCurrentUserId())
                 .defenderUserId(request.getDefenderId())
                 .attackerName(attackerName)
                 .joined(false)
@@ -73,7 +75,7 @@ public class LiveRaidService {
         RaidInviteMessage invite = RaidInviteMessage.builder()
                 .type("RAID_INVITE")
                 .raidId(raidId)
-                .attackerUserId(request.getAttackerId())
+                .attackerUserId(SecurityUtils.getCurrentUserId())
                 .attackerName(attackerName)
                 .defenderUserId(request.getDefenderId())
                 .joinDeadline(deadline.toString())
@@ -100,8 +102,8 @@ public class LiveRaidService {
                     .message("SESSION_GONE")
                     .build();
         }
-        if (request == null || request.getUserId() == null
-                || !request.getUserId().equals(session.getDefenderUserId())) {
+        if (request == null || SecurityUtils.getCurrentUserId() == null
+                || !SecurityUtils.getCurrentUserId().equals(session.getDefenderUserId())) {
             return LiveRaidStateMessage.builder()
                     .raidId(raidId)
                     .joined(false)
@@ -138,7 +140,7 @@ public class LiveRaidService {
                     .message("SESSION_GONE")
                     .build();
         }
-        if (msg == null || msg.getUserId() == null || msg.getRole() == null) {
+        if (msg == null || SecurityUtils.getCurrentUserId() == null || msg.getRole() == null) {
             return toState(session, "BAD_PAYLOAD");
         }
 
@@ -148,7 +150,7 @@ public class LiveRaidService {
         double y = clampY(msg.getY());
 
         if ("ATTACKER".equals(role)) {
-            if (!msg.getUserId().equals(session.getAttackerUserId())) {
+            if (!SecurityUtils.getCurrentUserId().equals(session.getAttackerUserId())) {
                 return toState(session, "NOT_ATTACKER");
             }
             if (session.getAttackerWsSessionId() == null && wsSessionId != null) {
@@ -164,7 +166,7 @@ public class LiveRaidService {
             session.setAttackerY(y);
             session.setAttackerUpdatedAt(now);
         } else if ("DEFENDER".equals(role)) {
-            if (!session.isJoined() || !msg.getUserId().equals(session.getDefenderUserId())) {
+            if (!session.isJoined() || !SecurityUtils.getCurrentUserId().equals(session.getDefenderUserId())) {
                 return toState(session, "DEFENDER_NOT_JOINED");
             }
             if (!isSpeedOk(
