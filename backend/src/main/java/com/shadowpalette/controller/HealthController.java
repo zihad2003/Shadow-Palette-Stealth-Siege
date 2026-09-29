@@ -50,6 +50,8 @@ public class HealthController {
                     String cipher = sslRs.getString("Value");
                     status.put("sslCipher", (cipher != null && !cipher.isEmpty()) ? cipher : "none");
                 }
+            } catch (Exception ignored) {
+                status.put("sslCipher", "none");
             }
         } catch (Exception e) {
             status.put("database", "disconnected");

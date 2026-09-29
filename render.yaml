@@ -6,27 +6,9 @@ services:
     dockerContext: ./backend
     plan: free
     envVars:
-      - key: SPRING_DATASOURCE_URL
-        fromDatabase:
-          name: shadow-palette-db
-          property: connectionString
-      - key: SPRING_DATASOURCE_USERNAME
-        fromDatabase:
-          name: shadow-palette-db
-          property: user
-      - key: SPRING_DATASOURCE_PASSWORD
-        fromDatabase:
-          name: shadow-palette-db
-          property: password
       - key: SPRING_PROFILES_ACTIVE
-        value: prod
+        value: local
       - key: PORT
         value: 8080
     healthCheckPath: /api/health
 
-databases:
-  - name: shadow-palette-db
-    databaseName: shadow_palette
-    user: shadow_palette_user
-    plan: free
-    mysqlVersion: "8"
