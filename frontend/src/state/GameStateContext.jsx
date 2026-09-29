@@ -336,7 +336,7 @@ export function GameStateProvider({ children }) {
   const [paintedTiles, setPaintedTiles] = useState(() =>
     savedWorld?.paintedTiles && typeof savedWorld.paintedTiles === 'object' && Object.keys(savedWorld.paintedTiles).length > 0
       ? savedWorld.paintedTiles
-      : generate5ColorTechniqueTiles(userIdStored || 1)
+      : generate5ColorTechniqueTiles(userId || 1)
   );
   const [selectedBuildingId, setSelectedBuildingId] = useState(null);
   const [movingBuildingId, setMovingBuildingId] = useState(null);
