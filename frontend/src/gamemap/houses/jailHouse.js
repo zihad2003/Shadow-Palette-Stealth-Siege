@@ -9,120 +9,202 @@ import {
   houseSpan,
 } from '../houseKit.js';
 
-function addJailBars(group, bodyW, bodyD, smashed) {
+function addJailBars(group, bodyW, bodyD, smashed, barHeight) {
   const barMat = new THREE.MeshStandardMaterial({
-    color: smashed ? '#555555' : '#8899A6',
-    metalness: 0.85,
-    roughness: 0.25,
+    color: smashed ? '#444444' : '#6A7A89',
+    metalness: 0.9,
+    roughness: 0.2,
   });
 
-  const barCount = 5;
+  const barCount = 7;
   // Front and back bars
   for (let i = 0; i <= barCount; i++) {
     const t = (i / barCount) - 0.5;
-    const x = t * bodyW * 0.85;
+    const x = t * bodyW * 0.88;
 
     // Skip center front for the cell gate
-    if (i === 2 || i === 3) continue;
+    if (i === 3 || i === 4) continue;
 
-    const barGeo = new THREE.CylinderGeometry(0.025, 0.025, 0.72, 8);
+    const barGeo = new THREE.CylinderGeometry(0.035, 0.035, barHeight, 8);
     const barF = new THREE.Mesh(barGeo, barMat);
     barF.castShadow = true;
-    barF.position.set(x, 0.52, bodyD * 0.44);
+    barF.position.set(x, barHeight * 0.5 + 0.14, bodyD * 0.46);
     if (smashed && i === 1) barF.rotation.z = 0.25;
     group.add(barF);
 
     const barB = new THREE.Mesh(barGeo, barMat);
     barB.castShadow = true;
-    barB.position.set(x, 0.52, -bodyD * 0.44);
-    if (smashed && i === 4) barB.rotation.x = -0.3;
+    barB.position.set(x, barHeight * 0.5 + 0.14, -bodyD * 0.46);
+    if (smashed && i === 5) barB.rotation.x = -0.3;
     group.add(barB);
   }
 
   // Side bars
   for (let i = 1; i < barCount; i++) {
     const t = (i / barCount) - 0.5;
-    const z = t * bodyD * 0.85;
+    const z = t * bodyD * 0.88;
 
-    const barGeo = new THREE.CylinderGeometry(0.025, 0.025, 0.72, 8);
+    const barGeo = new THREE.CylinderGeometry(0.035, 0.035, barHeight, 8);
     const barL = new THREE.Mesh(barGeo, barMat);
     barL.castShadow = true;
-    barL.position.set(-bodyW * 0.44, 0.52, z);
+    barL.position.set(-bodyW * 0.46, barHeight * 0.5 + 0.14, z);
     group.add(barL);
 
     const barR = new THREE.Mesh(barGeo, barMat);
     barR.castShadow = true;
-    barR.position.set(bodyW * 0.44, 0.52, z);
+    barR.position.set(bodyW * 0.46, barHeight * 0.5 + 0.14, z);
     if (smashed && i === 2) barR.rotation.z = -0.35;
     group.add(barR);
   }
+
+  // Heavy horizontal reinforcing crossbeams
+  const beamGeoX = new THREE.BoxGeometry(bodyW * 0.92, 0.06, 0.06);
+  const beamGeoZ = new THREE.BoxGeometry(0.06, 0.06, bodyD * 0.92);
+
+  const midY = barHeight * 0.55 + 0.14;
+  const beamBack = new THREE.Mesh(beamGeoX, barMat);
+  beamBack.position.set(0, midY, -bodyD * 0.46);
+  group.add(beamBack);
+
+  const beamLeft = new THREE.Mesh(beamGeoZ, barMat);
+  beamLeft.position.set(-bodyW * 0.46, midY, 0);
+  group.add(beamLeft);
+
+  const beamRight = new THREE.Mesh(beamGeoZ, barMat);
+  beamRight.position.set(bodyW * 0.46, midY, 0);
+  group.add(beamRight);
 }
 
 function buildJail({ hexColor, level = 1, footprintW = 3, footprintH = 3, smashed = false }) {
   const group = new THREE.Group();
   group.userData.buildingType = 'JAIL';
   const { bw, bd } = houseSpan(footprintW, footprintH);
-  const cloth = clothColor(hexColor, GAME_COLORS.PURPLE);
 
-  const bodyW = bw * 0.82;
-  const bodyD = bd * 0.82;
+  const bodyW = bw * 0.96;
+  const bodyD = bd * 0.96;
+  const barHeight = 1.35;
 
-  // Base concrete plinth
-  const base = box(bodyW + 0.14, 0.16, bodyD + 0.14, KIT.stoneDk, 0.02);
-  base.position.y = 0.08;
-  add(group, base);
+  // 1. Fortified concrete foundation plinth with steps
+  const plinth = box(bodyW + 0.28, 0.22, bodyD + 0.28, '#242830', 0.02);
+  plinth.position.y = 0.11;
+  add(group, plinth);
 
-  // Heavy 4 corner pillars
+  const subPlinth = box(bodyW + 0.42, 0.08, bodyD + 0.42, '#181B20', 0.02);
+  subPlinth.position.y = 0.04;
+  add(group, subPlinth);
+
+  // 2. Heavy fortified corner pillars (Reinforced stone bastions)
   const pillarMat = new THREE.MeshStandardMaterial({
-    color: '#2A2E35',
-    roughness: 0.5,
-    metalness: 0.6,
+    color: '#2B313A',
+    roughness: 0.65,
+    metalness: 0.4,
   });
-  const cx = bodyW * 0.44;
-  const cz = bodyD * 0.44;
-  const corners = [
+  const cx = bodyW * 0.45;
+  const cz = bodyD * 0.45;
+  const cornerPositions = [
     [cx, cz],
     [-cx, cz],
     [cx, -cz],
     [-cx, -cz],
   ];
-  corners.forEach(([px, pz]) => {
-    const p = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.82, 0.12), pillarMat);
+  cornerPositions.forEach(([px, pz]) => {
+    const pillarGeo = new THREE.BoxGeometry(0.26, barHeight + 0.22, 0.26);
+    const p = new THREE.Mesh(pillarGeo, pillarMat);
     p.castShadow = true;
-    p.position.set(px, 0.53, pz);
+    p.position.set(px, (barHeight + 0.22) * 0.5 + 0.14, pz);
     group.add(p);
+
+    // Decorative iron bracket cap on each pillar
+    const cap = box(0.3, 0.06, 0.3, '#111418', 0.02);
+    cap.position.set(px, barHeight + 0.26, pz);
+    add(group, cap);
   });
 
-  // Vertical steel cage bars
-  addJailBars(group, bodyW, bodyD, smashed);
+  // 3. Dense vertical & horizontal steel cage bars
+  addJailBars(group, bodyW, bodyD, smashed, barHeight);
 
-  // Cell roof canopy
-  const roof = box(bodyW + 0.1, 0.12, bodyD + 0.1, KIT.roofIron || '#1E232A', 0.02);
-  roof.position.y = 0.94;
+  // 4. Heavy Iron Cell Gate with padlock on front
+  const gateMat = new THREE.MeshStandardMaterial({
+    color: '#3A444E',
+    metalness: 0.85,
+    roughness: 0.3,
+  });
+  const gateFrame = new THREE.Mesh(new THREE.BoxGeometry(0.55, barHeight * 0.9, 0.06), gateMat);
+  gateFrame.position.set(0, barHeight * 0.48 + 0.14, bodyD * 0.46);
+  group.add(gateFrame);
+
+  // Padlock & electronic keypad
+  const lockMat = new THREE.MeshStandardMaterial({
+    color: smashed ? '#555555' : '#D69E2E',
+    metalness: 0.95,
+    roughness: 0.15,
+  });
+  const lock = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.12, 0.08), lockMat);
+  lock.position.set(0.18, barHeight * 0.48 + 0.14, bodyD * 0.48);
+  group.add(lock);
+
+  // 5. Heavy fortress stone roof parapet with battlements
+  const roofY = barHeight + 0.24;
+  const roof = box(bodyW + 0.24, 0.18, bodyD + 0.24, '#1E232B', 0.02);
+  roof.position.y = roofY;
   if (smashed) {
-    roof.rotation.z = 0.12;
-    roof.position.y = 0.86;
+    roof.rotation.z = 0.08;
+    roof.position.y = roofY - 0.08;
   }
   add(group, roof);
 
-  // Electronic lock console / Siren beacon on top
+  // Parapet battlements around the roof edge
+  for (let i = -1; i <= 1; i++) {
+    const battlementF = box(0.28, 0.16, 0.1, '#2B313A', 0.02);
+    battlementF.position.set(i * (bodyW * 0.38), roofY + 0.14, bodyD * 0.5 + 0.06);
+    add(group, battlementF);
+
+    const battlementB = box(0.28, 0.16, 0.1, '#2B313A', 0.02);
+    battlementB.position.set(i * (bodyW * 0.38), roofY + 0.14, -bodyD * 0.5 - 0.06);
+    add(group, battlementB);
+  }
+
+  // 6. Rotating Emergency Warning Beacon / Security Spotlight on roof
+  const beaconTower = box(0.3, 0.22, 0.3, '#181C22', 0.02);
+  beaconTower.position.set(0, roofY + 0.18, 0);
+  add(group, beaconTower);
+
   const beaconMat = new THREE.MeshStandardMaterial({
-    color: smashed ? '#333333' : '#E53E3E',
+    color: smashed ? '#444444' : '#E53E3E',
     emissive: smashed ? '#000000' : '#E53E3E',
-    emissiveIntensity: smashed ? 0 : 0.8,
+    emissiveIntensity: smashed ? 0 : 1.2,
+    roughness: 0.2,
+  });
+  const beaconDome = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 0.18, 16), beaconMat);
+  beaconDome.position.set(0, roofY + 0.35, 0);
+  beaconDome.userData.motion = 'spin';
+  beaconDome.userData.motionAmp = 2.5;
+  group.add(beaconDome);
+
+  // 7. Security searchlight attached to front pillar
+  const spotMat = new THREE.MeshStandardMaterial({
+    color: smashed ? '#222222' : '#F6E05E',
+    emissive: smashed ? '#000000' : '#ECC94B',
+    emissiveIntensity: smashed ? 0 : 0.9,
     roughness: 0.3,
   });
-  const beacon = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 0.14, 12), beaconMat);
-  beacon.position.set(0, smashed ? 0.94 : 1.05, 0);
-  group.add(beacon);
+  const spotLight = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.2, 12), spotMat);
+  spotLight.position.set(-cx, barHeight + 0.22, cz + 0.12);
+  spotLight.rotation.x = Math.PI * 0.65;
+  group.add(spotLight);
 
-  // Bench inside the cell
-  const bench = box(0.6, 0.08, 0.22, '#4A3B32', 0.02);
-  bench.position.set(0, 0.2, -bodyD * 0.25);
-  add(group, bench);
+  // 8. Prisoner Holding Bunks inside the cell
+  const bunkMat = new THREE.MeshStandardMaterial({ color: '#4A5568', roughness: 0.7 });
+  const bunkL = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.08, bodyD * 0.6), bunkMat);
+  bunkL.position.set(-bodyW * 0.24, 0.28, 0);
+  group.add(bunkL);
+
+  const bunkR = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.08, bodyD * 0.6), bunkMat);
+  bunkR.position.set(bodyW * 0.24, 0.28, 0);
+  group.add(bunkR);
 
   if (smashed) {
-    addRubble(group, 0.1, 0.12, 0.15, 6);
+    addRubble(group, 0.12, 0.16, 0.2, 8);
   }
 
   return group;

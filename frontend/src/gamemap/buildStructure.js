@@ -47,7 +47,7 @@ export function buildGameHouse(type, hexColor = '#C9B79A', level = 1, footprintW
   const group = builder.buildIntact({ hexColor, level, footprintW, footprintH });
   group.userData.buildingType = type;
   group.userData.level = level;
-  group.scale.y = HOUSE_HEIGHT_SCALE;
+  group.scale.y = (type === 'JAIL' || type === 'BASE_JAIL') ? 1.05 : HOUSE_HEIGHT_SCALE;
   return group;
 }
 
@@ -57,7 +57,7 @@ export function buildRuinedHouse(type, footprintW = 3, footprintH = 3, hexColor 
   const group = builder.buildDestroyed({ hexColor, level: 1, footprintW, footprintH });
   group.userData.buildingType = type;
   group.userData.ruined = true;
-  group.scale.y = HOUSE_HEIGHT_SCALE;
+  group.scale.y = (type === 'JAIL' || type === 'BASE_JAIL') ? 1.05 : HOUSE_HEIGHT_SCALE;
   return group;
 }
 

@@ -1,4 +1,4 @@
-﻿import { MAP_COLS, MAP_ROWS, LARGE_MAP, SEARCHLIGHT_TILE, GATE_SPAWN_TILE } from './mapConfig.js';
+import { MAP_COLS, MAP_ROWS, LARGE_MAP, SEARCHLIGHT_TILE, GATE_SPAWN_TILE } from './mapConfig.js';
 import { inSearchlightPlaza } from './placeUtils.js';
 
 export const GARAGE_SIZE = 4;
@@ -76,7 +76,8 @@ export function isStaticDecorBanned(column, row) {
 function markBuildingFootprints(solids, buildings = []) {
   buildings.forEach((b) => {
     if (!b || b.buildingType === 'MAKEUP_HOUSE') return;
-    if (b.ruined) return;
+    const isJail = b.buildingType === 'JAIL' || b.buildingType === 'BASE_JAIL';
+    if (b.ruined && !isJail) return;
     const { x, y, w, h } = buildingFootprint(b);
     for (let cx = x; cx < x + w; cx++) {
       for (let cy = y; cy < y + h; cy++) {
