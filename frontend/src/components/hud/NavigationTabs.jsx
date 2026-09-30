@@ -1,11 +1,11 @@
 import React from 'react';
-import { Home, Search, Settings } from 'lucide-react';
+import { Home, Search, Settings, History } from 'lucide-react';
 import { useGameState } from '../../state/GameStateContext.jsx';
 import ClayPanel from '../ui/ClayPanel.jsx';
 import ClayButton from '../ui/ClayButton.jsx';
 
 export default function NavigationTabs() {
-  const { gameState, transitionTo, setIsOptionsOpen, setIsMetaOpen } = useGameState();
+  const { gameState, transitionTo, setIsOptionsOpen, setIsMetaOpen, setIsHistoryOpen } = useGameState();
 
   const tabs = [
     { key: 'BASE_BUILDER', label: 'Base', icon: Home },
@@ -37,6 +37,15 @@ export default function NavigationTabs() {
         aria-label="Economy"
       >
         Meta
+      </ClayButton>
+      <ClayButton
+        variant="ghost"
+        onClick={() => setIsHistoryOpen(true)}
+        className="h-9 w-9 rounded-xl flex items-center justify-center text-clay-muted hover:text-clay-accent"
+        aria-label="Raid History"
+        title="Raid History"
+      >
+        <History size={14} />
       </ClayButton>
       <ClayButton
         variant="ghost"

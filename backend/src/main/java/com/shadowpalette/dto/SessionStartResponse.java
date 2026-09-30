@@ -27,4 +27,6 @@ public class SessionStartResponse {
     private Boolean termsAccepted;
     private String jwt;
     private String recoveryToken;
+    private Boolean isJailed;
+    private JailStayDto jailStay;
 }

@@ -23,6 +23,9 @@ import {
   postVisitState,
   endVisitSession,
   setJwtToken,
+  startSession,
+  getOrCreateDeviceToken,
+  savePlayerProgress,
 } from '../api.js';
 import {
   CART_PARTS,
@@ -198,7 +201,6 @@ export function GameStateProvider({ children }) {
     let cancelled = false;
     const resolve = async () => {
       try {
-        const { startSession, getOrCreateDeviceToken } = await import('../api.js');
         const deviceToken = getOrCreateDeviceToken();
         const res = await startSession(userId, undefined, undefined, deviceToken);
         if (!cancelled && res?.success && res.userId) {
@@ -219,6 +221,14 @@ export function GameStateProvider({ children }) {
             /* private mode */
           }
 
+          if (res.isJailed) {
+            setIsJailed(true);
+            setJailStay(res.jailStay || null);
+          } else {
+            setIsJailed(false);
+            setJailStay(null);
+          }
+
           if (res.worldSaveJson) {
             try {
               const data = JSON.parse(res.worldSaveJson);
@@ -237,21 +247,10 @@ export function GameStateProvider({ children }) {
             }
           }
         }
-      } catch {
-        // Backend offline / unreachable:
-        // Assign a random unique ephemeral ID for this device so devices don't collide
+      } catch (err) {
+        // Backend offline / unreachable: log error, do not fabricate fake database ID
         if (!cancelled) {
-          setUserId((prev) => {
-            if (prev != null) return prev;
-            const fallbackId = 20161 + Math.floor(Math.random() * 9000);
-            try {
-              window.sessionStorage.setItem('sp_userId', String(fallbackId));
-              window.localStorage.setItem('sp_userId', String(fallbackId));
-            } catch {
-              /* ignore */
-            }
-            return fallbackId;
-          });
+          console.error('Failed to initialize backend session:', err);
         }
       }
     };
@@ -362,6 +361,9 @@ export function GameStateProvider({ children }) {
   const [raidData, setRaidData] = useState(null);
 
   const [isOptionsOpen, setIsOptionsOpen] = useState(false);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [isJailed, setIsJailed] = useState(false);
+  const [jailStay, setJailStay] = useState(null);
   const [loadingScreen, setLoadingScreen] = useState({ active: false, title: '', subtitle: '', progress: 0 });
   const [toasts, setToasts] = useState([]);
   const buggySave = useRef(
@@ -418,7 +420,6 @@ export function GameStateProvider({ children }) {
     const trimmed = (name || '').trim();
     if (!trimmed) return false;
     try {
-      const { startSession } = await import('../api.js');
       const res = await startSession(null, trimmed, password);
       if (res?.success && res.userId) {
         setUserId(res.userId);
@@ -510,18 +511,16 @@ export function GameStateProvider({ children }) {
       if (message) showToast(message, 'success');
 
       if (userId) {
-        import('../api.js').then(({ savePlayerProgress }) => {
-          savePlayerProgress({
-            userId,
-            worldSaveJson: serialized,
-            coins: worldRef.current.coins,
-            inkEnergy: worldRef.current.inkEnergy,
-            chips: worldRef.current.chips,
-            prestigeLevel: worldRef.current.prestigeLevel,
-            termsAccepted: true,
-          }).catch(() => {
-            /* local save preserved */
-          });
+        savePlayerProgress({
+          userId,
+          worldSaveJson: serialized,
+          coins: worldRef.current.coins,
+          inkEnergy: worldRef.current.inkEnergy,
+          chips: worldRef.current.chips,
+          prestigeLevel: worldRef.current.prestigeLevel,
+          termsAccepted: true,
+        }).catch(() => {
+          /* local save preserved */
         });
       }
       return true;
@@ -658,6 +657,10 @@ export function GameStateProvider({ children }) {
   };
 
   const transitionTo = (nextState, params = {}) => {
+    if (isJailed && (nextState === 'RAID_ENTER' || nextState === 'STEALTH_RAID')) {
+      showToast('You are detained in Base Jail! Settle ransom or wait for release.', 'error');
+      return;
+    }
     soundEngine.playTabSound();
     if (visitSessionRef.current && nextState !== 'BASE_BUILDER') {
       void endVisitRef.current({ silent: true });
@@ -2093,6 +2096,12 @@ export function GameStateProvider({ children }) {
     setRaidLoot,
     isOptionsOpen,
     setIsOptionsOpen,
+    isHistoryOpen,
+    setIsHistoryOpen,
+    isJailed,
+    setIsJailed,
+    jailStay,
+    setJailStay,
     loadingScreen,
     triggerLoading,
     toasts,

@@ -13,6 +13,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -42,6 +43,7 @@ public class PresenceService {
 
     private final ConcurrentHashMap<Long, PresenceRecord> presence = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<Long, VisitSession> sessions = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Long, Instant> lastDbHeartbeat = new ConcurrentHashMap<>();
 
     public PresenceHeartbeatResponse heartbeat(PresenceHeartbeatRequest request) {
         if (request == null || SecurityUtils.getCurrentUserId() == null) {
@@ -56,6 +58,18 @@ public class PresenceService {
         rec.snapshot = request.getSnapshot();
         rec.lastSeen = LocalDateTime.now();
         presence.put(id, rec);
+
+        // Throttle writing last_seen_at to DB to at most once per 10s per user
+        Instant now = Instant.now();
+        Instant lastWrite = lastDbHeartbeat.get(id);
+        if (lastWrite == null || lastWrite.plusSeconds(10).isBefore(now)) {
+            lastDbHeartbeat.put(id, now);
+            userRepository.findById(id).ifPresent(user -> {
+                user.setLastSeenAt(LocalDateTime.now());
+                userRepository.save(user);
+            });
+        }
+
         return PresenceHeartbeatResponse.builder().success(true).build();
     }
 
@@ -76,11 +90,16 @@ public class PresenceService {
         return PresenceOnlineResponse.builder().success(true).players(players).build();
     }
 
-    /** True if this user has a fresh heartbeat within PRESENCE_TTL_SECONDS. */
+    /** True if this user has a fresh heartbeat within PRESENCE_TTL_SECONDS, is a bot, or recently active. */
     public boolean isOnline(Long userId) {
         if (userId == null) return false;
         prunePresence();
-        return presence.containsKey(userId);
+        if (presence.containsKey(userId)) {
+            return true;
+        }
+        return userRepository.findById(userId)
+                .map(u -> u.isBot() || (u.getLastSeenAt() != null && u.getLastSeenAt().isAfter(LocalDateTime.now().minusSeconds(45))))
+                .orElse(false);
     }
 
     @Transactional

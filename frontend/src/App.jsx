@@ -18,6 +18,7 @@ import LiveRaidInviteListener from './live/LiveRaidInviteListener.jsx';
 import DuoVoiceBar, { DuoInviteListener } from './duo/DuoVoiceBar.jsx';
 import AdminDashboardView from './views/AdminDashboardView.jsx';
 import OptionsModal from './components/hud/OptionsModal.jsx';
+import HistoryModal from './components/hud/HistoryModal.jsx';
 import MetaEconomyPanel from './components/hud/MetaEconomyPanel.jsx';
 import LoadingOverlay from './components/hud/LoadingOverlay.jsx';
 import ToastContainer from './components/hud/ToastContainer.jsx';
@@ -83,6 +84,7 @@ export default function App() {
         <ScreenError>
           <GameViewRouter />
           <OptionsModal />
+          <HistoryModal />
           <MetaEconomyPanel />
           <LoadingOverlay />
           <VisitHud />

@@ -3,20 +3,27 @@ package com.shadowpalette.liveraid;
 import com.shadowpalette.security.SecurityUtils;
 
 import com.shadowpalette.liveraid.dto.*;
+import com.shadowpalette.entity.LiveRaidSessionEntity;
+import com.shadowpalette.entity.User;
+import com.shadowpalette.repository.LiveRaidSessionRepository;
+import com.shadowpalette.repository.UserRepository;
 import com.shadowpalette.service.PresenceService;
 import com.shadowpalette.service.RaidService;
 import com.shadowpalette.util.StealthConstants;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class LiveRaidService {
@@ -25,6 +32,9 @@ public class LiveRaidService {
     private final PresenceService presenceService;
     private final SimpMessagingTemplate messaging;
     private final RaidService raidService;
+    private final LiveRaidSessionRepository sessionRepository;
+    private final UserRepository userRepository;
+    private final com.shadowpalette.service.JailService jailService;
 
     public LiveRaidStartResponse startRaid(LiveRaidStartRequest request) {
         if (request == null || SecurityUtils.getCurrentUserId() == null || request.getDefenderId() == null) {
@@ -39,10 +49,28 @@ public class LiveRaidService {
                     .message("CANNOT_RAID_SELF")
                     .build();
         }
+        if (jailService != null && jailService.isJailed(SecurityUtils.getCurrentUserId())) {
+            return LiveRaidStartResponse.builder()
+                    .success(false)
+                    .message("ATTACKER_IN_JAIL")
+                    .build();
+        }
 
         String raidId = (request.getRaidId() != null && !request.getRaidId().isBlank())
                 ? request.getRaidId().trim()
                 : "live_" + UUID.randomUUID();
+
+        boolean isBot = userRepository.findById(request.getDefenderId())
+                .map(User::isBot)
+                .orElse(false);
+        if (isBot) {
+            return LiveRaidStartResponse.builder()
+                    .success(true)
+                    .raidId(raidId)
+                    .liveInviteSent(false)
+                    .message("DEFENDER_BOT_ASYNC")
+                    .build();
+        }
 
         boolean online = presenceService.isOnline(request.getDefenderId());
         if (!online) {
@@ -72,6 +100,19 @@ public class LiveRaidService {
                 .build();
         registry.put(session);
 
+        try {
+            LiveRaidSessionEntity entity = LiveRaidSessionEntity.builder()
+                    .raidId(raidId)
+                    .attackerId(SecurityUtils.getCurrentUserId())
+                    .defenderId(request.getDefenderId())
+                    .status("INVITED")
+                    .createdAt(LocalDateTime.now())
+                    .build();
+            sessionRepository.save(entity);
+        } catch (Exception e) {
+            log.error("Failed to save initial LiveRaidSessionEntity for {}", raidId, e);
+        }
+
         RaidInviteMessage invite = RaidInviteMessage.builder()
                 .type("RAID_INVITE")
                 .raidId(raidId)
@@ -92,7 +133,7 @@ public class LiveRaidService {
                 .build();
     }
 
-    public LiveRaidStateMessage join(String raidId, LiveRaidJoinRequest request, String wsSessionId) {
+    public LiveRaidStateMessage join(String raidId, LiveRaidJoinRequest request, String wsSessionId, Long callerUserId) {
         LiveRaidSession session = registry.get(raidId).orElse(null);
         if (session == null || session.isTerminal()) {
             return LiveRaidStateMessage.builder()
@@ -102,8 +143,8 @@ public class LiveRaidService {
                     .message("SESSION_GONE")
                     .build();
         }
-        if (request == null || SecurityUtils.getCurrentUserId() == null
-                || !SecurityUtils.getCurrentUserId().equals(session.getDefenderUserId())) {
+        if (request == null || callerUserId == null
+                || !callerUserId.equals(session.getDefenderUserId())) {
             return LiveRaidStateMessage.builder()
                     .raidId(raidId)
                     .joined(false)
@@ -113,6 +154,17 @@ public class LiveRaidService {
         Instant now = Instant.now();
         if (session.isJoinExpired(now)) {
             registry.remove(raidId);
+            try {
+                sessionRepository.findById(raidId).ifPresent(entity -> {
+                    if ("INVITED".equals(entity.getStatus())) {
+                        entity.setStatus("EXPIRED");
+                        entity.setEndedAt(LocalDateTime.now());
+                        sessionRepository.save(entity);
+                    }
+                });
+            } catch (Exception e) {
+                log.error("Failed to update LiveRaidSessionEntity to EXPIRED for {}", raidId, e);
+            }
             return LiveRaidStateMessage.builder()
                     .raidId(raidId)
                     .joined(false)
@@ -124,6 +176,15 @@ public class LiveRaidService {
         session.setJoined(true);
         session.setDefenderWsSessionId(wsSessionId);
         registry.bindWsSession(wsSessionId, raidId);
+
+        try {
+            sessionRepository.findById(raidId).ifPresent(entity -> {
+                entity.setStatus("ACTIVE");
+                sessionRepository.save(entity);
+            });
+        } catch (Exception e) {
+            log.error("Failed to update LiveRaidSessionEntity to ACTIVE for {}", raidId, e);
+        }
         // Do not seed robot pose — first DEFENDER position update is authoritative.
 
         LiveRaidStateMessage state = toState(session, "DEFENDER_JOINED");
@@ -131,7 +192,7 @@ public class LiveRaidService {
         return state;
     }
 
-    public LiveRaidStateMessage updatePosition(String raidId, LiveRaidPositionMessage msg, String wsSessionId) {
+    public LiveRaidStateMessage updatePosition(String raidId, LiveRaidPositionMessage msg, String wsSessionId, Long callerUserId) {
         LiveRaidSession session = registry.get(raidId).orElse(null);
         if (session == null || session.isTerminal()) {
             return LiveRaidStateMessage.builder()
@@ -140,7 +201,7 @@ public class LiveRaidService {
                     .message("SESSION_GONE")
                     .build();
         }
-        if (msg == null || SecurityUtils.getCurrentUserId() == null || msg.getRole() == null) {
+        if (msg == null || callerUserId == null || msg.getRole() == null) {
             return toState(session, "BAD_PAYLOAD");
         }
 
@@ -150,7 +211,7 @@ public class LiveRaidService {
         double y = clampY(msg.getY());
 
         if ("ATTACKER".equals(role)) {
-            if (!SecurityUtils.getCurrentUserId().equals(session.getAttackerUserId())) {
+            if (!callerUserId.equals(session.getAttackerUserId())) {
                 return toState(session, "NOT_ATTACKER");
             }
             if (session.getAttackerWsSessionId() == null && wsSessionId != null) {
@@ -166,7 +227,7 @@ public class LiveRaidService {
             session.setAttackerY(y);
             session.setAttackerUpdatedAt(now);
         } else if ("DEFENDER".equals(role)) {
-            if (!session.isJoined() || !SecurityUtils.getCurrentUserId().equals(session.getDefenderUserId())) {
+            if (!session.isJoined() || !callerUserId.equals(session.getDefenderUserId())) {
                 return toState(session, "DEFENDER_NOT_JOINED");
             }
             if (!isSpeedOk(
@@ -238,6 +299,30 @@ public class LiveRaidService {
             state.setTerminal(true);
             state.setOutcome("ABORTED");
             broadcast(raidId, state);
+
+            try {
+                sessionRepository.findById(raidId).ifPresent(entity -> {
+                    entity.setStatus("ABORTED");
+                    entity.setEndedAt(LocalDateTime.now());
+                    sessionRepository.save(entity);
+                });
+            } catch (Exception e) {
+                log.error("Failed to update LiveRaidSessionEntity to ABORTED for {}", raidId, e);
+            }
+
+            long duration = Math.max(1, ChronoUnit.SECONDS.between(session.getCreatedAt(), Instant.now()));
+            try {
+                raidService.recordAbortedRaid(
+                        session.getAttackerUserId(),
+                        session.getDefenderUserId(),
+                        (int) duration,
+                        session.getRaidId(),
+                        "ATTACKER_LEFT"
+                );
+            } catch (Exception ex) {
+                log.error("Failed to recordAbortedRaid on attacker disconnect for raidId {}", session.getRaidId(), ex);
+            }
+
             registry.remove(raidId);
         }
     }
@@ -252,11 +337,65 @@ public class LiveRaidService {
             } else if (session.isJoinExpired(now)) {
                 // Expire quietly — attacker never depended on live invite.
                 drop.add(session.getRaidId());
+                try {
+                    sessionRepository.findById(session.getRaidId()).ifPresent(entity -> {
+                        if ("INVITED".equals(entity.getStatus())) {
+                            entity.setStatus("EXPIRED");
+                            entity.setEndedAt(LocalDateTime.now());
+                            sessionRepository.save(entity);
+                        }
+                    });
+                } catch (Exception e) {
+                    log.error("Failed to sweep expire LiveRaidSessionEntity for {}", session.getRaidId(), e);
+                }
+            } else if (session.isJoined() && isStaleSession(session, now)) {
+                // Stale active session with no updates for 60s
+                session.setTerminal(true);
+                session.setOutcome("ABORTED");
+                LiveRaidStateMessage state = toState(session, "TIMEOUT_STALE");
+                state.setTerminal(true);
+                state.setOutcome("ABORTED");
+                broadcast(session.getRaidId(), state);
+
+                try {
+                    sessionRepository.findById(session.getRaidId()).ifPresent(entity -> {
+                        entity.setStatus("ABORTED");
+                        entity.setEndedAt(LocalDateTime.now());
+                        sessionRepository.save(entity);
+                    });
+                } catch (Exception e) {
+                    log.error("Failed to sweep stale LiveRaidSessionEntity for {}", session.getRaidId(), e);
+                }
+
+                long duration = Math.max(1, ChronoUnit.SECONDS.between(session.getCreatedAt(), now));
+                try {
+                    raidService.recordAbortedRaid(
+                            session.getAttackerUserId(),
+                            session.getDefenderUserId(),
+                            (int) duration,
+                            session.getRaidId(),
+                            "TIMEOUT_STALE"
+                    );
+                } catch (Exception ex) {
+                    log.error("Failed to recordAbortedRaid on stale timeout for raidId {}", session.getRaidId(), ex);
+                }
+                drop.add(session.getRaidId());
             }
         }
         for (String id : drop) {
             registry.remove(id);
         }
+    }
+
+    private boolean isStaleSession(LiveRaidSession session, Instant now) {
+        Instant lastUpdate = session.getAttackerUpdatedAt();
+        if (session.getRobotUpdatedAt() != null && (lastUpdate == null || session.getRobotUpdatedAt().isAfter(lastUpdate))) {
+            lastUpdate = session.getRobotUpdatedAt();
+        }
+        if (lastUpdate == null) {
+            lastUpdate = session.getCreatedAt();
+        }
+        return lastUpdate != null && ChronoUnit.SECONDS.between(lastUpdate, now) > 60;
     }
 
     private LiveRaidStateMessage finalizeCaught(LiveRaidSession session) {
@@ -267,15 +406,36 @@ public class LiveRaidService {
         state.setOutcome("CAUGHT");
         broadcast(session.getRaidId(), state);
 
+        try {
+            sessionRepository.findById(session.getRaidId()).ifPresent(entity -> {
+                entity.setStatus("CAUGHT");
+                entity.setEndedAt(LocalDateTime.now());
+                sessionRepository.save(entity);
+            });
+        } catch (Exception e) {
+            log.error("Failed to update LiveRaidSessionEntity to CAUGHT for {}", session.getRaidId(), e);
+        }
+
         long duration = Math.max(1, ChronoUnit.SECONDS.between(session.getCreatedAt(), Instant.now()));
         try {
             raidService.completeLiveCaught(
                     session.getAttackerUserId(),
                     session.getDefenderUserId(),
-                    (int) duration
+                    (int) duration,
+                    session.getRaidId()
             );
-        } catch (Exception ignored) {
-            // Persist failure must not block the terminal broadcast already sent.
+        } catch (Exception ex) {
+            log.error("Failed to completeLiveCaught for raidId {}. Retrying once...", session.getRaidId(), ex);
+            try {
+                raidService.completeLiveCaught(
+                        session.getAttackerUserId(),
+                        session.getDefenderUserId(),
+                        (int) duration,
+                        session.getRaidId()
+                );
+            } catch (Exception retryEx) {
+                log.error("Retry completeLiveCaught also failed for raidId {}", session.getRaidId(), retryEx);
+            }
         }
         registry.remove(session.getRaidId());
         return state;

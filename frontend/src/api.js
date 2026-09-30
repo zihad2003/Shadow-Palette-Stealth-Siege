@@ -164,6 +164,10 @@ export async function placeDefense(userId, plotId, defenseType, modelVariant) {
   });
 }
 
+export async function fetchRaidTargets() {
+  return request('/api/raid/targets');
+}
+
 export async function fetchRaidTarget(userId) {
   return request(`/api/raid/target/${userId}`);
 }
@@ -322,4 +326,32 @@ export async function postRansomSettle(payload) {
     body: JSON.stringify(payload),
   });
 }
+
+export async function fetchRaidHistory(page = 0, size = 20) {
+  return request(`/api/history/me?page=${page}&size=${size}`);
+}
+
+export async function fetchMyJailStay() {
+  return request('/api/jail/me');
+}
+
+export async function createJailOffer(stayId, payload) {
+  return request(`/api/jail/${stayId}/offers`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function acceptJailOffer(offerId) {
+  return request(`/api/jail/offers/${offerId}/accept`, {
+    method: 'POST',
+  });
+}
+
+export async function rejectJailOffer(offerId) {
+  return request(`/api/jail/offers/${offerId}/reject`, {
+    method: 'POST',
+  });
+}
+
 

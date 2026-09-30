@@ -7,7 +7,7 @@ import { soundEngine } from '../soundEngine.js';
 import OnboardShell from '../components/ui/OnboardShell.jsx';
 import ClayButton from '../components/ui/ClayButton.jsx';
 
-const CharacterPreview = lazy(() => import('../components/three/CharacterPreview.jsx'));
+import CharacterPreview from '../components/three/CharacterPreview.jsx';
 
 export default function MainMenuView() {
   const {

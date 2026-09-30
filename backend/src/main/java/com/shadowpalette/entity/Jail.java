@@ -1,6 +1,7 @@
 package com.shadowpalette.entity;
 
 import jakarta.persistence.Entity;
+import jakarta.persistence.PrimaryKeyJoinColumn;
 import jakarta.persistence.Table;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
@@ -9,6 +10,7 @@ import lombok.experimental.SuperBuilder;
 
 @Entity
 @Table(name = "jail")
+@PrimaryKeyJoinColumn(name = "building_id")
 @Data
 @EqualsAndHashCode(callSuper = true)
 @NoArgsConstructor

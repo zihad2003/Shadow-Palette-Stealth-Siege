@@ -1,13 +1,17 @@
 package com.shadowpalette.config;
 
+import com.shadowpalette.liveraid.LiveRaidRegistry;
+import com.shadowpalette.liveraid.LiveRaidSession;
 import com.shadowpalette.security.JwtUtil;
 import com.shadowpalette.security.UserPrincipal;
 import io.jsonwebtoken.Claims;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageChannel;
+import org.springframework.messaging.MessageDeliveryException;
 import org.springframework.messaging.simp.config.ChannelRegistration;
 import org.springframework.messaging.simp.config.MessageBrokerRegistry;
 import org.springframework.messaging.simp.stomp.StompCommand;
@@ -30,6 +34,8 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     private String allowedOrigins;
 
     private final JwtUtil jwtUtil;
+    @Lazy
+    private final LiveRaidRegistry liveRaidRegistry;
 
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
@@ -60,7 +66,10 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
             @Override
             public Message<?> preSend(Message<?> message, MessageChannel channel) {
                 StompHeaderAccessor accessor = MessageHeaderAccessor.getAccessor(message, StompHeaderAccessor.class);
-                if (accessor != null && StompCommand.CONNECT.equals(accessor.getCommand())) {
+                if (accessor == null) return message;
+
+                // ── CONNECT: authenticate via JWT ──
+                if (StompCommand.CONNECT.equals(accessor.getCommand())) {
                     String authHeader = accessor.getFirstNativeHeader("Authorization");
                     if (authHeader != null && authHeader.startsWith("Bearer ")) {
                         String token = authHeader.substring(7);
@@ -72,22 +81,60 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
                             UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
                                     principal, null, Collections.emptyList());
                             accessor.setUser(auth);
+                        } else {
+                            throw new MessageDeliveryException("Invalid or expired JWT");
                         }
+                    } else {
+                        throw new MessageDeliveryException("Missing JWT in STOMP CONNECT");
                     }
                 }
-                
-                // Reject SEND/SUBSCRIBE to another user's destinations
-                if (accessor != null && (StompCommand.SUBSCRIBE.equals(accessor.getCommand()) || StompCommand.SEND.equals(accessor.getCommand()))) {
+
+                // ── SUBSCRIBE: enforce channel-level access rules ──
+                if (StompCommand.SUBSCRIBE.equals(accessor.getCommand())) {
                     String destination = accessor.getDestination();
-                    if (destination != null && destination.startsWith("/user/")) {
-                        // Spring automatically routes /user/{username}/... or similar.
-                        // Wait, if it's not a /user destination, should we reject? The prompt says "Reject SEND/SUBSCRIBE to another user's destinations."
-                        // Actually, Spring Security Messaging can do this automatically, but manually:
-                        // If they try to subscribe to /topic/user-{otherId}, reject. But we don't know the format.
+                    Long userId = extractUserId(accessor.getUser());
+                    if (destination != null && userId != null) {
+                        // /topic/raid-invite/{ownId} — only subscribe to your own
+                        if (destination.startsWith("/topic/raid-invite/")) {
+                            String targetId = destination.substring("/topic/raid-invite/".length());
+                            if (!String.valueOf(userId).equals(targetId)) {
+                                throw new MessageDeliveryException("Cannot subscribe to another user's raid invites");
+                            }
+                        }
+                        // /topic/raid-ransom/{ownId} — only subscribe to your own
+                        if (destination.startsWith("/topic/raid-ransom/")) {
+                            String targetId = destination.substring("/topic/raid-ransom/".length());
+                            if (!String.valueOf(userId).equals(targetId)) {
+                                throw new MessageDeliveryException("Cannot subscribe to another user's ransom channel");
+                            }
+                        }
+                        // /topic/live-raid/{raidId}/state — only attacker or defender
+                        if (destination.startsWith("/topic/live-raid/") && destination.endsWith("/state")) {
+                            String raidId = destination
+                                    .substring("/topic/live-raid/".length(),
+                                               destination.length() - "/state".length());
+                            LiveRaidSession session = liveRaidRegistry.get(raidId).orElse(null);
+                            if (session != null
+                                    && !userId.equals(session.getAttackerUserId())
+                                    && !userId.equals(session.getDefenderUserId())) {
+                                throw new MessageDeliveryException("Not a participant of this live raid");
+                            }
+                        }
                     }
                 }
                 return message;
             }
         });
     }
+
+    private static Long extractUserId(java.security.Principal principal) {
+        if (principal instanceof UsernamePasswordAuthenticationToken auth) {
+            Object p = auth.getPrincipal();
+            if (p instanceof UserPrincipal up) {
+                return up.getUserId();
+            }
+        }
+        return null;
+    }
 }
+

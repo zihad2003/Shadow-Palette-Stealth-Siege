@@ -19,6 +19,7 @@ public class RaidCompleteRequest {
     private Long defenderId;
 
     private int durationSeconds;
+    private String raidId;
     private List<WallBreakEventDto> wallBreakEvents;
     private List<SessionLogTickDto> sessionLog;
     private ClientReportedOutcomeDto clientReportedOutcome;

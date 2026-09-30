@@ -38,7 +38,20 @@ public class RaidLog {
 
     private int durationSeconds;
 
-    @Lob
     @Column(columnDefinition = "TEXT")
     private String sessionLogJson;
+
+    @Column(name = "is_live", nullable = false)
+    @Builder.Default
+    private boolean isLive = false;
+
+    @Column(name = "defender_was_online", nullable = false)
+    @Builder.Default
+    private boolean defenderWasOnline = false;
+
+    @Column(name = "raid_id", unique = true)
+    private String raidId;
+
+    @Column(name = "ended_reason", length = 100)
+    private String endedReason;
 }

@@ -22,6 +22,7 @@ public class Plot {
 
     private int yCoord;
 
+    @Column(name = "owner_id", unique = true)
     private Long ownerId;
 
     private boolean isOccupied;

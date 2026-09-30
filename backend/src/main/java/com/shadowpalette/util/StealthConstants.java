@@ -15,6 +15,7 @@ public final class StealthConstants {
     public static final double ALARM_AT = 100;
 
     public static final int RAID_DURATION_SECONDS = 150;
+    public static final int JAIL_MINUTES = 3;
 
     /** Edge-zone mismatches in SuspiciousState before Alert (tightened from 3). */
     public static final int SUSPICIOUS_TICKS_TO_ALERT = 2;

@@ -6,7 +6,7 @@ import { useGameState } from '../../state/GameStateContext.jsx';
 import ClayPanel from '../ui/ClayPanel.jsx';
 import ClayButton from '../ui/ClayButton.jsx';
 
-const CharacterPreview = lazy(() => import('../three/CharacterPreview.jsx'));
+import CharacterPreview from '../three/CharacterPreview.jsx';
 
 export default function MakeupHousePanel({ onClose, onReady }) {
   const { camoColor, changeCamoColor, setCamoReady, raidSession } = useGameState();

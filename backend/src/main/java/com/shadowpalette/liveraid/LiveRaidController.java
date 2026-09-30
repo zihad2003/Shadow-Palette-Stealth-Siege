@@ -1,12 +1,14 @@
 package com.shadowpalette.liveraid;
 
 import com.shadowpalette.liveraid.dto.*;
+import com.shadowpalette.security.UserPrincipal;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.messaging.handler.annotation.DestinationVariable;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.messaging.simp.SimpMessageHeaderAccessor;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -25,17 +27,29 @@ public class LiveRaidController {
     public LiveRaidStateMessage join(
             @DestinationVariable String raidId,
             @Payload LiveRaidJoinRequest request,
-            SimpMessageHeaderAccessor headers
+            SimpMessageHeaderAccessor headers,
+            java.security.Principal principal
     ) {
-        return liveRaidService.join(raidId, request, headers.getSessionId());
+        return liveRaidService.join(raidId, request, headers.getSessionId(), extractUserId(principal));
     }
 
     @MessageMapping("/live-raid/{raidId}/position")
     public LiveRaidStateMessage position(
             @DestinationVariable String raidId,
             @Payload LiveRaidPositionMessage request,
-            SimpMessageHeaderAccessor headers
+            SimpMessageHeaderAccessor headers,
+            java.security.Principal principal
     ) {
-        return liveRaidService.updatePosition(raidId, request, headers.getSessionId());
+        return liveRaidService.updatePosition(raidId, request, headers.getSessionId(), extractUserId(principal));
+    }
+
+    private static Long extractUserId(java.security.Principal principal) {
+        if (principal instanceof UsernamePasswordAuthenticationToken auth) {
+            Object p = auth.getPrincipal();
+            if (p instanceof UserPrincipal up) {
+                return up.getUserId();
+            }
+        }
+        return null;
     }
 }

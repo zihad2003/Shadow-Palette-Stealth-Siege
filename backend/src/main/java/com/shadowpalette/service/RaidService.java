@@ -28,10 +28,72 @@ public class RaidService {
     private final RaidLogRepository raidLogRepository;
     private final RaidValidator raidValidator;
     private final SimpMessagingTemplate messagingTemplate;
+    private final PresenceService presenceService;
+    private final JailService jailService;
+
+    @Transactional(readOnly = true)
+    public List<RaidTargetDto> getRaidTargets(Long callerId) {
+        List<Plot> plots = plotRepository.findAll();
+        List<RaidTargetDto> targets = new ArrayList<>();
+        Set<Long> processedOwners = new HashSet<>();
+
+        for (Plot plot : plots) {
+            Long ownerId = plot.getOwnerId();
+            if (ownerId == null || (callerId != null && callerId.equals(ownerId))) {
+                continue;
+            }
+            if (!plot.isOccupied() || !processedOwners.add(ownerId)) {
+                continue;
+            }
+
+            User user = userRepository.findById(ownerId).orElse(null);
+            if (user == null) {
+                continue;
+            }
+
+            List<Building> buildings = buildingRepository.findByPlotId(plot.getId());
+            boolean hasLighthouse = lighthouseRepository.findByPlotId(plot.getId()).isPresent();
+            boolean hasPatrol = patrolRobotRepository.findByPlotId(plot.getId()).isPresent();
+            boolean hasJail = buildings.stream().anyMatch(b -> "JAIL".equalsIgnoreCase(b.getBuildingType()));
+            boolean isOnline = user.isBot() || presenceService.isOnline(user.getId());
+
+            targets.add(RaidTargetDto.builder()
+                    .id(user.getId())
+                    .ownerId(user.getId())
+                    .name(user.getUsername())
+                    .username(user.getUsername())
+                    .isBot(user.isBot())
+                    .online(isOnline)
+                    .lastSeenAt(user.getLastSeenAt())
+                    .camoColor(user.getCamoColor() != null ? user.getCamoColor() : "BLUE")
+                    .camo(user.getCamoColor() != null ? user.getCamoColor() : "BLUE")
+                    .level(Math.max(1, user.getPrestigeLevel()))
+                    .prestigeLevel(user.getPrestigeLevel())
+                    .coins(user.getCoins())
+                    .ink(user.getInkEnergy())
+                    .chips(user.getChips())
+                    .buildingsCount(buildings.size())
+                    .hasLighthouse(hasLighthouse)
+                    .hasPatrol(hasPatrol)
+                    .hasJail(hasJail)
+                    .build());
+        }
+
+        targets.sort((a, b) -> {
+            if (a.isBot() != b.isBot()) return a.isBot() ? -1 : 1;
+            if (a.isOnline() != b.isOnline()) return a.isOnline() ? -1 : 1;
+            return a.getId().compareTo(b.getId());
+        });
+
+        return targets;
+    }
 
     @Transactional(readOnly = true)
     public RaidTargetResponse getRaidTarget(Long defenderId, Long attackerId) {
         if (attackerId != null) {
+            if (jailService != null && jailService.isJailed(attackerId)) {
+                throw new ApiException(HttpStatus.FORBIDDEN, "ATTACKER_IN_JAIL");
+            }
             userRepository.findById(attackerId).ifPresent(attacker -> {
                 if (attacker.getRaidCooldownUntil() != null && attacker.getRaidCooldownUntil().isAfter(LocalDateTime.now())) {
                     throw new ApiException(HttpStatus.FORBIDDEN, "RAID_COOLDOWN_ACTIVE");
@@ -39,11 +101,12 @@ public class RaidService {
             });
         }
 
-        User defender = userRepository.findById(defenderId).orElse(null);
+        User defender = userRepository.findById(defenderId)
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "USER_NOT_FOUND"));
 
-        int chipsAvailable = (defender != null && defender.getChips() > 0) ? defender.getChips() : 200;
-        int coinsAvailable = (defender != null && defender.getCoins() > 0) ? defender.getCoins() : 200;
-        int inkAvailable = (defender != null && defender.getInkEnergy() > 0) ? defender.getInkEnergy() : 50;
+        int chipsAvailable = Math.max(0, defender.getChips());
+        int coinsAvailable = Math.max(0, defender.getCoins());
+        int inkAvailable = Math.max(0, defender.getInkEnergy());
 
         List<Plot> plots = plotRepository.findByOwnerId(defenderId);
         Plot plot = (plots != null && !plots.isEmpty()) ? plots.get(0) : null;
@@ -78,24 +141,39 @@ public class RaidService {
 
     @Transactional
     public RaidCompleteResponse completeRaid(RaidCompleteRequest request) {
-        User attacker = userRepository.findById(SecurityUtils.getCurrentUserId())
-                .orElseGet(() -> User.builder()
-                        .id(SecurityUtils.getCurrentUserId())
-                        .username("Player" + String.format("%05d", SecurityUtils.getCurrentUserId()))
-                        .camoColor("BLUE")
-                        .coins(500)
-                        .inkEnergy(100)
-                        .chips(200)
-                        .build());
+        Long attackerId = SecurityUtils.getCurrentUserId();
+        if (attackerId == null) {
+            throw new ApiException(HttpStatus.UNAUTHORIZED, "UNAUTHORIZED");
+        }
+
+        // Idempotency check if raidId provided
+        if (request.getRaidId() != null && !request.getRaidId().isBlank()) {
+            Optional<RaidLog> existing = raidLogRepository.findByRaidId(request.getRaidId());
+            if (existing.isPresent()) {
+                RaidLog log = existing.get();
+                User currentAttacker = userRepository.findById(attackerId)
+                        .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "ATTACKER_NOT_FOUND"));
+                return RaidCompleteResponse.builder()
+                        .success(true)
+                        .validatedOutcome(ValidatedOutcomeDto.builder()
+                                .outcome(log.getOutcome())
+                                .isDetected(log.isDetected())
+                                .coinsLooted(log.getStolenCoins())
+                                .inkLooted(log.getStolenInk())
+                                .chipsAwarded(log.getStolenChips())
+                                .build())
+                        .raidLogId(log.getId())
+                        .attackerCoins(currentAttacker.getCoins())
+                        .attackerInk(currentAttacker.getInkEnergy())
+                        .build();
+            }
+        }
+
+        User attacker = userRepository.findById(attackerId)
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "ATTACKER_NOT_FOUND"));
 
         User defender = userRepository.findById(request.getDefenderId())
-                .orElseGet(() -> User.builder()
-                        .id(request.getDefenderId())
-                        .username("Defender" + request.getDefenderId())
-                        .coins(200)
-                        .inkEnergy(50)
-                        .chips(200)
-                        .build());
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "DEFENDER_NOT_FOUND"));
 
         ValidatedOutcomeDto validated = raidValidator.validateSession(
                 request, attacker.getCamoColor(), defender.getCoins(), defender.getInkEnergy()
@@ -144,6 +222,7 @@ public class RaidService {
         userRepository.save(attacker);
         userRepository.save(defender);
 
+        boolean defenderOnline = defender.isBot() || presenceService.isOnline(defender.getId());
         RaidLog raidLog = RaidLog.builder()
                 .attackerId(attacker.getId())
                 .defenderId(defender.getId())
@@ -155,6 +234,10 @@ public class RaidService {
                 .durationSeconds(request.getDurationSeconds())
                 .timestamp(LocalDateTime.now())
                 .sessionLogJson(request.getSessionLog() != null ? request.getSessionLog().toString() : "[]")
+                .isLive(false)
+                .defenderWasOnline(defenderOnline)
+                .raidId(request.getRaidId())
+                .endedReason(validated.getOutcome())
                 .build();
 
         RaidLog savedLog = raidLogRepository.save(raidLog);
@@ -174,23 +257,35 @@ public class RaidService {
      */
     @Transactional
     public RaidCompleteResponse completeLiveCaught(Long attackerId, Long defenderId, int durationSeconds) {
+        return completeLiveCaught(attackerId, defenderId, durationSeconds, null);
+    }
+
+    @Transactional
+    public RaidCompleteResponse completeLiveCaught(Long attackerId, Long defenderId, int durationSeconds, String raidId) {
         User attacker = userRepository.findById(attackerId)
-                .orElseGet(() -> User.builder()
-                        .id(attackerId)
-                        .username("Player" + String.format("%05d", attackerId))
-                        .camoColor("BLUE")
-                        .coins(500)
-                        .inkEnergy(100)
-                        .chips(200)
-                        .build());
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "ATTACKER_NOT_FOUND"));
         User defender = userRepository.findById(defenderId)
-                .orElseGet(() -> User.builder()
-                        .id(defenderId)
-                        .username("Defender" + defenderId)
-                        .coins(200)
-                        .inkEnergy(50)
-                        .chips(200)
-                        .build());
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "DEFENDER_NOT_FOUND"));
+
+        if (raidId != null && !raidId.isBlank()) {
+            Optional<RaidLog> existing = raidLogRepository.findByRaidId(raidId);
+            if (existing.isPresent()) {
+                RaidLog log = existing.get();
+                return RaidCompleteResponse.builder()
+                        .success(true)
+                        .validatedOutcome(ValidatedOutcomeDto.builder()
+                                .outcome(log.getOutcome())
+                                .isDetected(log.isDetected())
+                                .chipsAwarded(0)
+                                .coinsLooted(0)
+                                .inkLooted(0)
+                                .build())
+                        .raidLogId(log.getId())
+                        .attackerCoins(attacker.getCoins())
+                        .attackerInk(attacker.getInkEnergy())
+                        .build();
+            }
+        }
 
         attacker.setRaidCooldownUntil(LocalDateTime.now().plusMinutes(5));
         userRepository.save(attacker);
@@ -215,8 +310,20 @@ public class RaidService {
                 .durationSeconds(Math.max(1, durationSeconds))
                 .timestamp(LocalDateTime.now())
                 .sessionLogJson("[\"live-raid\"]")
+                .isLive(true)
+                .defenderWasOnline(true)
+                .raidId(raidId)
+                .endedReason("CAUGHT")
                 .build();
         RaidLog saved = raidLogRepository.save(raidLog);
+
+        if (jailService != null) {
+            try {
+                jailService.createJailStay(attacker.getId(), defender.getId(), raidId);
+            } catch (Exception ex) {
+                // Ignore so main live caught response succeeds
+            }
+        }
 
         return RaidCompleteResponse.builder()
                 .success(true)
@@ -225,6 +332,67 @@ public class RaidService {
                 .attackerCoins(attacker.getCoins())
                 .attackerInk(attacker.getInkEnergy())
                 .build();
+    }
+
+    @Transactional
+    public void recordAbortedRaid(Long attackerId, Long defenderId, int durationSeconds, String raidId, String reason) {
+        if (raidId != null && !raidId.isBlank() && raidLogRepository.findByRaidId(raidId).isPresent()) {
+            return;
+        }
+        RaidLog raidLog = RaidLog.builder()
+                .attackerId(attackerId)
+                .defenderId(defenderId)
+                .outcome("ABORTED")
+                .isDetected(false)
+                .stolenChips(0)
+                .stolenCoins(0)
+                .stolenInk(0)
+                .durationSeconds(Math.max(1, durationSeconds))
+                .timestamp(LocalDateTime.now())
+                .sessionLogJson("[\"aborted\"]")
+                .isLive(true)
+                .defenderWasOnline(true)
+                .raidId(raidId)
+                .endedReason(reason)
+                .build();
+        raidLogRepository.save(raidLog);
+    }
+
+    @Transactional(readOnly = true)
+    public org.springframework.data.domain.Page<RaidHistoryDto> getHistoryForUser(Long userId, int page, int size) {
+        org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(
+                Math.max(0, page), Math.max(1, Math.min(100, size)),
+                org.springframework.data.domain.Sort.by("timestamp").descending()
+        );
+        org.springframework.data.domain.Page<RaidLog> logs = raidLogRepository.findByAttackerIdOrDefenderIdOrderByTimestampDesc(userId, userId, pageable);
+
+        return logs.map(log -> {
+            boolean isAttacker = userId.equals(log.getAttackerId());
+            Long opponentId = isAttacker ? log.getDefenderId() : log.getAttackerId();
+            String opponentName = "Unknown";
+            if (opponentId != null) {
+                opponentName = userRepository.findById(opponentId)
+                        .map(User::getUsername)
+                        .orElse("Player " + opponentId);
+            }
+
+            return RaidHistoryDto.builder()
+                    .id(log.getId())
+                    .raidId(log.getRaidId())
+                    .opponentId(opponentId)
+                    .opponentUsername(opponentName)
+                    .outcome(log.getOutcome())
+                    .coinsLooted(log.getStolenCoins())
+                    .inkLooted(log.getStolenInk())
+                    .chipsAwarded(log.getStolenChips())
+                    .isLive(log.isLive())
+                    .defenderWasOnline(log.isDefenderWasOnline())
+                    .durationSeconds(log.getDurationSeconds())
+                    .timestamp(log.getTimestamp())
+                    .perspective(isAttacker ? "ATTACKER" : "DEFENDER")
+                    .endedReason(log.getEndedReason())
+                    .build();
+        });
     }
 
     @Transactional

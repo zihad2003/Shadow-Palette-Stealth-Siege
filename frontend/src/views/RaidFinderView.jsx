@@ -6,11 +6,10 @@ import HudHeader from '../components/ui/HudHeader.jsx';
 import ClayPanel from '../components/ui/ClayPanel.jsx';
 import ClayButton from '../components/ui/ClayButton.jsx';
 import RaidTargetCard from '../components/raid/RaidTargetCard.jsx';
-import { RAID_TARGETS } from '../data/raidTargets.js';
 import { useGameState } from '../state/GameStateContext.jsx';
 import { RefreshCw, Users, Eye, Swords, ShieldAlert, Car } from 'lucide-react';
 import DuoLobbyView from '../duo/DuoLobbyView.jsx';
-import { sendVisitInvite } from '../api.js';
+import { sendVisitInvite, fetchRaidTargets } from '../api.js';
 
 export default function RaidFinderView() {
   const {
@@ -34,6 +33,27 @@ export default function RaidFinderView() {
   const [sentVisit, setSentVisit] = useState({});
   const [refreshing, setRefreshing] = useState(false);
   const [manualId, setManualId] = useState('');
+  const [targets, setTargets] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadTargets = async () => {
+      try {
+        const data = await fetchRaidTargets();
+        if (!cancelled && Array.isArray(data)) {
+          setTargets(data);
+        }
+      } catch (err) {
+        console.error('Failed to load targets', err);
+      }
+    };
+    loadTargets();
+    const interval = window.setInterval(loadTargets, 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, []);
 
   useEffect(() => {
     const tick = () => setCooldownLeft(Math.max(0, Math.ceil((raidCooldownUntil - Date.now()) / 1000)));
@@ -114,15 +134,15 @@ export default function RaidFinderView() {
   };
 
   const players = (onlinePlayers || []).filter((p) => Number(p.userId) !== Number(userId));
-  const otherHint = Number(userId) === 20161 ? 20162 : 20161;
-  const otherHintFormatted = fmtUid(otherHint);
 
   const onRefresh = async () => {
     setRefreshing(true);
     try {
       const list = await refreshOnlinePlayers?.();
+      const targetList = await fetchRaidTargets();
+      if (Array.isArray(targetList)) setTargets(targetList);
       const others = (list || []).filter((p) => Number(p.userId) !== Number(userId));
-      showToast(others.length ? `${others.length} players online` : 'No other players online', 'info');
+      showToast(others.length ? `${others.length} players online` : 'Targets updated', 'info');
     } finally {
       setRefreshing(false);
     }
@@ -131,7 +151,7 @@ export default function RaidFinderView() {
   const sendManualInvite = async () => {
     const gid = Number(manualId);
     if (!Number.isFinite(gid) || gid <= 0) {
-      showToast(`Enter friend user id (e.g. ${otherHint})`, 'error');
+      showToast('Enter valid player ID', 'error');
       return;
     }
     const ok = await inviteDuoPlayer(gid);
@@ -141,51 +161,7 @@ export default function RaidFinderView() {
     }
   };
 
-  // Build real player raid targets (both online live PvP and offline registered bases)
-  const livePlayerTargets = players.map((p) => ({
-    id: p.userId,
-    name: p.username || `Player ${fmtUid(p.userId)}'s Base`,
-    ownerId: p.userId,
-    isRealPlayer: true,
-    isOnline: true,
-    level: 2,
-    difficulty: 'PvP Live',
-    coins: 500,
-    ink: 100,
-    chips: 250,
-    camo: p.camoColor || 'BLUE',
-    primaryColor: '#EF4444',
-    buildings: 5,
-    lighthouse: true,
-    patrol: true,
-    jail: true,
-    description: 'Real player base! Defender is currently ONLINE — live counter-siege & Base Jail active.',
-  }));
 
-  const knownRealIds = [otherHint];
-  const offlineRealTargets = knownRealIds
-    .filter((id) => !players.some((p) => Number(p.userId) === Number(id)))
-    .map((id) => ({
-      id: id,
-      name: `Player ${fmtUid(id)}'s Base`,
-      ownerId: id,
-      isRealPlayer: true,
-      isOnline: false,
-      level: 2,
-      difficulty: 'PvP Offline',
-      coins: 450,
-      ink: 90,
-      chips: 220,
-      camo: 'BLUE',
-      primaryColor: '#6366F1',
-      buildings: 5,
-      lighthouse: true,
-      patrol: true,
-      jail: true,
-      description: 'Real player base! Automated AI patrol defense. If owner logs in, live siege alert triggers.',
-    }));
-
-  const allTargets = [...livePlayerTargets, ...offlineRealTargets, ...RAID_TARGETS];
 
   return (
     <div className="relative w-full h-full overflow-hidden bg-clay-bg flex flex-col">
@@ -306,7 +282,7 @@ export default function RaidFinderView() {
                   <input
                     type="number"
                     min={1}
-                    placeholder={`Friend id (${otherHintFormatted})`}
+                    placeholder="Friend user id"
                     value={manualId}
                     onChange={(e) => setManualId(e.target.value)}
                     className="flex-1 h-8 rounded-lg bg-black/15 px-2 text-[11px] text-clay-text outline-none border border-white/10"
@@ -333,8 +309,8 @@ export default function RaidFinderView() {
           </p>
         </div>
         <div className="grid gap-5 sm:grid-cols-2 max-w-4xl mx-auto">
-          {allTargets.map((t) => (
-            <RaidTargetCard key={t.id} target={t} onRaid={() => handleRaid(t)} />
+          {targets.map((t) => (
+            <RaidTargetCard key={t.id || t.ownerId} target={t} onRaid={() => handleRaid(t)} />
           ))}
         </div>
       </div>

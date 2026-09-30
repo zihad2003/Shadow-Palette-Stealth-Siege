@@ -9,12 +9,35 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import com.shadowpalette.dto.RaidTargetDto;
+import com.shadowpalette.security.SecurityUtils;
+import java.util.List;
+
 @RestController
 @RequestMapping("/api/raid")
 @RequiredArgsConstructor
 public class RaidController {
 
     private final RaidService raidService;
+
+    @GetMapping("/targets")
+    public ResponseEntity<List<RaidTargetDto>> getRaidTargets() {
+        Long callerId = SecurityUtils.getCurrentUserId();
+        List<RaidTargetDto> targets = raidService.getRaidTargets(callerId);
+        return ResponseEntity.ok(targets);
+    }
+
+    @GetMapping("/history")
+    public ResponseEntity<org.springframework.data.domain.Page<com.shadowpalette.dto.RaidHistoryDto>> getRaidHistory(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size
+    ) {
+        Long userId = SecurityUtils.getCurrentUserId();
+        if (userId == null) {
+            return ResponseEntity.status(401).build();
+        }
+        return ResponseEntity.ok(raidService.getHistoryForUser(userId, page, size));
+    }
 
     @GetMapping("/target/{userId}")
     public ResponseEntity<RaidTargetResponse> getRaidTarget(

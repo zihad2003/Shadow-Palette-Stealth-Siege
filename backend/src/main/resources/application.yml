@@ -2,11 +2,12 @@ spring:
   application:
     name: shadow-palette-backend
   datasource:
-    url: ${SPRING_DATASOURCE_URL:jdbc:h2:file:./data/shadow_palette;MODE=MySQL;DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE;AUTO_SERVER=TRUE}
+    url: ${SPRING_DATASOURCE_URL:jdbc:h2:file:./data/shadow_palette;MODE=MySQL;DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE}
     username: ${SPRING_DATASOURCE_USERNAME:sa}
     password: ${SPRING_DATASOURCE_PASSWORD:}
     driver-class-name: ${SPRING_DATASOURCE_DRIVER:org.h2.Driver}
   jpa:
+    database-platform: org.hibernate.dialect.H2Dialect
     hibernate:
       ddl-auto: ${HIBERNATE_DDL_AUTO:update}
     show-sql: false

@@ -31,7 +31,6 @@ public class User {
     @Column(length = 255)
     private String guestSecretHash;
 
-    @Lob
     @Column(columnDefinition = "LONGTEXT")
     private String worldSaveJson;
 
@@ -50,4 +49,11 @@ public class User {
     private int prestigeLevel;
 
     private LocalDateTime raidCooldownUntil;
+
+    @Column(name = "is_bot", nullable = false)
+    @Builder.Default
+    private boolean isBot = false;
+
+    @Column(name = "last_seen_at")
+    private LocalDateTime lastSeenAt;
 }

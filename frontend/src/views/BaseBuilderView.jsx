@@ -154,69 +154,7 @@ export default function BaseBuilderView() {
     selectedBuildingId,
     buildings,
   };
-  const rebuildKeysRef = useRef({
-    tickRebuildHold,
-    repairBuilding,
-    guideStep,
-    activeRuinId,
-    dismissWelcome,
-    buildings,
-    pickUpPartAt,
-    dropCarriedPart,
-    saveWorld,
-    tickPickupAnim,
-    tickMountHold,
-    mountCarriedPart,
-    sitInBuggy,
-    standFromBuggy,
-    bumpBuggyGear,
-    advanceBuggyTrack,
-    buggySeated,
-    buggyGear,
-    garageComplete,
-    carriedPart,
-    isVisitGuest,
-    visitRole,
-    collectHouseCoins,
-    sleepAtHouse,
-    cyclePaintColor,
-    upgradeHouse,
-    showToast,
-  });
-  rebuildKeysRef.current = {
-    tickRebuildHold,
-    repairBuilding,
-    guideStep,
-    activeRuinId,
-    dismissWelcome,
-    buildings,
-    pickUpPartAt,
-    dropCarriedPart,
-    saveWorld,
-    tickPickupAnim,
-    tickMountHold,
-    mountCarriedPart,
-    sitInBuggy,
-    standFromBuggy,
-    bumpBuggyGear,
-    advanceBuggyTrack,
-    buggySeated,
-    buggyGear,
-    garageComplete,
-    carriedPart,
-    isVisitGuest,
-    visitRole,
-    collectHouseCoins,
-    sleepAtHouse,
-    cyclePaintColor,
-    upgradeHouse,
-    showToast,
-    carriedIntruder,
-    canCatchIntruder,
-    isNearJailCell,
-    handleCatchIntruder,
-    handleDropIntruderInJail,
-  };
+  const rebuildKeysRef = useRef(null);
   const sprintMeter = useRef(createSprintMeter());
   const pendingDismount = useRef(null);
   const [stamina, setStamina] = useState({ stamina: 1, sprinting: false, exhausted: false });
@@ -297,6 +235,41 @@ export default function BaseBuilderView() {
         status: 'JAIL_LOCKED',
       }).catch(() => {});
     }
+  };
+
+  rebuildKeysRef.current = {
+    tickRebuildHold,
+    repairBuilding,
+    guideStep,
+    activeRuinId,
+    dismissWelcome,
+    buildings,
+    pickUpPartAt,
+    dropCarriedPart,
+    saveWorld,
+    tickPickupAnim,
+    tickMountHold,
+    mountCarriedPart,
+    sitInBuggy,
+    standFromBuggy,
+    bumpBuggyGear,
+    advanceBuggyTrack,
+    buggySeated,
+    buggyGear,
+    garageComplete,
+    carriedPart,
+    isVisitGuest,
+    visitRole,
+    collectHouseCoins,
+    sleepAtHouse,
+    cyclePaintColor,
+    upgradeHouse,
+    showToast,
+    carriedIntruder,
+    canCatchIntruder,
+    isNearJailCell,
+    handleCatchIntruder,
+    handleDropIntruderInJail,
   };
 
   const nearPart = findPartNear(partSpawns, walker.column, walker.row);
@@ -1097,7 +1070,7 @@ export default function BaseBuilderView() {
       <RansomModal
         isOpen={showJailRansomModal}
         isPrisoner={false}
-        attackerId={carriedIntruder?.id || intruder?.id || liveRaidInvite?.attackerUserId || 20162}
+        attackerId={carriedIntruder?.id || intruder?.id || liveRaidInvite?.attackerUserId || null}
         defenderId={userId}
         attackerName={carriedIntruder?.name || intruder?.name || liveRaidInvite?.attackerName || 'Intruder'}
         defenderName="Base Owner (You)"

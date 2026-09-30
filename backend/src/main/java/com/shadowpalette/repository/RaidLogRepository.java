@@ -10,6 +10,10 @@ import java.util.List;
 public interface RaidLogRepository extends JpaRepository<RaidLog, Long> {
     List<RaidLog> findByAttackerId(Long attackerId);
     List<RaidLog> findByDefenderId(Long defenderId);
+    java.util.Optional<RaidLog> findByRaidId(String raidId);
+    org.springframework.data.domain.Page<RaidLog> findByAttackerIdOrDefenderIdOrderByTimestampDesc(
+            Long attackerId, Long defenderId, org.springframework.data.domain.Pageable pageable);
+    List<RaidLog> findByAttackerIdOrDefenderIdOrderByTimestampDesc(Long attackerId, Long defenderId);
     long countByAttackerIdAndOutcomeNot(Long attackerId, String outcome);
     long countByAttackerId(Long attackerId);
     long countByAttackerIdAndOutcome(Long attackerId, String outcome);

@@ -5,6 +5,8 @@ import com.shadowpalette.liveraid.dto.LiveRaidPositionMessage;
 import com.shadowpalette.liveraid.dto.LiveRaidStartRequest;
 import com.shadowpalette.liveraid.dto.LiveRaidStartResponse;
 import com.shadowpalette.liveraid.dto.LiveRaidStateMessage;
+import com.shadowpalette.repository.LiveRaidSessionRepository;
+import com.shadowpalette.repository.UserRepository;
 import com.shadowpalette.security.UserPrincipal;
 import com.shadowpalette.service.PresenceService;
 import com.shadowpalette.service.RaidService;
@@ -36,15 +38,18 @@ class LiveRaidFlowTest {
     @Mock PresenceService presenceService;
     @Mock SimpMessagingTemplate messaging;
     @Mock RaidService raidService;
+    @Mock LiveRaidSessionRepository sessionRepository;
+    @Mock UserRepository userRepository;
+    @Mock com.shadowpalette.service.JailService jailService;
 
     LiveRaidRegistry registry;
     LiveRaidService liveRaidService;
 
     @BeforeEach
     void setUp() {
-        setUserId(1L); // default: attacker
+        setUserId(1L); // default: attacker (used by startRaid which still reads SecurityContextHolder)
         registry = new LiveRaidRegistry();
-        liveRaidService = new LiveRaidService(registry, presenceService, messaging, raidService);
+        liveRaidService = new LiveRaidService(registry, presenceService, messaging, raidService, sessionRepository, userRepository, jailService);
     }
 
     @Test
@@ -66,7 +71,7 @@ class LiveRaidFlowTest {
     void inviteJoinCatch() {
         when(presenceService.isOnline(34L)).thenReturn(true);
 
-        // Attacker (userId=1) starts the raid
+        // Attacker (userId=1) starts the raid (HTTP, uses SecurityContextHolder)
         setUserId(1L);
         LiveRaidStartResponse start = liveRaidService.startRaid(LiveRaidStartRequest.builder()
                 .defenderId(34L)
@@ -76,34 +81,34 @@ class LiveRaidFlowTest {
         assertTrue(start.isSuccess());
         verify(messaging).convertAndSend(eq("/topic/raid-invite/34"), any(Object.class));
 
-        // Defender (userId=34) joins
-        setUserId(34L);
+        // Defender (userId=34) joins — callerUserId passed directly (STOMP)
         LiveRaidStateMessage joined = liveRaidService.join(
                 "raid-live-1",
                 LiveRaidJoinRequest.builder().role("DEFENDER").build(),
-                "ws-def"
+                "ws-def",
+                34L
         );
         assertEquals("DEFENDER_JOINED", joined.getMessage());
 
-        // Attacker sends position
-        setUserId(1L);
+        // Attacker sends position — callerUserId passed directly (STOMP)
         liveRaidService.updatePosition(
                 "raid-live-1",
                 LiveRaidPositionMessage.builder().role("ATTACKER").x(10).y(10).build(),
-                "ws-atk"
+                "ws-atk",
+                1L
         );
 
         // Defender moves to same tile → CAUGHT
-        setUserId(34L);
         LiveRaidStateMessage caught = liveRaidService.updatePosition(
                 "raid-live-1",
                 LiveRaidPositionMessage.builder().role("DEFENDER").x(10.2).y(10.1).build(),
-                "ws-def"
+                "ws-def",
+                34L
         );
         assertEquals("CAUGHT", caught.getOutcome());
 
-        // completeLiveCaught called with attacker=1, defender=34
-        verify(raidService).completeLiveCaught(eq(1L), eq(34L), anyInt());
+        // completeLiveCaught called with attacker=1, defender=34, duration, raidId
+        verify(raidService).completeLiveCaught(eq(1L), eq(34L), anyInt(), eq("raid-live-1"));
         verify(messaging, atLeastOnce()).convertAndSend(eq("/topic/live-raid/raid-live-1/state"), any(Object.class));
     }
 
@@ -120,14 +125,13 @@ class LiveRaidFlowTest {
     void defenderDisconnectFallback() {
         when(presenceService.isOnline(34L)).thenReturn(true);
 
-        // Attacker starts
+        // Attacker starts (HTTP, SecurityContextHolder)
         setUserId(1L);
         liveRaidService.startRaid(LiveRaidStartRequest.builder()
                 .defenderId(34L).raidId("raid-d").attackerName("A").build());
 
-        // Defender joins
-        setUserId(34L);
-        liveRaidService.join("raid-d", LiveRaidJoinRequest.builder().role("DEFENDER").build(), "ws-def");
+        // Defender joins (STOMP, callerUserId passed directly)
+        liveRaidService.join("raid-d", LiveRaidJoinRequest.builder().role("DEFENDER").build(), "ws-def", 34L);
 
         // Verify joined
         LiveRaidSession s = registry.get("raid-d").orElseThrow();
@@ -140,10 +144,44 @@ class LiveRaidFlowTest {
         assertFalse(s.isTerminal());
     }
 
+    @Test
+    @DisplayName("Null callerUserId in join returns NOT_DEFENDER")
+    void nullCallerRejectJoin() {
+        when(presenceService.isOnline(34L)).thenReturn(true);
+        setUserId(1L);
+        liveRaidService.startRaid(LiveRaidStartRequest.builder()
+                .defenderId(34L).raidId("raid-null").attackerName("A").build());
+
+        LiveRaidStateMessage result = liveRaidService.join(
+                "raid-null",
+                LiveRaidJoinRequest.builder().role("DEFENDER").build(),
+                "ws-x",
+                null  // no authenticated user
+        );
+        assertEquals("NOT_DEFENDER", result.getMessage());
+    }
+
+    @Test
+    @DisplayName("Null callerUserId in updatePosition returns BAD_PAYLOAD")
+    void nullCallerRejectPosition() {
+        when(presenceService.isOnline(34L)).thenReturn(true);
+        setUserId(1L);
+        liveRaidService.startRaid(LiveRaidStartRequest.builder()
+                .defenderId(34L).raidId("raid-null-pos").attackerName("A").build());
+
+        LiveRaidStateMessage result = liveRaidService.updatePosition(
+                "raid-null-pos",
+                LiveRaidPositionMessage.builder().role("ATTACKER").x(5).y(5).build(),
+                "ws-x",
+                null
+        );
+        assertEquals("BAD_PAYLOAD", result.getMessage());
+    }
+
     private void setUserId(Long userId) {
         SecurityContextHolder.getContext().setAuthentication(
             new UsernamePasswordAuthenticationToken(
                 new UserPrincipal(userId, "user" + userId), null, Collections.emptyList())
         );
     }
-}
+}

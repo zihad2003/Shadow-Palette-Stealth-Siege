@@ -36,30 +36,32 @@ export default function RaidTargetCard({ target, onRaid }) {
       <div className="flex items-start justify-between gap-2">
         <div>
           <div className="flex items-center gap-1.5">
-            <h3 className="font-heading font-extrabold text-sm text-clay-text">{target.name}</h3>
-            {target.isRealPlayer && (
+            <h3 className="font-heading font-extrabold text-sm text-clay-text">{target.name || target.username}</h3>
+            <span
+              className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider ${
+                target.online || target.isOnline
+                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
+                  : 'bg-zinc-700/40 text-zinc-400 border border-zinc-600/40'
+              }`}
+            >
               <span
-                className={`inline-block w-2 h-2 rounded-full ${
-                  target.isOnline ? 'bg-emerald-400 animate-pulse' : 'bg-indigo-400'
+                className={`w-1.5 h-1.5 rounded-full ${
+                  target.online || target.isOnline ? 'bg-emerald-400 animate-pulse' : 'bg-zinc-400'
                 }`}
-                title={target.isOnline ? 'Defender is Online' : 'Defender is Offline'}
               />
-            )}
+              {target.online || target.isOnline ? 'ONLINE' : 'OFFLINE'}
+            </span>
           </div>
           <p className="text-[11px] text-clay-muted">
-            Owner #{target.ownerId} · {target.isRealPlayer ? (target.isOnline ? 'Real Player (Live)' : 'Real Player (Base)') : `Lv ${target.level}`}
+            Owner #{target.ownerId || target.id} · {target.isBot ? 'Bot Garrison' : 'Player Base'} · Lv {target.level || 1}
           </p>
         </div>
         <span
           className={`text-[10px] font-heading font-bold uppercase ${
-            target.isRealPlayer && target.isOnline
-              ? 'text-emerald-400 font-extrabold tracking-wider animate-pulse'
-              : target.isRealPlayer
-              ? 'text-indigo-400 font-bold'
-              : (DIFFICULTY_TONE[target.difficulty] || '')
+            target.difficulty ? (DIFFICULTY_TONE[target.difficulty] || 'text-clay-accent') : 'text-clay-accent'
           }`}
         >
-          {target.difficulty}
+          {target.difficulty || (target.isBot ? 'Bot' : (target.online || target.isOnline ? 'PvP Live' : 'Async'))}
         </span>
       </div>
 
@@ -89,14 +91,14 @@ export default function RaidTargetCard({ target, onRaid }) {
 
       <div className="flex items-center justify-between text-[11px] text-clay-muted">
         <span className="flex items-center gap-1">
-          <Palette size={12} style={{ color: COLORS[target.camo] }} />
-          Camo {target.camo}
+          <Palette size={12} style={{ color: COLORS[target.camo || target.camoColor] || '#999' }} />
+          Camo {target.camo || target.camoColor || 'BLUE'}
         </span>
         <span className="flex items-center gap-1">
           <Shield size={12} />
-          {target.lighthouse ? 'Lighthouse' : 'No light'}
-          {target.patrol ? ' · Patrol' : ''}
-          {target.jail ? ' · Jail' : ''}
+          {target.hasLighthouse || target.lighthouse ? 'Lighthouse' : 'No light'}
+          {target.hasPatrol || target.patrol ? ' · Patrol' : ''}
+          {target.hasJail || target.jail ? ' · Jail' : ''}
         </span>
       </div>
 
