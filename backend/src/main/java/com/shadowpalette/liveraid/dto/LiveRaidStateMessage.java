@@ -16,6 +16,8 @@ public class LiveRaidStateMessage {
     private String outcome; // null | CAUGHT | DEFENDER_LEFT
     private Double attackerX;
     private Double attackerY;
+    private Integer attackerModel;
+    private String attackerCamo;
     private Double robotX;
     private Double robotY;
     private String message;

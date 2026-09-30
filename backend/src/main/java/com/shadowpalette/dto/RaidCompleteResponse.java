@@ -19,4 +19,6 @@ public class RaidCompleteResponse {
     /** Attacker balances after loot transfer — frontend refreshes TopResourceBar. */
     private Integer attackerCoins;
     private Integer attackerInk;
+    /** True when this raidId was already settled. The client must not add loot again. */
+    private Boolean duplicate;
 }

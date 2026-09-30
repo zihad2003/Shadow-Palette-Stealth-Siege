@@ -24,6 +24,10 @@ public class VisitSessionDto {
     private String guestCamo;
     private boolean hostSeated;
     private boolean guestSeated;
+    private Double hostX;
+    private Double hostY;
+    private Double guestX;
+    private Double guestY;
     private int gear;
     private double trackT;
     private Map<String, Object> snapshot;

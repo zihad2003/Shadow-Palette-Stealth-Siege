@@ -226,6 +226,8 @@ public class LiveRaidService {
             session.setAttackerX(x);
             session.setAttackerY(y);
             session.setAttackerUpdatedAt(now);
+            if (msg.getModel() != null) session.setAttackerModel(msg.getModel());
+            if (msg.getCamo() != null && !msg.getCamo().isBlank()) session.setAttackerCamo(msg.getCamo());
         } else if ("DEFENDER".equals(role)) {
             if (!session.isJoined() || !callerUserId.equals(session.getDefenderUserId())) {
                 return toState(session, "DEFENDER_NOT_JOINED");
@@ -454,6 +456,8 @@ public class LiveRaidService {
                 .status(session.getStatus())
                 .attackerX(session.getAttackerX())
                 .attackerY(session.getAttackerY())
+                .attackerModel(session.getAttackerModel())
+                .attackerCamo(session.getAttackerCamo())
                 .robotX(session.getRobotX())
                 .robotY(session.getRobotY())
                 .message(message)
@@ -469,8 +473,8 @@ public class LiveRaidService {
         double dt = Math.max(0.05, (now.toEpochMilli() - prevAt.toEpochMilli()) / 1000.0);
         double dist = Math.hypot(nextX - prevX, nextY - prevY);
         double max = maxTilesPerSec * dt * StealthConstants.LIVE_POSITION_SPEED_SLACK;
-        // Cap single-frame teleport abuse but allow first reconnect spikes up to ~8 tiles.
-        return dist <= Math.max(max, 8.0 * Math.min(1.0, dt));
+        double floor = dt >= 1.0 ? 8.0 : 2.5;
+        return dist <= Math.max(max, floor);
     }
 
     static double clampX(double x) {

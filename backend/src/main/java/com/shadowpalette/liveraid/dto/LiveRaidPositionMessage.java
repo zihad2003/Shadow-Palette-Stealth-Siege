@@ -16,4 +16,6 @@ public class LiveRaidPositionMessage {
     private double y;
     private String status;
     private String outcome;
+    private Integer model;
+    private String camo;
 }

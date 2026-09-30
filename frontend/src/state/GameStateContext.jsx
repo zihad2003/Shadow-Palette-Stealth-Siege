@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { UPGRADE_COSTS, MAKEUP_RECOLOR_INK } from '../data/raidTargets.js';
 import { GAME_COLORS, GAME_COLOR_KEYS, COLOR_NAMES, hexForColor, isGameColor } from '../colors.js';
 import {
@@ -167,6 +167,9 @@ export function GameStateProvider({ children }) {
   const isAdminPath = typeof window !== 'undefined' && (window.location.pathname === '/admin' || window.location.pathname === '/admin/');
   const startView = isAdminPath ? 'ADMIN' : (allowedViews.includes(initialView) ? initialView : 'SPLASH');
   const [gameState, setGameState] = useState(startView);
+  const gameStateRef = useRef(gameState);
+  gameStateRef.current = gameState;
+  const enteredDuoRaidRef = useRef('');
   const [isFirstRun, setIsFirstRun] = useState(!introDone);
 
   const markIntroDone = () => {
@@ -391,6 +394,10 @@ export function GameStateProvider({ children }) {
   const [visitSpawnToken, setVisitSpawnToken] = useState(0);
   const homeBackupRef = useRef(null);
   const visitSessionRef = useRef(null);
+  const visitPoseRef = useRef({ column: null, row: null });
+  const reportVisitPose = useCallback((column, row) => {
+    visitPoseRef.current = { column, row };
+  }, []);
   const visitRoleRef = useRef(null);
   const endVisitRef = useRef(async () => { });
   const snapshotRef = useRef({});
@@ -2123,6 +2130,7 @@ export function GameStateProvider({ children }) {
     closeRideInvite,
     openRideInvite,
     visitSession,
+    reportVisitPose,
     visitRole,
     isVisitGuest,
     visitSpawnToken,
@@ -2175,16 +2183,23 @@ export function GameStateProvider({ children }) {
           if (!state || cancelled) return;
           setDuoParty((prev) => ({ ...(prev || {}), ...state }));
           if (state.status === 'ENDED') {
+            enteredDuoRaidRef.current = '';
             setDuoParty(null);
             return;
           }
+          const gs = gameStateRef.current;
+          const me = Number(userId);
+          const inParty = Number(state.guestId) === me || Number(state.hostId) === me;
+          const raidKey = `${state.partyId}:${state.raidId || state.defenderId}`;
           if (
             state.status === 'IN_RAID' &&
             state.defenderId != null &&
-            (Number(state.guestId) === Number(userId) || Number(state.hostId) === Number(userId)) &&
-            gameState !== 'STEALTH_RAID' &&
-            gameState !== 'RAID_ENTER'
+            inParty &&
+            gs !== 'STEALTH_RAID' &&
+            gs !== 'RAID_ENTER' &&
+            enteredDuoRaidRef.current !== raidKey
           ) {
+            enteredDuoRaidRef.current = raidKey;
             transitionTo('RAID_ENTER', {
               defenderId: state.defenderId,
               duoPartyId: state.partyId,
@@ -2201,7 +2216,7 @@ export function GameStateProvider({ children }) {
       stompUnsubscribe(`/topic/duo/${partyId}/state`);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [duoParty?.partyId, userId, gameState]);
+  }, [duoParty?.partyId, userId]);
 
   // REST fallback: discover pending duo invite / party when STOMP misses the push.
   useEffect(() => {
@@ -2247,13 +2262,18 @@ export function GameStateProvider({ children }) {
           return { ...(prev || {}), ...res };
         });
 
+        if (res.status === 'ENDED') enteredDuoRaidRef.current = '';
+        const gs = gameStateRef.current;
+        const raidKey = `${res.partyId}:${res.raidId || res.defenderId}`;
         if (
           res.status === 'IN_RAID' &&
           res.defenderId != null &&
           (iAmGuest || iAmHost) &&
-          gameState !== 'STEALTH_RAID' &&
-          gameState !== 'RAID_ENTER'
+          gs !== 'STEALTH_RAID' &&
+          gs !== 'RAID_ENTER' &&
+          enteredDuoRaidRef.current !== raidKey
         ) {
+          enteredDuoRaidRef.current = raidKey;
           transitionTo('RAID_ENTER', {
             defenderId: res.defenderId,
             duoPartyId: res.partyId,
@@ -2409,7 +2429,7 @@ export function GameStateProvider({ children }) {
         /* ignore */
       }
     };
-    const id = window.setInterval(poll, 800);
+    const id = window.setInterval(poll, 250);
     return () => window.clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visitSession?.visitId]);
@@ -2417,26 +2437,32 @@ export function GameStateProvider({ children }) {
   useEffect(() => {
     if (!visitSession?.visitId || visitRole === 'guest') return undefined;
     const id = window.setInterval(() => {
+      const pose = visitPoseRef.current;
       postVisitState({
         visitId: visitSession.visitId,
         userId,
         seated: buggySeated,
         gear: buggyGear,
         trackT: buggyTrackT,
+        column: pose.column,
+        row: pose.row,
       }).catch(() => { });
-    }, 450);
+    }, 250);
     return () => window.clearInterval(id);
   }, [visitSession?.visitId, visitRole, buggySeated, buggyGear, buggyTrackT, userId]);
 
   useEffect(() => {
     if (!visitSession?.visitId || visitRole !== 'guest') return undefined;
     const id = window.setInterval(() => {
+      const pose = visitPoseRef.current;
       postVisitState({
         visitId: visitSession.visitId,
         userId,
         seated: buggySeated,
+        column: pose.column,
+        row: pose.row,
       }).catch(() => { });
-    }, 800);
+    }, 250);
     return () => window.clearInterval(id);
   }, [visitSession?.visitId, visitRole, buggySeated, userId]);
 

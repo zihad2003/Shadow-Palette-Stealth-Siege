@@ -30,6 +30,8 @@ public class RaidService {
     private final SimpMessagingTemplate messagingTemplate;
     private final PresenceService presenceService;
     private final JailService jailService;
+    /** potId -> {claimedCoins, claimedInk, potCoins, potInk}. Ceiling grows to the larger extract. */
+    private final Map<String, int[]> raidPots = new java.util.concurrent.ConcurrentHashMap<>();
 
     @Transactional(readOnly = true)
     public List<RaidTargetDto> getRaidTargets(Long callerId) {
@@ -165,6 +167,7 @@ public class RaidService {
                         .raidLogId(log.getId())
                         .attackerCoins(currentAttacker.getCoins())
                         .attackerInk(currentAttacker.getInkEnergy())
+                        .duplicate(true)
                         .build();
             }
         }
@@ -203,10 +206,32 @@ public class RaidService {
 
         int coinsLooted = Math.max(0, validated.getCoinsLooted());
         int inkLooted = Math.max(0, validated.getInkLooted());
-
-        // Cap steal to what the defender actually holds right now.
-        coinsLooted = Math.min(coinsLooted, Math.max(0, defender.getCoins()));
-        inkLooted = Math.min(inkLooted, Math.max(0, defender.getInkEnergy()));
+        int partySize = request.getPartySize() == null ? 1 : Math.max(1, Math.min(2, request.getPartySize()));
+        int fullCoins = coinsLooted;
+        int fullInk = inkLooted;
+        if (partySize > 1) {
+            coinsLooted = fullCoins / partySize;
+            inkLooted = fullInk / partySize;
+        }
+        String potId = request.getPotId();
+        int[] pot = (potId != null && !potId.isBlank() && partySize > 1)
+                ? raidPots.computeIfAbsent(potId, key -> new int[] {0, 0, 0, 0})
+                : null;
+        if (pot != null) {
+            synchronized (pot) {
+                if (fullCoins > pot[2]) pot[2] = fullCoins;
+                if (fullInk > pot[3]) pot[3] = fullInk;
+                coinsLooted = Math.min(coinsLooted, Math.max(0, pot[2] - pot[0]));
+                inkLooted = Math.min(inkLooted, Math.max(0, pot[3] - pot[1]));
+                coinsLooted = Math.min(coinsLooted, Math.max(0, defender.getCoins()));
+                inkLooted = Math.min(inkLooted, Math.max(0, defender.getInkEnergy()));
+                pot[0] += coinsLooted;
+                pot[1] += inkLooted;
+            }
+        } else {
+            coinsLooted = Math.min(coinsLooted, Math.max(0, defender.getCoins()));
+            inkLooted = Math.min(inkLooted, Math.max(0, defender.getInkEnergy()));
+        }
 
         defender.setCoins(Math.max(0, defender.getCoins() - coinsLooted));
         defender.setInkEnergy(Math.max(0, defender.getInkEnergy() - inkLooted));

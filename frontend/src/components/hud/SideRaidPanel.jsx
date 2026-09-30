@@ -26,10 +26,15 @@ export default function SideRaidPanel({
     (async () => {
       setSubmitted(true);
       try {
+        const potId = raidSession?.raidId || null;
+        const partySize = raidSession?.duoPartyId ? 2 : 1;
         const payload = {
           attackerId: userId,
           defenderId: raidTargetId,
           durationSeconds: Math.max(1, Math.round(elapsedSeconds || 120 - (remaining || 0))),
+          raidId: potId && userId ? `${potId}:${userId}` : potId,
+          potId,
+          partySize,
           lockedCamoColor: raidSession?.camoColor || lockedCamo,
           tileColors: paintedTiles,
           searchlightLevel,
@@ -46,9 +51,11 @@ export default function SideRaidPanel({
         const res = await completeRaid(payload);
         if (cancelled) return;
         const vo = res?.validatedOutcome;
-        if (vo) {
-          if (typeof res.attackerCoins === 'number') setCoins?.(res.attackerCoins);
-          if (typeof res.attackerInk === 'number') setInkEnergy?.(res.attackerInk);
+        if (vo && !res.duplicate) {
+          const coins = Math.max(0, Number(vo.coinsLooted) || 0);
+          const ink = Math.max(0, Number(vo.inkLooted) || 0);
+          if (coins) setCoins?.((current) => current + coins);
+          if (ink) setInkEnergy?.((current) => current + ink);
         }
       } catch (e) {
         if (!cancelled) showToast('Saved locally', 'info');

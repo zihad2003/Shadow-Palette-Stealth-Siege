@@ -8,7 +8,38 @@ import { getJwtToken } from '../api.js';
 
 let client = null;
 let connectPromise = null;
+const connectWaiters = [];
+/** destination -> { sub, listeners: Set<Function> } */
 const subscriptions = new Map();
+const pendingSubs = new Map();
+
+function dispatchFrame(entry, frame) {
+  let body = null;
+  try {
+    body = JSON.parse(frame.body);
+  } catch {
+    body = frame.body;
+  }
+  for (const fn of entry.listeners) {
+    try {
+      fn(body, frame);
+    } catch {
+      /* one listener must not drop the others */
+    }
+  }
+}
+
+function resubscribeAll() {
+  if (!client?.connected) return;
+  for (const [dest, entry] of subscriptions) {
+    try {
+      entry.sub?.unsubscribe();
+    } catch {
+      /* old socket is already gone */
+    }
+    entry.sub = client.subscribe(dest, (frame) => dispatchFrame(entry, frame));
+  }
+}
 
 function wsUrl() {
   if (typeof window === 'undefined') return 'http://127.0.0.1:8080/ws';
@@ -24,11 +55,33 @@ export function getStompClient() {
   return client;
 }
 
+function waitForReconnect() {
+  return new Promise((resolve, reject) => {
+    const waiter = { resolve, reject, timer: 0 };
+    waiter.timer = setTimeout(() => {
+      const i = connectWaiters.indexOf(waiter);
+      if (i >= 0) connectWaiters.splice(i, 1);
+      reject(new Error('STOMP connect timeout'));
+    }, 40000);
+    connectWaiters.push(waiter);
+  });
+}
+
+function flushWaiters(c) {
+  const pending = connectWaiters.splice(0);
+  for (const waiter of pending) {
+    clearTimeout(waiter.timer);
+    waiter.resolve(c);
+  }
+}
+
 export function ensureStompConnected() {
   if (client?.connected) return Promise.resolve(client);
   if (connectPromise) return connectPromise;
+  if (client) return waitForReconnect();
 
   connectPromise = new Promise((resolve, reject) => {
+    let settled = false;
     const connectHeaders = {};
     const jwt = getJwtToken();
     if (jwt) {
@@ -41,21 +94,39 @@ export function ensureStompConnected() {
       heartbeatIncoming: 10000,
       heartbeatOutgoing: 10000,
       onConnect: () => {
+        if (!c.active) return;
         client = c;
-        resolve(c);
+        resubscribeAll();
+        connectPromise = null;
+        flushWaiters(c);
+        if (!settled) {
+          settled = true;
+          resolve(c);
+        }
       },
       onStompError: (frame) => {
-        reject(new Error(frame.headers?.message || 'STOMP error'));
+        if (!settled) {
+          settled = true;
+          connectPromise = null;
+          reject(new Error(frame.headers?.message || 'STOMP error'));
+        }
       },
     });
     c.activate();
-    // Timeout so callers aren't stuck forever if backend is down.
+    // Render free tier can take half a minute to wake. Don't give up at 8s.
     setTimeout(() => {
-      if (!c.connected) {
+      if (!settled && !c.connected) {
+        settled = true;
         connectPromise = null;
+        try {
+          c.deactivate();
+        } catch {
+          /* ignore */
+        }
+        client = null;
         reject(new Error('STOMP connect timeout'));
       }
-    }, 8000);
+    }, 40000);
   }).catch((err) => {
     connectPromise = null;
     throw err;
@@ -66,37 +137,41 @@ export function ensureStompConnected() {
 
 export async function stompSubscribe(destination, onMessage) {
   const c = await ensureStompConnected();
-  const prev = subscriptions.get(destination);
-  if (prev) {
-    try {
-      prev.unsubscribe();
-    } catch {
-      /* ignore */
+  let entry = subscriptions.get(destination);
+  if (!entry) {
+    let opening = pendingSubs.get(destination);
+    if (!opening) {
+      opening = Promise.resolve().then(() => {
+        const listeners = new Set();
+        const created = { sub: null, listeners };
+        created.sub = c.subscribe(destination, (frame) => dispatchFrame(created, frame));
+        subscriptions.set(destination, created);
+        return created;
+      });
+      pendingSubs.set(destination, opening);
+      opening.finally(() => {
+        if (pendingSubs.get(destination) === opening) pendingSubs.delete(destination);
+      });
     }
+    entry = await opening;
   }
-  const sub = c.subscribe(destination, (frame) => {
-    let body = null;
-    try {
-      body = JSON.parse(frame.body);
-    } catch {
-      body = frame.body;
-    }
-    onMessage(body, frame);
-  });
-  subscriptions.set(destination, sub);
-  return sub;
+  entry.listeners.add(onMessage);
+  return entry.sub;
 }
 
-export function stompUnsubscribe(destination) {
-  const sub = subscriptions.get(destination);
-  if (sub) {
-    try {
-      sub.unsubscribe();
-    } catch {
-      /* ignore */
-    }
-    subscriptions.delete(destination);
+export function stompUnsubscribe(destination, onMessage) {
+  const entry = subscriptions.get(destination);
+  if (!entry) return;
+  if (onMessage) {
+    entry.listeners.delete(onMessage);
+    if (entry.listeners.size > 0) return;
   }
+  try {
+    entry.sub.unsubscribe();
+  } catch {
+    /* ignore */
+  }
+  subscriptions.delete(destination);
 }
 
 export async function stompPublish(destination, body) {
@@ -109,9 +184,14 @@ export async function stompPublish(destination, body) {
 }
 
 export async function disconnectStomp() {
-  for (const [dest, sub] of subscriptions) {
+  const pending = connectWaiters.splice(0);
+  for (const waiter of pending) {
+    clearTimeout(waiter.timer);
+    waiter.reject(new Error('STOMP disconnected'));
+  }
+  for (const [dest, entry] of subscriptions) {
     try {
-      sub.unsubscribe();
+      entry.sub.unsubscribe();
     } catch {
       /* ignore */
     }

@@ -1,34 +1,23 @@
 /**
- * Robust WebRTC voice chat with STUN and Open Relay TURN fallback.
- * Fixes SDP negotiation races, prevents audio feedback conflicts, and guarantees reliable laptop-to-laptop and laptop-to-mobile audio.
+ * Duo voice routed through the game server (STOMP), not peer-to-peer WebRTC.
+ * Both players already reach the API, so this works across NATs after a Vercel deploy
+ * without a separate TURN relay.
  */
 import { stompPublish, stompSubscribe, stompUnsubscribe } from '../live/stompClient.js';
 
-const ICE_SERVERS = {
-  iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'stun:stun2.l.google.com:19302' },
-    { urls: 'stun:stun3.l.google.com:19302' },
-    { urls: 'stun:stun4.l.google.com:19302' },
-    { urls: 'stun:global.stun.twilio.com:3478' },
-    { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
-    { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
-    { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
-  ],
-  iceCandidatePoolSize: 10,
-};
+const RATE = 16000;
+const FRAME = 2048;
 
-export function createDuoVoiceCall({ partyId, userId, isHost, onStatus, onRemoteStream }) {
-  let pc = null;
+export function createDuoVoiceCall({ partyId, userId, onStatus }) {
   let localStream = null;
+  let captureCtx = null;
+  let playCtx = null;
+  let processor = null;
   let muted = false;
   let deafened = false;
   let disposed = false;
-  let makingOffer = false;
-  let remoteReady = false;
-  const pendingIce = [];
-  const signalDest = `/topic/duo/${partyId}/signal`;
+  let nextPlay = 0;
+  const voiceDest = `/topic/voice/${partyId}`;
 
   const setStatus = (s) => {
     try {
@@ -38,186 +27,93 @@ export function createDuoVoiceCall({ partyId, userId, isHost, onStatus, onRemote
     }
   };
 
-  const publish = (type, payload = null) =>
-    stompPublish(`/app/duo/${partyId}/signal`, {
-      fromUserId: userId,
-      type,
-      payload,
+  function resume() {
+    captureCtx?.resume?.().catch(() => {});
+    playCtx?.resume?.().catch(() => {});
+  }
+
+  function playPcm(bytes, rate) {
+    if (deafened || disposed || !bytes || bytes.length < 2) return;
+    const playRate = rate || RATE;
+    if (!playCtx) playCtx = new AudioContext();
+    resume();
+    const samples = bytes.length >> 1;
+    const f32 = new Float32Array(samples);
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    for (let i = 0; i < samples; i += 1) {
+      f32[i] = view.getInt16(i * 2, true) / 32768;
+    }
+    const buf = playCtx.createBuffer(1, f32.length, playRate);
+    buf.copyToChannel(f32, 0);
+    const src = playCtx.createBufferSource();
+    src.buffer = buf;
+    src.connect(playCtx.destination);
+    const now = playCtx.currentTime;
+    if (nextPlay < now + 0.02) nextPlay = now + 0.06;
+    src.start(nextPlay);
+    nextPlay += buf.duration;
+    if (nextPlay > now + 0.6) nextPlay = now + 0.08;
+    setStatus('connected');
+  }
+
+  function onVoice(msg) {
+    if (disposed || !msg || Number(msg.fromUserId) === Number(userId) || !msg.pcm) return;
+    try {
+      const bin = atob(msg.pcm);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+      playPcm(bytes, Number(msg.rate) || RATE);
+    } catch {
+      /* bad chunk */
+    }
+  }
+
+  function publishPcm(float32) {
+    if (muted || disposed) return;
+    const pcm = new Int16Array(float32.length);
+    for (let i = 0; i < float32.length; i += 1) {
+      const s = Math.max(-1, Math.min(1, float32[i]));
+      pcm[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+    }
+    const bytes = new Uint8Array(pcm.buffer);
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 1) bin += String.fromCharCode(bytes[i]);
+    stompPublish(`/app/voice/${partyId}`, {
+      pcm: btoa(bin),
+      rate: captureCtx?.sampleRate || RATE,
     }).catch(() => {});
-
-  async function flushIce() {
-    if (!pc?.remoteDescription) return;
-    while (pendingIce.length) {
-      const c = pendingIce.shift();
-      try {
-        await pc.addIceCandidate(c);
-      } catch {
-        /* ignore stale candidate */
-      }
-    }
-  }
-
-  async function sendOffer() {
-    if (disposed || !pc || !isHost || makingOffer) return;
-    if (pc.signalingState !== 'stable') return;
-    makingOffer = true;
-    try {
-      setStatus('calling');
-      const offer = await pc.createOffer({
-        offerToReceiveAudio: true,
-      });
-      if (disposed) return;
-      await pc.setLocalDescription(offer);
-      await publish('offer', { type: offer.type, sdp: offer.sdp });
-    } catch (e) {
-      console.warn('[Voice] sendOffer error:', e);
-    } finally {
-      makingOffer = false;
-    }
-  }
-
-  async function handleSignal(msg) {
-    if (disposed || !msg || Number(msg.fromUserId) === Number(userId)) return;
-    if (!pc) return;
-
-    try {
-      if (msg.type === 'ready' && isHost) {
-        remoteReady = true;
-        if (pc.signalingState === 'stable') {
-          await sendOffer();
-        }
-        return;
-      }
-
-      if (msg.type === 'offer' && !isHost) {
-        if (pc.signalingState !== 'stable') {
-          // Collision resolution: roll back if we had a local offer
-          if (pc.signalingState === 'have-local-offer') {
-            await pc.setLocalDescription({ type: 'rollback' }).catch(() => {});
-          } else {
-            return;
-          }
-        }
-
-        const desc = new RTCSessionDescription(msg.payload);
-        await pc.setRemoteDescription(desc);
-        await flushIce();
-
-        const answer = await pc.createAnswer({
-          offerToReceiveAudio: true,
-        });
-        await pc.setLocalDescription(answer);
-        await publish('answer', { type: answer.type, sdp: answer.sdp });
-        setStatus('connected');
-        return;
-      }
-
-      if (msg.type === 'answer' && isHost) {
-        if (pc.signalingState !== 'have-local-offer') return;
-
-        const desc = new RTCSessionDescription(msg.payload);
-        await pc.setRemoteDescription(desc);
-        await flushIce();
-        setStatus('connected');
-        return;
-      }
-
-      if (msg.type === 'ice' && msg.payload) {
-        try {
-          const candidate = new RTCIceCandidate(msg.payload);
-          if (!pc.remoteDescription) {
-            pendingIce.push(candidate);
-          } else {
-            await pc.addIceCandidate(candidate);
-          }
-        } catch {
-          /* ignore */
-        }
-      }
-    } catch (e) {
-      const text = String(e?.message || e);
-      if (/wrong state|stable|InvalidStateError|no pending remote/i.test(text)) return;
-      console.warn('[Voice] Signal error:', text);
-    }
   }
 
   async function start() {
     setStatus('requesting-mic');
     try {
       localStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
         video: false,
       });
     } catch (err) {
       setStatus('mic-denied');
       throw err;
     }
-
     if (disposed) {
-      localStream?.getTracks().forEach((t) => t.stop());
+      localStream.getTracks().forEach((t) => t.stop());
       return;
     }
 
-    pc = new RTCPeerConnection(ICE_SERVERS);
-
-    localStream.getAudioTracks().forEach((track) => {
-      track.enabled = !muted;
-      pc.addTrack(track, localStream);
-    });
-
-    pc.onicecandidate = (ev) => {
-      if (!ev.candidate) return;
-      publish('ice', ev.candidate.toJSON());
+    await stompSubscribe(voiceDest, onVoice);
+    captureCtx = new AudioContext({ sampleRate: RATE });
+    resume();
+    const source = captureCtx.createMediaStreamSource(localStream);
+    processor = captureCtx.createScriptProcessor(FRAME, 1, 1);
+    const sink = captureCtx.createGain();
+    sink.gain.value = 0;
+    processor.onaudioprocess = (ev) => {
+      publishPcm(ev.inputBuffer.getChannelData(0));
     };
-
-    pc.ontrack = (ev) => {
-      const stream = ev.streams?.[0] || new MediaStream([ev.track]);
-      onRemoteStream?.(stream);
-      if (ev.track) {
-        ev.track.onunmute = () => onRemoteStream?.(stream);
-      }
-      setStatus('connected');
-    };
-
-    pc.onconnectionstatechange = () => {
-      const s = pc?.connectionState;
-      if (s === 'connected') setStatus('connected');
-      else if (s === 'failed' || s === 'disconnected') setStatus('reconnecting');
-    };
-
-    pc.oniceconnectionstatechange = () => {
-      const s = pc?.iceConnectionState;
-      if (s === 'connected' || s === 'completed') setStatus('connected');
-      else if (s === 'failed') {
-        setStatus('reconnecting');
-        if (isHost && pc && pc.signalingState === 'stable') {
-          pc.restartIce?.();
-          sendOffer().catch(() => {});
-        }
-      }
-    };
-
-    await stompSubscribe(signalDest, handleSignal);
-
-    if (isHost) {
-      setStatus('calling');
-      await sendOffer();
-    } else {
-      setStatus('waiting-offer');
-      await publish('ready');
-      // If host was slightly slower to subscribe, re-announce ready every 2s until offer arrives
-      const timer = window.setInterval(() => {
-        if (disposed || !pc || pc.connectionState === 'connected' || pc.remoteDescription) {
-          window.clearInterval(timer);
-          return;
-        }
-        publish('ready');
-      }, 2000);
-    }
+    source.connect(processor);
+    processor.connect(sink);
+    sink.connect(captureCtx.destination);
+    setStatus(captureCtx.state === 'suspended' ? 'needs-gesture' : 'calling');
   }
 
   function setMuted(next) {
@@ -233,6 +129,7 @@ export function createDuoVoiceCall({ partyId, userId, isHost, onStatus, onRemote
 
   function setDeafened(next) {
     deafened = !!next;
+    if (deafened) nextPlay = 0;
   }
 
   function isDeafened() {
@@ -241,17 +138,21 @@ export function createDuoVoiceCall({ partyId, userId, isHost, onStatus, onRemote
 
   async function stop() {
     disposed = true;
-    stompUnsubscribe(signalDest);
+    stompUnsubscribe(voiceDest, onVoice);
     try {
-      pc?.close();
+      processor?.disconnect();
     } catch {
       /* ignore */
     }
-    pc = null;
+    processor = null;
     localStream?.getTracks().forEach((t) => t.stop());
     localStream = null;
+    captureCtx?.close?.().catch(() => {});
+    playCtx?.close?.().catch(() => {});
+    captureCtx = null;
+    playCtx = null;
     setStatus('ended');
   }
 
-  return { start, stop, setMuted, isMuted, setDeafened, isDeafened };
+  return { start, stop, resume, setMuted, isMuted, setDeafened, isDeafened };
 }

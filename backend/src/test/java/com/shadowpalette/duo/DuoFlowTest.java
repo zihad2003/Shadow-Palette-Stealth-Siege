@@ -81,9 +81,9 @@ class DuoFlowTest {
         assertEquals(55L, raid.getDefenderId());
 
         duoService.updatePosition(invited.getPartyId(), DuoPositionMessage.builder()
-                .x(10).y(10).alarm(false).build());
+                .x(10).y(10).alarm(false).build(), 1L);
         DuoPartyState after = duoService.updatePosition(invited.getPartyId(), DuoPositionMessage.builder()
-                .x(10.1).y(10).alarm(true).build());
+                .x(10.1).y(10).alarm(true).build(), 1L);
         assertTrue(after.isAlarmLatched());
         assertEquals(10.1, after.getHostX());
         

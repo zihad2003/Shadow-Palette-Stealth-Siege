@@ -257,6 +257,15 @@ public class PresenceService {
                 session.trackT = t;
             }
         }
+        if (request.getColumn() != null && request.getRow() != null) {
+            if (host) {
+                session.hostX = request.getColumn();
+                session.hostY = request.getRow();
+            } else {
+                session.guestX = request.getColumn();
+                session.guestY = request.getRow();
+            }
+        }
         return toSessionDto(session);
     }
 
@@ -368,6 +377,10 @@ public class PresenceService {
                 .guestCamo(session.guestCamo)
                 .hostSeated(session.hostSeated)
                 .guestSeated(session.guestSeated)
+                .hostX(session.hostX)
+                .hostY(session.hostY)
+                .guestX(session.guestX)
+                .guestY(session.guestY)
                 .gear(session.gear)
                 .trackT(session.trackT)
                 .snapshot(session.snapshot)
@@ -397,6 +410,10 @@ public class PresenceService {
         Map<String, Object> snapshot;
         boolean hostSeated;
         boolean guestSeated;
+        Double hostX;
+        Double hostY;
+        Double guestX;
+        Double guestY;
         int gear;
         double trackT;
         String status;

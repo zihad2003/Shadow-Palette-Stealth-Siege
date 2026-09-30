@@ -16,6 +16,8 @@ public class LiveRaidSession {
     private Long attackerUserId;
     private Long defenderUserId;
     private String attackerName;
+    private Integer attackerModel;
+    private String attackerCamo;
 
     private Double attackerX;
     private Double attackerY;

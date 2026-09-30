@@ -78,7 +78,7 @@ export default function DuoLobbyView() {
   const hostModel = duoParty?.hostModel || (isHost ? characterModel : 1);
   const hostCamo = duoParty?.hostCamo || (isHost ? camoColor : 'BLUE');
   const guestModel = duoParty?.guestModel || (isGuest ? characterModel : 2);
-  const guestCamo = duoParty?.guestCamo || (isGuest ? camoColor : 'ORANGE');
+  const guestCamo = duoParty?.guestCamo || (isGuest ? camoColor : 'PURPLE');
 
   return (
     <div className="absolute inset-0 z-50 bg-[#0d1417]/95 backdrop-blur-md flex flex-col p-4 sm:p-6 overflow-y-auto">

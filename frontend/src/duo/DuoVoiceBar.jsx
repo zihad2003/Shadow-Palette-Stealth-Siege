@@ -36,11 +36,9 @@ export default function DuoVoiceBar() {
     gameState === 'RAID_ENTER' ||
     gameState === 'STEALTH_RAID';
 
+  const partnerHere = !!duoParty?.guestJoined || duoParty?.status === 'IN_RAID';
   const bothInLobby =
-    inDuoGameSession &&
-    !!partyId &&
-    duoParty.status !== 'ENDED' &&
-    (duoParty.guestJoined || duoParty.status === 'IN_RAID' || duoParty.status === 'LOBBY');
+    inDuoGameSession && !!partyId && duoParty.status !== 'ENDED' && partnerHere;
 
   useEffect(() => {
     if (!bothInLobby || !userId || !partyId) {
@@ -66,21 +64,11 @@ export default function DuoVoiceBar() {
           partyId,
           userId,
           isHost,
-          onStatus: (s) => !cancelled && setVoiceStatus(s),
-          onRemoteStream: (stream) => {
-            if (audioRef.current) {
-              audioRef.current.srcObject = stream;
-              audioRef.current.volume = deafened ? 0 : 1.0;
-              audioRef.current.muted = deafened;
-              const p = audioRef.current.play();
-              if (p !== undefined) {
-                p.then(() => setAutoplayBlocked(false))
-                  .catch((err) => {
-                    console.warn('[Voice] Audio autoplay waiting for gesture:', err);
-                    setAutoplayBlocked(true);
-                  });
-              }
-            }
+          onStatus: (s) => {
+            if (cancelled) return;
+            setVoiceStatus(s);
+            if (s === 'needs-gesture') setAutoplayBlocked(true);
+            if (s === 'connected') setAutoplayBlocked(false);
           },
         });
         callRef.current = call;
@@ -95,12 +83,8 @@ export default function DuoVoiceBar() {
 
     // Continuous audio unlocker on any mouse click or keyboard interaction (essential for laptops)
     const unlockAudio = () => {
-      if (audioRef.current && audioRef.current.srcObject && audioRef.current.paused) {
-        audioRef.current
-          .play()
-          .then(() => setAutoplayBlocked(false))
-          .catch(() => {});
-      }
+      callRef.current?.resume?.();
+      setAutoplayBlocked(false);
     };
     window.addEventListener('pointerdown', unlockAudio, { passive: true });
     window.addEventListener('keydown', unlockAudio, { passive: true });
@@ -118,7 +102,7 @@ export default function DuoVoiceBar() {
       setVoiceStatus('idle');
       setAutoplayBlocked(false);
     };
-  }, [partyId, userId, isHost, deafened, bothInLobby]);
+  }, [partyId, userId, isHost, bothInLobby]);
 
   if (!bothInLobby) return null;
 
@@ -142,12 +126,8 @@ export default function DuoVoiceBar() {
 
   const handleManualUnmuteClick = (e) => {
     e.stopPropagation();
-    if (audioRef.current) {
-      audioRef.current
-        .play()
-        .then(() => setAutoplayBlocked(false))
-        .catch(() => {});
-    }
+    callRef.current?.resume?.();
+    setAutoplayBlocked(false);
   };
 
   const isConnected = voiceStatus === 'connected';
@@ -196,7 +176,7 @@ export default function DuoVoiceBar() {
         </button>
 
         {/* Autoplay unlock pill if browser blocked initial sound */}
-        {autoplayBlocked && (
+        {(autoplayBlocked || voiceStatus === 'needs-gesture') && (
           <button
             onClick={handleManualUnmuteClick}
             className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse hover:bg-amber-500/30"

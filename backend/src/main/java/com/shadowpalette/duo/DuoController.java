@@ -64,18 +64,44 @@ public class DuoController {
     }
 
     @MessageMapping("/duo/{partyId}/position")
-    public DuoPartyState position(
+    public void position(
             @DestinationVariable String partyId,
-            @Payload DuoPositionMessage msg
+            @Payload DuoPositionMessage msg,
+            java.security.Principal principal
     ) {
-        return duoService.updatePosition(partyId, msg);
+        duoService.updatePosition(partyId, msg, extractUserId(principal));
     }
 
     @MessageMapping("/duo/{partyId}/signal")
     public void signal(
             @DestinationVariable String partyId,
-            @Payload DuoSignalMessage msg
+            @Payload DuoSignalMessage msg,
+            java.security.Principal principal
     ) {
+        Long userId = extractUserId(principal);
+        if (userId != null && msg != null) msg.setFromUserId(userId);
         duoService.relaySignal(partyId, msg);
+    }
+
+    @MessageMapping("/voice/{room}")
+    public void voice(
+            @DestinationVariable String room,
+            @Payload DuoVoiceMessage msg,
+            java.security.Principal principal
+    ) {
+        Long userId = extractUserId(principal);
+        if (userId == null || msg == null) return;
+        msg.setFromUserId(userId);
+        duoService.relayVoice(room, msg);
+    }
+
+    private static Long extractUserId(java.security.Principal principal) {
+        if (principal instanceof org.springframework.security.authentication.UsernamePasswordAuthenticationToken auth) {
+            Object p = auth.getPrincipal();
+            if (p instanceof com.shadowpalette.security.UserPrincipal up) {
+                return up.getUserId();
+            }
+        }
+        return null;
     }
 }

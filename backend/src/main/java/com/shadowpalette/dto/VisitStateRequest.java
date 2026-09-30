@@ -14,4 +14,6 @@ public class VisitStateRequest {
     private Boolean seated;
     private Integer gear;
     private Double trackT;
+    private Double column;
+    private Double row;
 }

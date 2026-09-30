@@ -146,9 +146,9 @@ public class DuoService {
         return toState(party, "RAID_STARTED");
     }
 
-    public DuoPartyState updatePosition(String partyId, DuoPositionMessage msg) {
+    public DuoPartyState updatePosition(String partyId, DuoPositionMessage msg, Long userId) {
         DuoParty party = requireParty(partyId);
-        if (party == null || msg == null || SecurityUtils.getCurrentUserId() == null) return fail("BAD_PAYLOAD");
+        if (party == null || msg == null || userId == null) return fail("BAD_PAYLOAD");
         if (!"IN_RAID".equals(party.getStatus()) && !"LOBBY".equals(party.getStatus())) {
             return fail("PARTY_ENDED");
         }
@@ -156,9 +156,12 @@ public class DuoService {
         Instant now = Instant.now();
         double x = clampX(msg.getX());
         double y = clampY(msg.getY());
-        boolean isHost = SecurityUtils.getCurrentUserId().equals(party.getHostId());
-        boolean isGuest = SecurityUtils.getCurrentUserId().equals(party.getGuestId());
+        boolean isHost = userId.equals(party.getHostId());
+        boolean isGuest = userId.equals(party.getGuestId());
         if (!isHost && !isGuest) return fail("NOT_PARTY");
+        if ((isHost && party.isHostCaught()) || (isGuest && party.isGuestCaught())) {
+            return toState(party, "CAUGHT");
+        }
 
         if (isHost) {
             if (!speedOk(party.getHostX(), party.getHostY(), party.getHostUpdatedAt(), x, y, now)) {
@@ -186,6 +189,31 @@ public class DuoService {
         DuoParty party = requireParty(partyId);
         if (party == null || signal == null) return;
         messaging.convertAndSend("/topic/duo/" + partyId + "/signal", signal);
+    }
+
+    public void relayVoice(String room, DuoVoiceMessage voice) {
+        if (room == null || room.isBlank() || voice == null || voice.getFromUserId() == null) return;
+        String pcm = voice.getPcm();
+        if (pcm == null || pcm.isBlank() || pcm.length() > 16000) return;
+        if (!maySpeak(room, voice.getFromUserId())) return;
+        messaging.convertAndSend("/topic/voice/" + room, voice);
+    }
+
+    private boolean maySpeak(String room, Long userId) {
+        if (room.startsWith("jail_")) {
+            String[] parts = room.split("_");
+            if (parts.length != 3) return false;
+            try {
+                long a = Long.parseLong(parts[1]);
+                long b = Long.parseLong(parts[2]);
+                return userId.equals(a) || userId.equals(b);
+            } catch (NumberFormatException ex) {
+                return false;
+            }
+        }
+        DuoParty party = requireParty(room);
+        if (party == null) return false;
+        return userId.equals(party.getHostId()) || userId.equals(party.getGuestId());
     }
 
     public DuoPartyState markCaught(String partyId, Long userId) {
@@ -301,7 +329,9 @@ public class DuoService {
         double dt = Math.max(0.05, (now.toEpochMilli() - at.toEpochMilli()) / 1000.0);
         double dist = Math.hypot(x - px, y - py);
         double max = StealthConstants.PLAYER_WALK_SPEED * 2.1 * dt * StealthConstants.LIVE_POSITION_SPEED_SLACK;
-        return dist <= Math.max(max, 8.0 * Math.min(1.0, dt));
+        // Tile steps arrive in one packet (~1 tile). A tiny dt used to reject every real step.
+        double floor = dt >= 1.0 ? 8.0 : 2.5;
+        return dist <= Math.max(max, floor);
     }
 
     private static double clampX(double x) {

@@ -95,23 +95,15 @@ export default function RansomModal({
       userId: isPrisoner ? attackerId : defenderId,
       isHost: !isPrisoner,
       onStatus: () => {},
-      onRemoteStream: (stream) => {
-        if (!audioRef.current) {
-          audioRef.current = new Audio();
-          audioRef.current.autoplay = true;
-        }
-        audioRef.current.srcObject = stream;
-        audioRef.current.muted = voiceDeafened;
-        audioRef.current.play().catch(() => {});
-      },
     });
     callRef.current = call;
+    call.start().catch(() => {});
 
     return () => {
       call.stop();
       callRef.current = null;
     };
-  }, [voiceActive, isOpen, attackerId, defenderId, isPrisoner, voiceDeafened]);
+  }, [voiceActive, isOpen, attackerId, defenderId, isPrisoner]);
 
   const handleSendOffer = async () => {
     soundEngine.playClickSound();
@@ -267,7 +259,7 @@ export default function RansomModal({
                       onClick={() => {
                         const d = !voiceDeafened;
                         setVoiceDeafened(d);
-                        if (audioRef.current) audioRef.current.muted = d;
+                        callRef.current?.setDeafened(d);
                       }}
                     >
                       {voiceDeafened ? <VolumeX size={14} /> : <Volume2 size={14} />}

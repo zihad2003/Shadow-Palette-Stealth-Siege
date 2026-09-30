@@ -98,6 +98,7 @@ export default function BaseBuilderView() {
     buggyGear,
     buggyTrackT,
     visitSession,
+    reportVisitPose,
     visitRole,
     isVisitGuest,
     visitSpawnToken,
@@ -157,6 +158,7 @@ export default function BaseBuilderView() {
   const rebuildKeysRef = useRef(null);
   const sprintMeter = useRef(createSprintMeter());
   const pendingDismount = useRef(null);
+  const jailedIntruderRef = useRef(null);
   const [stamina, setStamina] = useState({ stamina: 1, sprinting: false, exhausted: false });
   const [compass, setCompass] = useState(null);
   const [parkedCar, setParkedCar] = useState(null);
@@ -217,9 +219,18 @@ export default function BaseBuilderView() {
       column: jailBuilding?.xPos ?? 15,
       row: jailBuilding?.yPos ?? 15,
     };
-    sceneApi.current?.setPartnerPose?.(jailPos.column, jailPos.row, {
+    const locked = {
+      ...prisoner,
+      column: jailPos.column,
+      row: jailPos.row,
       camoColor: prisoner.camoColor || 'RED',
-      characterModel: 1,
+      characterModel: prisoner.characterModel || 1,
+    };
+    jailedIntruderRef.current = locked;
+    sceneApi.current?.clearPartnerPose?.();
+    sceneApi.current?.setPrisonerPose?.(locked.column, locked.row, {
+      camoColor: locked.camoColor,
+      characterModel: locked.characterModel,
     });
     soundEngine.playGateSlamSound?.();
     showToast('Intruder locked in Base Jail! Intercom open for ransom negotiation.', 'success');
@@ -393,6 +404,39 @@ export default function BaseBuilderView() {
   }, [camoColor, characterModel]);
 
   useEffect(() => {
+    reportVisitPose?.(walker.column, walker.row);
+  }, [walker.column, walker.row, reportVisitPose]);
+
+  useEffect(() => {
+    if (liveRaidInvite?.raidId || jailedIntruderRef.current) return;
+    const other = !visitSession
+      ? null
+      : visitRole === 'guest'
+        ? {
+            x: visitSession.hostX,
+            y: visitSession.hostY,
+            seated: !!visitSession.hostSeated,
+            camo: visitSession.hostCamo,
+            model: visitSession.hostModel,
+          }
+        : {
+            x: visitSession.guestX,
+            y: visitSession.guestY,
+            seated: !!visitSession.guestSeated,
+            camo: visitSession.guestCamo,
+            model: visitSession.guestModel,
+          };
+    if (!other || other.seated || other.x == null || other.y == null) {
+      sceneApi.current?.clearPartnerPose?.();
+      return;
+    }
+    sceneApi.current?.setPartnerPose?.(other.x, other.y, {
+      camoColor: other.camo || 'BLUE',
+      characterModel: other.model || 1,
+    });
+  }, [visitSession, visitRole, liveRaidInvite?.raidId]);
+
+  useEffect(() => {
     if (guideStep === GUIDE_STEPS.WELCOME || guideStep === GUIDE_STEPS.REBUILD) return;
     if (carriedPart) return;
     pickUpPartAt(walker.column, walker.row);
@@ -404,6 +448,9 @@ export default function BaseBuilderView() {
     if (!raidId || !userId) {
       if (intruder) setIntruder(null);
       if (carriedIntruder) setCarriedIntruder(null);
+      sceneApi.current?.clearPartnerPose?.();
+      sceneApi.current?.clearPrisonerPose?.();
+      jailedIntruderRef.current = null;
       return undefined;
     }
     let cancelled = false;
@@ -419,29 +466,41 @@ export default function BaseBuilderView() {
         });
         await stompSubscribe(`/topic/live-raid/${raidId}/state`, (state) => {
           if (!state || cancelled) return;
-          if (state.attackerX != null && state.attackerY != null) {
+          if (jailedIntruderRef.current) {
+            const locked = jailedIntruderRef.current;
+            sceneApi.current?.clearPartnerPose?.();
+            sceneApi.current?.setPrisonerPose?.(locked.column, locked.row, {
+              camoColor: locked.camoColor,
+              characterModel: locked.characterModel,
+            });
+          } else if (state.attackerX != null && state.attackerY != null) {
             const col = state.attackerX;
             const row = state.attackerY;
             if (carriedIntruderRef.current) {
               return;
             }
+            const camo = state.attackerCamo || 'RED';
+            const model = state.attackerModel || 1;
             setIntruder({
               id: liveRaidInvite.attackerUserId,
               name: liveRaidInvite.attackerName,
-              camoColor: 'RED',
+              camoColor: camo,
+              characterModel: model,
               column: col,
               row: row,
             });
             sceneApi.current?.setPartnerPose?.(col, row, {
-              camoColor: 'RED',
-              characterModel: 1,
+              camoColor: camo,
+              characterModel: model,
             });
           }
           if (state.outcome === 'RELEASED') {
             setIntruder(null);
             setCarriedIntruder(null);
+            jailedIntruderRef.current = null;
             setShowJailRansomModal(false);
             sceneApi.current?.clearPartnerPose?.();
+            sceneApi.current?.clearPrisonerPose?.();
             setLiveRaidInvite(null);
           }
         });
@@ -462,7 +521,7 @@ export default function BaseBuilderView() {
       if (carriedIntruderRef.current) {
         sceneApi.current?.setPartnerPose?.(pos.column, pos.row, {
           camoColor: carriedIntruderRef.current.camoColor || 'RED',
-          characterModel: 1,
+          characterModel: carriedIntruderRef.current.characterModel || 1,
         });
       }
     }, 120);
@@ -1083,7 +1142,9 @@ export default function BaseBuilderView() {
             showToast('Intruder released and sent back to their base.', 'info');
           }
           setShowJailRansomModal(false);
+          jailedIntruderRef.current = null;
           sceneApi.current?.clearPartnerPose?.();
+          sceneApi.current?.clearPrisonerPose?.();
           const raidId = liveRaidInvite?.raidId;
           if (raidId) {
             stompPublish(`/app/live-raid/${raidId}/position`, {
@@ -1098,7 +1159,9 @@ export default function BaseBuilderView() {
         onDecline={() => {
           showToast('Negotiation ended. Intruder released and sent back to their base.', 'info');
           setShowJailRansomModal(false);
+          jailedIntruderRef.current = null;
           sceneApi.current?.clearPartnerPose?.();
+          sceneApi.current?.clearPrisonerPose?.();
           const raidId = liveRaidInvite?.raidId;
           if (raidId) {
             stompPublish(`/app/live-raid/${raidId}/position`, {

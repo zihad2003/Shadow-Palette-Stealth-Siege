@@ -471,16 +471,15 @@ export default function GameMap({
     let attackerMesh = null;
     // Face into the fortress (-Z) from the south gate by default
     const attackerSmooth = { x: 0, z: 0, yaw: Math.PI, primed: false, speed: 0, sprintMul: 1 };
-    /** Second human attacker (duo raid) — driven via setPartnerPose. */
-    let partnerMesh = null;
-    const partnerPose = {
-      column: null,
-      row: null,
-      camoColor: 'RED',
-      characterModel: 1,
-      visible: false,
-    };
-    const partnerSmooth = { x: 0, z: 0, yaw: Math.PI, primed: false, speed: 0 };
+    /** Walking partner and jailed prisoner are separate meshes so one cannot erase the other. */
+    const makeActor = (tag) => ({
+      tag,
+      mesh: null,
+      pose: { column: null, row: null, camoColor: 'RED', characterModel: 1, visible: false },
+      smooth: { x: 0, z: 0, yaw: Math.PI, primed: false, speed: 0 },
+    });
+    const partner = makeActor('partner');
+    const prisoner = makeActor('prisoner');
     const chaseLook = new THREE.Vector3();
     const chaseDesired = new THREE.Vector3();
     const chaseCurrent = new THREE.Vector3();
@@ -781,44 +780,46 @@ export default function GameMap({
       attackerMesh.rotation.y = attackerSmooth.yaw;
     };
 
-    const syncPartner = (dt = 0.016) => {
-      if (!partnerPose.visible || partnerPose.column == null || partnerPose.row == null) {
-        if (partnerMesh) partnerMesh.visible = false;
-        partnerSmooth.primed = false;
+    const syncActor = (actor, dt = 0.016) => {
+      const pose = actor.pose;
+      const smooth = actor.smooth;
+      if (!pose.visible || pose.column == null || pose.row == null) {
+        if (actor.mesh) actor.mesh.visible = false;
+        smooth.primed = false;
         return;
       }
-      const charSig = `${partnerPose.characterModel || 1}|${partnerPose.camoColor || 'RED'}|partner|${CHAR_MESH_REV}`;
-      if (partnerMesh && partnerMesh.userData.charSig !== charSig) {
-        scene.remove(partnerMesh);
-        disposeObject(partnerMesh);
-        partnerMesh = null;
+      const charSig = `${pose.characterModel || 1}|${pose.camoColor || 'RED'}|${actor.tag}|${CHAR_MESH_REV}`;
+      if (actor.mesh && actor.mesh.userData.charSig !== charSig) {
+        scene.remove(actor.mesh);
+        disposeObject(actor.mesh);
+        actor.mesh = null;
       }
-      if (!partnerMesh) {
-        partnerMesh = createAttacker({
-          camoColor: partnerPose.camoColor || 'RED',
-          characterModel: partnerPose.characterModel || 1,
+      if (!actor.mesh) {
+        actor.mesh = createAttacker({
+          camoColor: pose.camoColor || 'RED',
+          characterModel: pose.characterModel || 1,
           scale: cameraModeRef.current === 'chase' ? 0.72 : 0.4,
         });
-        partnerMesh.userData.isPartner = true;
-        partnerMesh.userData.charSig = charSig;
-        partnerMesh.traverse((n) => {
+        actor.mesh.userData.isPartner = true;
+        actor.mesh.userData.charSig = charSig;
+        actor.mesh.traverse((n) => {
           n.userData.isPartner = true;
           n.userData.keepColor = true;
         });
-        scene.add(partnerMesh);
+        scene.add(actor.mesh);
       }
-      partnerMesh.visible = true;
-      const col = THREE.MathUtils.clamp(partnerPose.column, 0, MAP_COLS - 1);
-      const row = THREE.MathUtils.clamp(partnerPose.row, 0, MAP_ROWS - 1);
+      actor.mesh.visible = true;
+      const col = THREE.MathUtils.clamp(pose.column, 0, MAP_COLS - 1);
+      const row = THREE.MathUtils.clamp(pose.row, 0, MAP_ROWS - 1);
       const p = tileWorldPos(col, row);
-      if (!partnerSmooth.primed) {
-        partnerSmooth.x = p.x;
-        partnerSmooth.z = p.z;
-        partnerSmooth.yaw = Math.PI;
-        partnerSmooth.primed = true;
+      if (!smooth.primed) {
+        smooth.x = p.x;
+        smooth.z = p.z;
+        smooth.yaw = Math.PI;
+        smooth.primed = true;
       }
-      const dx = p.x - partnerSmooth.x;
-      const dz = p.z - partnerSmooth.z;
+      const dx = p.x - smooth.x;
+      const dz = p.z - smooth.z;
       const dist = Math.hypot(dx, dz);
       const walkSpeed = TILE_PITCH / WALK_TILE_SECONDS;
       const safeDt = Math.max(dt, 0.001);
@@ -827,24 +828,24 @@ export default function GameMap({
         const maxStep = walkSpeed * 1.2 * safeDt;
         const settle = dist * (1 - Math.exp(-10 * safeDt));
         const step = Math.min(dist, Math.max(settle * 0.4, Math.min(maxStep, dist)));
-        partnerSmooth.x += (dx / dist) * step;
-        partnerSmooth.z += (dz / dist) * step;
+        smooth.x += (dx / dist) * step;
+        smooth.z += (dz / dist) * step;
         moved = step;
       } else {
-        partnerSmooth.x = p.x;
-        partnerSmooth.z = p.z;
+        smooth.x = p.x;
+        smooth.z = p.z;
       }
       const instSpeed = moved / safeDt / walkSpeed;
-      partnerSmooth.speed += (instSpeed - partnerSmooth.speed) * (1 - Math.exp(-8 * dt));
+      smooth.speed += (instSpeed - smooth.speed) * (1 - Math.exp(-8 * dt));
       if (dist > 0.06) {
         const targetYaw = Math.atan2(dx, dz);
-        let yawDiff = targetYaw - partnerSmooth.yaw;
+        let yawDiff = targetYaw - smooth.yaw;
         while (yawDiff > Math.PI) yawDiff -= Math.PI * 2;
         while (yawDiff < -Math.PI) yawDiff += Math.PI * 2;
-        partnerSmooth.yaw += yawDiff * (1 - Math.exp(-9 * dt));
+        smooth.yaw += yawDiff * (1 - Math.exp(-9 * dt));
       }
-      partnerMesh.position.set(partnerSmooth.x, TILE_HEIGHT, partnerSmooth.z);
-      partnerMesh.rotation.y = partnerSmooth.yaw;
+      actor.mesh.position.set(smooth.x, TILE_HEIGHT, smooth.z);
+      actor.mesh.rotation.y = smooth.yaw;
     };
 
     syncVehicle(0.016, 0);
@@ -1371,21 +1372,37 @@ export default function GameMap({
         clearLivePatrol: () => {
           patrol?.clearLiveControl?.();
         },
-        /** Duo partner mesh — column/row in tile space; pass null to hide. */
+        /** Duo partner or live raider — column/row in tile space; pass null to hide. */
         setPartnerPose: (column, row, opts = {}) => {
           if (column == null || row == null) {
-            partnerPose.visible = false;
+            partner.pose.visible = false;
             return;
           }
-          partnerPose.column = Number(column);
-          partnerPose.row = Number(row);
-          if (opts.camoColor) partnerPose.camoColor = opts.camoColor;
-          if (opts.characterModel != null) partnerPose.characterModel = opts.characterModel;
-          partnerPose.visible = true;
+          partner.pose.column = Number(column);
+          partner.pose.row = Number(row);
+          if (opts.camoColor) partner.pose.camoColor = opts.camoColor;
+          if (opts.characterModel != null) partner.pose.characterModel = opts.characterModel;
+          partner.pose.visible = true;
         },
         clearPartnerPose: () => {
-          partnerPose.visible = false;
-          partnerSmooth.primed = false;
+          partner.pose.visible = false;
+          partner.smooth.primed = false;
+        },
+        /** Jailed raider. Separate from the walking partner so neither overwrites the other. */
+        setPrisonerPose: (column, row, opts = {}) => {
+          if (column == null || row == null) {
+            prisoner.pose.visible = false;
+            return;
+          }
+          prisoner.pose.column = Number(column);
+          prisoner.pose.row = Number(row);
+          if (opts.camoColor) prisoner.pose.camoColor = opts.camoColor;
+          if (opts.characterModel != null) prisoner.pose.characterModel = opts.characterModel;
+          prisoner.pose.visible = true;
+        },
+        clearPrisonerPose: () => {
+          prisoner.pose.visible = false;
+          prisoner.smooth.primed = false;
         },
       };
     }
@@ -1702,7 +1719,8 @@ export default function GameMap({
       selectRing.rotation.z = elapsed * 0.6;
       syncVehicle(dt, elapsed);
       syncAttacker(dt);
-      syncPartner(dt);
+      syncActor(partner, dt);
+      syncActor(prisoner, dt);
       if (attackerMesh) {
         const vehNow = vehicleRef.current || {};
         const picking = !!(vehNow.pickupAnim && vehNow.pickupAnim.t < 1);
@@ -1736,12 +1754,14 @@ export default function GameMap({
         if (rideOtherMesh && rideOtherMesh.visible) {
           tickCharacter(rideOtherMesh, elapsed, { dt, speed: 0, seated: true });
         }
-        if (partnerMesh && partnerMesh.visible) {
-          tickCharacter(partnerMesh, elapsed, {
-            dt,
-            speed: partnerSmooth.speed || 0,
-            seated: false,
-          });
+        for (const actor of [partner, prisoner]) {
+          if (actor.mesh && actor.mesh.visible) {
+            tickCharacter(actor.mesh, elapsed, {
+              dt,
+              speed: actor.smooth.speed || 0,
+              seated: false,
+            });
+          }
         }
 
         const anim = vehNow.pickupAnim;

@@ -131,6 +131,8 @@ export default function StealthRaidView() {
   const [stash, setStash] = useState(() => initRaidStash(raidBuildings, raidLoot || targetMeta));
   const stashRef = useRef(stash);
   stashRef.current = stash;
+  const lootedHousesRef = useRef(new Set());
+  const creditHouseLootRef = useRef(() => false);
   const [stolen, setStolen] = useState({ coins: 0, ink: 0 });
   const stolenRef = useRef(stolen);
   stolenRef.current = stolen;
@@ -198,6 +200,8 @@ export default function StealthRaidView() {
   });
   const attackerRef = useRef(attacker);
   attackerRef.current = attacker;
+  attackerRef.current.camoColor = lockedCamo;
+  attackerRef.current.characterModel = characterModel || 1;
 
   const [hud, setHud] = useState({
     meter: 0,
@@ -586,6 +590,7 @@ export default function StealthRaidView() {
             : { column: 10, row: 10 };
           setAttacker((prev) => ({ ...prev, ...jailPos }));
           attackerRef.current = { ...attackerRef.current, ...jailPos };
+          if (duoPartyId) duoMarkCaught(duoPartyId, userId).catch(() => { });
           showToastRef.current('Captured! Locked in Base Jail — Negotiate ransom or voice intercom', 'warning');
           soundEngine.playWallHitSound?.();
         } else {
@@ -765,6 +770,8 @@ export default function StealthRaidView() {
             role: 'ATTACKER',
             x: pos.column,
             y: pos.row,
+            model: pos.characterModel || null,
+            camo: pos.camoColor || null,
           }).catch(() => { });
         }, 120);
       } catch {
@@ -810,6 +817,7 @@ export default function StealthRaidView() {
       cancelled = true;
       window.clearInterval(pubTimer);
       sceneApi.current?.clearPartnerPose?.();
+      sceneApi.current?.clearPrisonerPose?.();
     };
   }, [duoPartyId, userId]);
 
@@ -819,11 +827,17 @@ export default function StealthRaidView() {
     const iAmHost = Number(duoParty.hostId) === Number(userId);
     const px = iAmHost ? duoParty.guestX : duoParty.hostX;
     const py = iAmHost ? duoParty.guestY : duoParty.hostY;
-    if (px != null && py != null) {
-      sceneApi.current?.setPartnerPose?.(px, py, {
-        camoColor: iAmHost ? 'RED' : 'GREEN',
-        characterModel: 1,
-      });
+    const partnerCaught = iAmHost ? !!duoParty.guestCaught : !!duoParty.hostCaught;
+    const camoColor = iAmHost ? (duoParty.guestCamo || 'GREEN') : (duoParty.hostCamo || 'PURPLE');
+    const characterModel = iAmHost ? (duoParty.guestModel || 1) : (duoParty.hostModel || 1);
+    if (partnerCaught) {
+      sceneApi.current?.clearPartnerPose?.();
+      if (px != null && py != null) {
+        sceneApi.current?.setPrisonerPose?.(px, py, { camoColor, characterModel });
+      }
+    } else if (px != null && py != null) {
+      sceneApi.current?.clearPrisonerPose?.();
+      sceneApi.current?.setPartnerPose?.(px, py, { camoColor, characterModel });
     }
     if (duoParty.alarmLatched && !chaseLatchedRef.current) {
       duoAlarmRef.current = true;
@@ -855,6 +869,12 @@ export default function StealthRaidView() {
     duoParty?.guestX,
     duoParty?.guestY,
     duoParty?.alarmLatched,
+    duoParty?.hostCaught,
+    duoParty?.guestCaught,
+    duoParty?.guestCamo,
+    duoParty?.hostCamo,
+    duoParty?.guestModel,
+    duoParty?.hostModel,
     duoParty?.status,
     duoParty?.hostId,
     userId,
@@ -876,29 +896,48 @@ export default function StealthRaidView() {
   useEffect(() => {
     if (!duoPartyId) return undefined;
     let cancelled = false;
+    const onSignal = (msg) => {
+      if (!msg || Number(msg.fromUserId) === Number(userId)) return;
+      if (msg.type === 'ROBOT_HIT') {
+        const secs = Number(msg.payload?.stunSeconds) || 12;
+        soundEngine.playWallHitSound();
+        sceneApi.current?.stunPatrolRobot?.(secs);
+        robotContext.current?.stun?.(secs);
+        robotStunnedUntilRef.current = Date.now() + secs * 1000;
+        setRobotStunCountdown(secs);
+        showToastRef.current?.(`Teammate disabled the robot for ${secs}s`, 'success');
+      }
+      if (msg.type === 'LOOT') {
+        const kind = msg.payload?.kind === 'ink' ? 'ink' : 'coin';
+        const houseId = msg.payload?.houseId;
+        const share = Math.max(0, Math.floor(Number(msg.payload?.partnerShare) || 0));
+        creditHouseLootRef.current?.(houseId, kind, share, 'partner');
+      }
+      if (msg.type === 'WALL') {
+        const column = Number(msg.payload?.column);
+        const row = Number(msg.payload?.row);
+        const hits = Number(msg.payload?.hits) || 1;
+        const final = !!msg.payload?.final;
+        if (!Number.isFinite(column) || !Number.isFinite(row)) return;
+        wallHitsRef.current = Math.max(wallHitsRef.current, hits);
+        sceneApi.current?.playWallBreak?.(column, row, { hits, final, gate: isAtGate(column, row) });
+        soundEngine.playWallBreakSound(final);
+        setHud((prev) => ({ ...prev, wallHits: wallHitsRef.current, breakFlash: true }));
+        if (final) showToastRef.current?.('Partner opened a wall', 'success');
+      }
+    };
     (async () => {
       try {
         await ensureStompConnected();
         if (cancelled) return;
-        await stompSubscribe(`/topic/duo/${duoPartyId}/signal`, (msg) => {
-          if (!msg || Number(msg.fromUserId) === Number(userId)) return;
-          if (msg.type === 'ROBOT_HIT') {
-            const secs = Number(msg.payload?.stunSeconds) || 12;
-            soundEngine.playWallHitSound();
-            sceneApi.current?.stunPatrolRobot?.(secs);
-            robotContext.current?.stun?.(secs);
-            robotStunnedUntilRef.current = Date.now() + (secs * 1000);
-            setRobotStunCountdown(secs);
-            showToastRef.current?.(`⚡ Teammate disabled the robot for ${secs}s!`, 'success');
-          }
-        });
+        await stompSubscribe(`/topic/duo/${duoPartyId}/signal`, onSignal);
       } catch {
         /* offline */
       }
     })();
     return () => {
       cancelled = true;
-      stompUnsubscribe(`/topic/duo/${duoPartyId}/signal`);
+      stompUnsubscribe(`/topic/duo/${duoPartyId}/signal`, onSignal);
     };
   }, [duoPartyId, userId]);
 
@@ -974,41 +1013,58 @@ export default function StealthRaidView() {
     setLootFloats((prev) => [...prev, { id, kind, amount }]);
   };
 
+  creditHouseLootRef.current = (houseId, kind, credit, source) => {
+    if (houseId == null || hudRef.current.outcome) return false;
+    const key = `${kind}:${houseId}`;
+    if (lootedHousesRef.current.has(key)) return false;
+    lootedHousesRef.current.add(key);
+    const gain = Math.max(0, Math.floor(Number(credit) || 0));
+    if (kind === 'ink') {
+      setStash((prev) => ({ ...prev, ink: { ...prev.ink, [houseId]: 0 } }));
+      if (gain > 0) {
+        setStolen((prev) => ({ ...prev, ink: prev.ink + gain }));
+        setInkEnergy((v) => v + gain);
+        spawnLootFloat('ink', gain);
+      }
+    } else {
+      setStash((prev) => ({ ...prev, coins: { ...prev.coins, [houseId]: 0 } }));
+      if (gain > 0) {
+        setStolen((prev) => ({ ...prev, coins: prev.coins + gain }));
+        setCoins((v) => v + gain);
+        spawnLootFloat('coin', gain);
+      }
+    }
+    sceneApi.current?.pulseBuilding?.(houseId);
+    soundEngine.playSuccessSound();
+    const label = kind === 'ink' ? 'ink' : 'coins';
+    showToast(source === 'partner' ? `Partner looted · you got ${gain} ${label}` : `Stole ${gain} ${label}`, 'success');
+    return true;
+  };
+
   /** Walk up to a coin/ink house and steal with a float animation. */
   const stealFromHouse = (house) => {
     if (!house || hudRef.current.outcome) return false;
     const id = house.id;
-    if (house.buildingType === 'COIN_GENERATOR') {
-      const n = Math.floor(Number(stashRef.current.coins[id]) || 0);
-      if (n <= 0) {
-        showToast('Empty vault', 'info');
-        return false;
-      }
-      setStash((prev) => ({ ...prev, coins: { ...prev.coins, [id]: 0 } }));
-      setStolen((prev) => ({ ...prev, coins: prev.coins + n }));
-      setCoins((v) => v + n);
-      spawnLootFloat('coin', n);
-      sceneApi.current?.pulseBuilding?.(id);
-      soundEngine.playSuccessSound();
-      showToast(`Stole ${n} coins`, 'success');
-      return true;
+    const isInk = house.buildingType === 'INK_HOUSE';
+    const isCoin = house.buildingType === 'COIN_GENERATOR';
+    if (!isInk && !isCoin) return false;
+    const kind = isInk ? 'ink' : 'coin';
+    const n = Math.floor(Number(isInk ? stashRef.current.ink[id] : stashRef.current.coins[id]) || 0);
+    if (n <= 0) {
+      showToast(isInk ? 'Empty ink' : 'Empty vault', 'info');
+      return false;
     }
-    if (house.buildingType === 'INK_HOUSE') {
-      const n = Math.floor(Number(stashRef.current.ink[id]) || 0);
-      if (n <= 0) {
-        showToast('Empty ink', 'info');
-        return false;
-      }
-      setStash((prev) => ({ ...prev, ink: { ...prev.ink, [id]: 0 } }));
-      setStolen((prev) => ({ ...prev, ink: prev.ink + n }));
-      setInkEnergy((v) => v + n);
-      spawnLootFloat('ink', n);
-      sceneApi.current?.pulseBuilding?.(id);
-      soundEngine.playSuccessSound();
-      showToast(`Stole ${n} ink`, 'success');
-      return true;
+    const mine = duoPartyId ? Math.ceil(n / 2) : n;
+    const partnerShare = duoPartyId ? n - mine : 0;
+    const ok = creditHouseLootRef.current(id, kind, mine, 'self');
+    if (ok && duoPartyId) {
+      stompPublish(`/app/duo/${duoPartyId}/signal`, {
+        fromUserId: userId,
+        type: 'LOOT',
+        payload: { houseId: id, kind, amount: n, partnerShare },
+      }).catch(() => {});
     }
-    return false;
+    return ok;
   };
 
   /** Start channeling loot from a house with 3D ground spinning animation. */
@@ -1180,6 +1236,13 @@ export default function StealthRaidView() {
 
     sceneApi.current?.playWallBreak?.(column, row, { hits, final, gate: isAtGate(column, row) });
     soundEngine.playWallBreakSound(final);
+    if (duoPartyId) {
+      stompPublish(`/app/duo/${duoPartyId}/signal`, {
+        fromUserId: userId,
+        type: 'WALL',
+        payload: { column, row, hits, final },
+      }).catch(() => {});
+    }
     if (final) soundEngine.playSuccessSound();
 
     window.setTimeout(() => {

@@ -20,6 +20,10 @@ public class RaidCompleteRequest {
 
     private int durationSeconds;
     private String raidId;
+    /** Shared duo raid id. Each attacker still sends their own raidId. */
+    private String potId;
+    /** 2 during a duo raid so the defender is charged one shared pot, not twice. */
+    private Integer partySize;
     private List<WallBreakEventDto> wallBreakEvents;
     private List<SessionLogTickDto> sessionLog;
     private ClientReportedOutcomeDto clientReportedOutcome;
