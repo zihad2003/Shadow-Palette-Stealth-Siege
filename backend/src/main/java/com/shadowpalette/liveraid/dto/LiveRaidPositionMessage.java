@@ -14,4 +14,6 @@ public class LiveRaidPositionMessage {
     private String role;
     private double x;
     private double y;
+    private String status;
+    private String outcome;
 }

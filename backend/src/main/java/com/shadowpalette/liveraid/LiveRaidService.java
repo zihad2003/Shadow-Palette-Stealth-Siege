@@ -181,9 +181,20 @@ public class LiveRaidService {
             return toState(session, "BAD_ROLE");
         }
 
+        if (msg.getStatus() != null) {
+            session.setStatus(msg.getStatus());
+        }
+        if (msg.getOutcome() != null) {
+            session.setOutcome(msg.getOutcome());
+            if ("CAUGHT".equals(msg.getOutcome()) || "CAUGHT_IN_JAIL".equals(msg.getOutcome()) || "RELEASED".equals(msg.getOutcome())) {
+                session.setTerminal(true);
+            }
+        }
+
         if (session.isJoined()
                 && session.getAttackerX() != null
-                && session.getRobotX() != null) {
+                && session.getRobotX() != null
+                && !"CARRIED".equals(session.getStatus())) {
             double dist = Math.hypot(
                     session.getAttackerX() - session.getRobotX(),
                     session.getAttackerY() - session.getRobotY()
@@ -280,6 +291,7 @@ public class LiveRaidService {
                 .joined(session.isJoined())
                 .terminal(session.isTerminal())
                 .outcome(session.getOutcome())
+                .status(session.getStatus())
                 .attackerX(session.getAttackerX())
                 .attackerY(session.getAttackerY())
                 .robotX(session.getRobotX())

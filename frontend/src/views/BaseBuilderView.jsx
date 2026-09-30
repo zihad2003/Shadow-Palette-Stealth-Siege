@@ -27,6 +27,8 @@ import BuildQuestHud from '../components/hud/BuildQuestHud.jsx';
 import ActionPrompt from '../components/hud/ActionPrompt.jsx';
 import HouseStation from '../components/hud/HouseStation.jsx';
 import { GAME_COLORS, GAME_COLOR_KEYS } from '../colors.js';
+import { ensureStompConnected, stompPublish, stompSubscribe, stompUnsubscribe } from '../live/stompClient.js';
+import RansomModal from '../components/raid/RansomModal.jsx';
 
 const BASE_DECOR_SEED = 7;
 
@@ -108,11 +110,23 @@ export default function BaseBuilderView() {
     pickPaintColor,
     cyclePaintColor,
     upgradeHouse,
+    liveRaidInvite,
+    setLiveRaidInvite,
+    userId,
+    coins,
+    setCoins,
   } = useGameState();
   const sceneApi = useRef(null);
   const [selectedTile, setSelectedTile] = useState(null);
   const [makeupOpen, setMakeupOpen] = useState(false);
   const [cameraMode, setCameraMode] = useState('chase');
+  const [intruder, setIntruder] = useState(null);
+  const [carriedIntruder, setCarriedIntruder] = useState(null);
+  const [showJailRansomModal, setShowJailRansomModal] = useState(false);
+  const carriedIntruderRef = useRef(null);
+  carriedIntruderRef.current = carriedIntruder;
+  const intruderRef = useRef(null);
+  intruderRef.current = intruder;
   const [walker, setWalker] = useState({
     column: GATE_SPAWN_TILE.column,
     row: GATE_SPAWN_TILE.row,
@@ -197,6 +211,11 @@ export default function BaseBuilderView() {
     cyclePaintColor,
     upgradeHouse,
     showToast,
+    carriedIntruder,
+    canCatchIntruder,
+    isNearJailCell,
+    handleCatchIntruder,
+    handleDropIntruderInJail,
   };
   const sprintMeter = useRef(createSprintMeter());
   const pendingDismount = useRef(null);
@@ -227,6 +246,59 @@ export default function BaseBuilderView() {
   const nearInk = !makeupStation && nearRepaired?.buildingType === 'INK_HOUSE' ? nearRepaired : null;
   const nearCraft = !makeupStation && nearRepaired?.buildingType === 'CRAFT_HOUSE' ? nearRepaired : null;
   const nearJail = !makeupStation && (nearRepaired?.buildingType === 'JAIL' || nearRepaired?.buildingType === 'BASE_JAIL') ? nearRepaired : null;
+  const jailBuilding = buildings?.find((b) => b.buildingType === 'JAIL' || b.buildingType === 'BASE_JAIL');
+  const distToJail = jailBuilding ? Math.hypot(walker.column - (jailBuilding.xPos ?? 15), walker.row - (jailBuilding.yPos ?? 15)) : Infinity;
+  const isNearJailCell = distToJail <= 3.8 || !!nearJail;
+  const distToIntruder = intruder ? Math.hypot(walker.column - intruder.column, walker.row - intruder.row) : Infinity;
+  const canCatchIntruder = !carriedIntruder && distToIntruder <= 2.5;
+
+  const handleCatchIntruder = () => {
+    if (!intruder || carriedIntruder) return;
+    const target = intruder;
+    setCarriedIntruder(target);
+    setIntruder(null);
+    soundEngine.playWallHitSound?.();
+    showToast(`Caught ${target.name || 'Intruder'}! Picked up. Carry them to your Base Jail!`, 'warning');
+    const raidId = liveRaidInvite?.raidId;
+    if (raidId) {
+      stompPublish(`/app/live-raid/${raidId}/position`, {
+        userId,
+        role: 'DEFENDER',
+        x: walker.column,
+        y: walker.row,
+        status: 'CARRIED',
+      }).catch(() => {});
+    }
+  };
+
+  const handleDropIntruderInJail = () => {
+    if (!carriedIntruder) return;
+    const prisoner = carriedIntruder;
+    setCarriedIntruder(null);
+    const jailPos = {
+      column: jailBuilding?.xPos ?? 15,
+      row: jailBuilding?.yPos ?? 15,
+    };
+    sceneApi.current?.setPartnerPose?.(jailPos.column, jailPos.row, {
+      camoColor: prisoner.camoColor || 'RED',
+      characterModel: 1,
+    });
+    soundEngine.playGateSlamSound?.();
+    showToast('Intruder locked in Base Jail! Intercom open for ransom negotiation.', 'success');
+    setShowJailRansomModal(true);
+    const raidId = liveRaidInvite?.raidId;
+    if (raidId) {
+      stompPublish(`/app/live-raid/${raidId}/position`, {
+        userId,
+        role: 'DEFENDER',
+        x: jailPos.column,
+        y: jailPos.row,
+        outcome: 'CAUGHT_IN_JAIL',
+        status: 'JAIL_LOCKED',
+      }).catch(() => {});
+    }
+  };
+
   const nearPart = findPartNear(partSpawns, walker.column, walker.row);
   const peekHouse = nearRuin || stationHouse;
   const nearActive = !!(activeRuin && nearRuin && nearRuin.id === activeRuin.id);
@@ -353,6 +425,81 @@ export default function BaseBuilderView() {
     pickUpPartAt(walker.column, walker.row);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [walker.column, walker.row, guideStep, carriedPart]);
+
+  useEffect(() => {
+    const raidId = liveRaidInvite?.raidId;
+    if (!raidId || !userId) {
+      if (intruder) setIntruder(null);
+      if (carriedIntruder) setCarriedIntruder(null);
+      return undefined;
+    }
+    let cancelled = false;
+    let pubTimer = 0;
+
+    (async () => {
+      try {
+        await ensureStompConnected();
+        if (cancelled) return;
+        await stompPublish(`/app/live-raid/${raidId}/join`, {
+          userId,
+          role: 'DEFENDER',
+        });
+        await stompSubscribe(`/topic/live-raid/${raidId}/state`, (state) => {
+          if (!state || cancelled) return;
+          if (state.attackerX != null && state.attackerY != null) {
+            const col = state.attackerX;
+            const row = state.attackerY;
+            if (carriedIntruderRef.current) {
+              return;
+            }
+            setIntruder({
+              id: liveRaidInvite.attackerUserId,
+              name: liveRaidInvite.attackerName,
+              camoColor: 'RED',
+              column: col,
+              row: row,
+            });
+            sceneApi.current?.setPartnerPose?.(col, row, {
+              camoColor: 'RED',
+              characterModel: 1,
+            });
+          }
+          if (state.outcome === 'RELEASED') {
+            setIntruder(null);
+            setCarriedIntruder(null);
+            setShowJailRansomModal(false);
+            sceneApi.current?.clearPartnerPose?.();
+            setLiveRaidInvite(null);
+          }
+        });
+      } catch {
+        /* fallback */
+      }
+    })();
+
+    pubTimer = window.setInterval(() => {
+      const pos = walkerRef.current;
+      stompPublish(`/app/live-raid/${raidId}/position`, {
+        userId,
+        role: 'DEFENDER',
+        x: pos.column,
+        y: pos.row,
+        status: carriedIntruderRef.current ? 'CARRIED' : null,
+      }).catch(() => {});
+      if (carriedIntruderRef.current) {
+        sceneApi.current?.setPartnerPose?.(pos.column, pos.row, {
+          camoColor: carriedIntruderRef.current.camoColor || 'RED',
+          characterModel: 1,
+        });
+      }
+    }, 120);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(pubTimer);
+      stompUnsubscribe(`/topic/live-raid/${raidId}/state`);
+    };
+  }, [liveRaidInvite?.raidId, userId, setLiveRaidInvite]);
 
   useEffect(() => {
     if (!visitSpawnToken) return;
@@ -587,6 +734,18 @@ export default function BaseBuilderView() {
       if ((e.key === 'e' || e.key === 'E') && !e.repeat) {
         e.preventDefault();
         const rk = rebuildKeysRef.current;
+        if (rk.carriedIntruder) {
+          if (rk.isNearJailCell) {
+            rk.handleDropIntruderInJail?.();
+          } else {
+            rk.showToast?.('Carry the intruder to the Base Jail to lock them in!', 'info');
+          }
+          return;
+        }
+        if (rk.canCatchIntruder) {
+          rk.handleCatchIntruder?.();
+          return;
+        }
         const pos = walkerRef.current;
         if (rk.pickUpPartAt(pos.column, pos.row)) return;
         if (rk.carriedPart) {
@@ -755,6 +914,12 @@ export default function BaseBuilderView() {
     : buggySeated
       ? [visitRole === 'guest' ? 'F leave' : 'W drive · A/D steer · S back · F stand']
       : [
+          carriedIntruder
+            ? isNearJailCell
+              ? 'E Drop Intruder in Base Jail'
+              : 'Carrying Intruder · Carry to Base Jail'
+            : null,
+          canCatchIntruder ? `E Catch Intruder (${intruder?.name || 'Raider'})` : null,
           nearGarage && carriedPart
             ? mountProgress > 0.02
               ? `Hold F · ${Math.round(mountProgress * 100)}%`
@@ -929,6 +1094,50 @@ export default function BaseBuilderView() {
       )}
 
       {makeupOpen && <MakeupHousePanel onClose={() => setMakeupOpen(false)} />}
+      <RansomModal
+        isOpen={showJailRansomModal}
+        isPrisoner={false}
+        attackerId={carriedIntruder?.id || intruder?.id || liveRaidInvite?.attackerUserId || 20162}
+        defenderId={userId}
+        attackerName={carriedIntruder?.name || intruder?.name || liveRaidInvite?.attackerName || 'Intruder'}
+        defenderName="Base Owner (You)"
+        playerCoins={coins || 500}
+        onRelease={(ransomCoins) => {
+          if (ransomCoins > 0) {
+            setCoins((c) => c + ransomCoins);
+            showToast(`Ransom received: +${ransomCoins} coins! Intruder released and sent home.`, 'success');
+          } else {
+            showToast('Intruder released and sent back to their base.', 'info');
+          }
+          setShowJailRansomModal(false);
+          sceneApi.current?.clearPartnerPose?.();
+          const raidId = liveRaidInvite?.raidId;
+          if (raidId) {
+            stompPublish(`/app/live-raid/${raidId}/position`, {
+              userId,
+              role: 'DEFENDER',
+              outcome: 'RELEASED',
+              status: 'RELEASED',
+            }).catch(() => {});
+          }
+          setLiveRaidInvite(null);
+        }}
+        onDecline={() => {
+          showToast('Negotiation ended. Intruder released and sent back to their base.', 'info');
+          setShowJailRansomModal(false);
+          sceneApi.current?.clearPartnerPose?.();
+          const raidId = liveRaidInvite?.raidId;
+          if (raidId) {
+            stompPublish(`/app/live-raid/${raidId}/position`, {
+              userId,
+              role: 'DEFENDER',
+              outcome: 'RELEASED',
+              status: 'RELEASED',
+            }).catch(() => {});
+          }
+          setLiveRaidInvite(null);
+        }}
+      />
     </div>
   );
 }

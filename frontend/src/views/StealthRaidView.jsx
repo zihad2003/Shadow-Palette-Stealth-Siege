@@ -723,10 +723,18 @@ export default function StealthRaidView() {
             sceneApi.current?.clearLivePatrol?.();
             showToastRef.current('Defender left — patrol AI resumed', 'info');
           }
-          if (liveDefenderRef.current && state.robotX != null && state.robotY != null) {
+          if (liveDefenderRef.current && state.robotX != null && state.robotY != null && state.status !== 'CARRIED') {
             sceneApi.current?.setLivePatrolPosition?.(state.robotX, state.robotY);
           }
-          if (state.terminal && state.outcome === 'CAUGHT' && !imprisonedRef.current) {
+          if (state.status === 'CARRIED') {
+            imprisonedRef.current = true;
+            if (state.robotX != null && state.robotY != null) {
+              setAttacker({ column: state.robotX, row: state.robotY });
+              attackerRef.current = { column: state.robotX, row: state.robotY };
+            }
+            showToastRef.current?.('Caught by Base Owner! You have been picked up — being carried to the Base Jail...', 'warning');
+          }
+          if ((state.status === 'JAIL_LOCKED' || state.outcome === 'CAUGHT_IN_JAIL' || (state.terminal && state.outcome === 'CAUGHT')) && !imprisonedRef.current) {
             liveCaughtRef.current = true;
             imprisonedRef.current = true;
             setImprisoned(true);
@@ -737,8 +745,17 @@ export default function StealthRaidView() {
               : { column: 10, row: 10 };
             setAttacker((prev) => ({ ...prev, ...jailPos }));
             attackerRef.current = { ...attackerRef.current, ...jailPos };
-            showToastRef.current?.('Captured by Base Owner! Imprisoned in Base Jail — Voice Intercom & Ransom Active', 'warning');
-            soundEngine.playWallHitSound?.();
+            showToastRef.current?.('Dropped into Base Jail cell! Voice Intercom & Ransom Active.', 'warning');
+            soundEngine.playGateSlamSound?.();
+          }
+          if (state.outcome === 'RELEASED') {
+            setShowRansomModal(false);
+            imprisonedRef.current = false;
+            setImprisoned(false);
+            showToastRef.current?.('Base owner released you from jail! Returning to your base...', 'success');
+            window.setTimeout(() => {
+              transitionTo('BASE_BUILDER');
+            }, 1200);
           }
         });
         pubTimer = window.setInterval(() => {

@@ -19,4 +19,5 @@ public class LiveRaidStateMessage {
     private Double robotX;
     private Double robotY;
     private String message;
+    private String status;
 }
