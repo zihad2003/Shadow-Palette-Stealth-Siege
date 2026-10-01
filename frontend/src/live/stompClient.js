@@ -4,7 +4,7 @@
  */
 import { Client } from '@stomp/stompjs';
 import SockJS from 'sockjs-client';
-import { getJwtToken } from '../api.js';
+import { getApiBaseUrl, getJwtToken } from '../api.js';
 
 let client = null;
 let connectPromise = null;
@@ -43,7 +43,7 @@ function resubscribeAll() {
 
 function wsUrl() {
   if (typeof window === 'undefined') return 'http://127.0.0.1:8080/ws';
-  const apiBase = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '');
+  const apiBase = getApiBaseUrl();
   if (apiBase) {
     return `${apiBase}/ws`;
   }

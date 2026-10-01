@@ -139,6 +139,8 @@ export const COLOR_QUOTA_WARN = 0.3;
 export const GRID_SIZE = MAP_COLS * MAP_ROWS;
 export const PLACEABLE_BUILDINGS = ['CRAFT_HOUSE', 'INK_HOUSE', 'SLEEP_HOUSE', 'COIN_GENERATOR'];
 
+let sessionStartInflight = null;
+
 export function GameStateProvider({ children }) {
   // FSM: SPLASH | STORY | INTRO_* | MAIN_MENU | PAINT_TUTORIAL | BASE_BUILDER | RAID_FINDER | RAID_ENTER | STEALTH_RAID | LIVE_DEFENSE
   const initialView = new URLSearchParams(window.location.search).get('view');
@@ -200,12 +202,20 @@ export function GameStateProvider({ children }) {
 
   // On first mount, resolve or allocate player identity via the server.
   // One device is guaranteed one persistent account.
+  // Strict Mode mounts the effect twice; share one in-flight request so we do not create two accounts.
   useEffect(() => {
     let cancelled = false;
-    const resolve = async () => {
+    let timer = 0;
+    const resolve = async (attempt) => {
       try {
         const deviceToken = getOrCreateDeviceToken();
-        const res = await startSession(userId, undefined, undefined, deviceToken);
+        if (!sessionStartInflight) {
+          sessionStartInflight = startSession(userId, undefined, undefined, deviceToken).catch((err) => {
+            sessionStartInflight = null;
+            throw err;
+          });
+        }
+        const res = await sessionStartInflight;
         if (!cancelled && res?.success && res.userId) {
           setUserId(res.userId);
           if (res.username) setUsername(res.username);
@@ -249,17 +259,21 @@ export function GameStateProvider({ children }) {
               /* ignore parse error */
             }
           }
+          return;
         }
       } catch (err) {
-        // Backend offline / unreachable: log error, do not fabricate fake database ID
         if (!cancelled) {
           console.error('Failed to initialize backend session:', err);
         }
       }
+      if (!cancelled && attempt < 4) {
+        timer = window.setTimeout(() => resolve(attempt + 1), 5000);
+      }
     };
-    resolve();
+    resolve(0);
     return () => {
       cancelled = true;
+      window.clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -402,16 +416,20 @@ export function GameStateProvider({ children }) {
   const endVisitRef = useRef(async () => { });
   const snapshotRef = useRef({});
 
-  const fmtUid = (id) => String(id).padStart(5, '0');
-  const defaultUsername = `Player${fmtUid(userId)}`;
+  const fmtUid = (id) => {
+    const n = Number(id);
+    if (!Number.isFinite(n) || n <= 0) return '';
+    return String(n).padStart(5, '0');
+  };
+  const defaultUsername = fmtUid(userId) ? `Player${fmtUid(userId)}` : 'Player';
   const [username, setUsername] = useState(() => {
     try {
       const stored = window.localStorage.getItem('sp_username');
-      if (stored && stored.trim()) return stored.trim();
+      if (stored && stored.trim() && !/0null/i.test(stored)) return stored.trim();
     } catch {
       /* ignore */
     }
-    return defaultUsername;
+    return 'Player';
   });
 
   useEffect(() => {

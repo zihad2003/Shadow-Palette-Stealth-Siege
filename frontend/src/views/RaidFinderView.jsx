@@ -34,26 +34,34 @@ export default function RaidFinderView() {
   const [refreshing, setRefreshing] = useState(false);
   const [manualId, setManualId] = useState('');
   const [targets, setTargets] = useState([]);
+  const [targetError, setTargetError] = useState('');
 
   useEffect(() => {
+    if (!userId) return undefined;
     let cancelled = false;
     const loadTargets = async () => {
       try {
         const data = await fetchRaidTargets();
-        if (!cancelled && Array.isArray(data)) {
+        if (cancelled) return;
+        if (Array.isArray(data)) {
           setTargets(data);
+          setTargetError('');
+        } else {
+          setTargetError('Raid server returned an unexpected target list');
         }
       } catch (err) {
-        console.error('Failed to load targets', err);
+        if (!cancelled) {
+          setTargetError(err?.message || 'Could not load raid worlds');
+        }
       }
     };
     loadTargets();
-    const interval = window.setInterval(loadTargets, 5000);
+    const interval = window.setInterval(loadTargets, 8000);
     return () => {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
     const tick = () => setCooldownLeft(Math.max(0, Math.ceil((raidCooldownUntil - Date.now()) / 1000)));
@@ -81,7 +89,11 @@ export default function RaidFinderView() {
     };
   }, [duoOpen, duoParty?.partyId, duoParty?.status]);
 
-  const fmtUid = (id) => String(id).padStart(5, '0');
+  const fmtUid = (id) => {
+    const n = Number(id);
+    if (!Number.isFinite(n) || n <= 0) return null;
+    return String(n).padStart(5, '0');
+  };
 
   const inDuo = !!duoParty?.partyId && duoParty.status !== 'ENDED';
   const isDuoHost = inDuo && Number(duoParty.hostId) === Number(userId);
@@ -142,6 +154,7 @@ export default function RaidFinderView() {
     }
     for (const t of targets || []) {
       if (t.isBot || t.bot) continue;
+      if (!(t.online || t.isOnline)) continue;
       const id = Number(t.ownerId || t.id);
       if (!id || id === Number(userId)) continue;
       if (byId.has(id)) continue;
@@ -160,7 +173,10 @@ export default function RaidFinderView() {
     try {
       const list = await refreshOnlinePlayers?.();
       const targetList = await fetchRaidTargets();
-      if (Array.isArray(targetList)) setTargets(targetList);
+      if (Array.isArray(targetList)) {
+        setTargets(targetList);
+        setTargetError('');
+      }
       const others = (list || []).filter((p) => Number(p.userId) !== Number(userId));
       showToast(others.length ? `${others.length} players online` : 'Targets updated', 'info');
     } finally {
@@ -199,7 +215,7 @@ export default function RaidFinderView() {
               onClick={() => setDuoOpen((v) => !v)}
             >
               <Users size={14} />
-              {inDuo ? 'Duo ready' : players.length ? `Network (${players.length})` : 'Network'}
+              {inDuo ? 'Duo ready' : players.length ? `Co-op / Duo (${players.length})` : 'Co-op / Duo'}
             </ClayButton>
             <NavigationTabs />
             <TopResourceBar />
@@ -213,7 +229,7 @@ export default function RaidFinderView() {
             <div className="flex items-center justify-between gap-2 mb-1">
               <p className="text-[12px] font-semibold flex items-center gap-1.5">
                 <Users size={14} className="text-clay-accent" />
-                Live Player Comms
+                Co-op / Duo
               </p>
               <ClayButton
                 variant="ghost"
@@ -225,7 +241,10 @@ export default function RaidFinderView() {
               </ClayButton>
             </div>
             <p className="text-[10px] text-clay-muted mb-2">
-              Your device account: <span className="text-clay-text font-semibold">Player {fmtUid(userId)}</span>
+              Your device account:{' '}
+              <span className="text-clay-text font-semibold">
+                {fmtUid(userId) ? `Player ${fmtUid(userId)}` : 'Connecting…'}
+              </span>
             </p>
 
             {inDuo ? (
@@ -329,6 +348,13 @@ export default function RaidFinderView() {
           </p>
         </div>
         <div className="grid gap-5 sm:grid-cols-2 max-w-4xl mx-auto">
+          {!userId ? (
+            <p className="text-sm text-clay-muted col-span-full">Connecting to the raid server…</p>
+          ) : targetError && targets.length === 0 ? (
+            <p className="text-sm text-clay-muted col-span-full">{targetError}</p>
+          ) : targets.length === 0 ? (
+            <p className="text-sm text-clay-muted col-span-full">Looking for raid worlds…</p>
+          ) : null}
           {targets.map((t) => (
             <RaidTargetCard key={t.id || t.ownerId} target={t} onRaid={() => handleRaid(t)} />
           ))}

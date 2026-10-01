@@ -1,6 +1,21 @@
 // API Service Client for Backend Integration
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '');
+const ENV_API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '');
+const RENDER_API_BASE = 'https://shadow-palette-backend.onrender.com';
+
+function resolveApiBase() {
+  if (ENV_API_BASE) return ENV_API_BASE;
+  if (typeof window === 'undefined') return '';
+  const host = window.location.hostname;
+  if (host === 'localhost' || host === '127.0.0.1') return '';
+  return RENDER_API_BASE;
+}
+
+const API_BASE_URL = resolveApiBase();
+
+export function getApiBaseUrl() {
+  return API_BASE_URL;
+}
 
 /* ---- JWT token management ---- */
 let _jwtToken = null;
@@ -27,14 +42,14 @@ export function getJwtToken() {
 
 async function request(url, options = {}) {
   const fullUrl = url.startsWith('http') ? url : `${API_BASE_URL}${url}`;
-  const headers = { 'Content-Type': 'application/json', ...options.headers };
+  const { timeoutMs: timeoutOpt, signal: givenSignal, headers: optionHeaders, ...rest } = options;
+  const headers = { 'Content-Type': 'application/json', ...optionHeaders };
   if (_jwtToken) {
     headers['Authorization'] = `Bearer ${_jwtToken}`;
   }
-  // Add a timeout so the UI doesn't hang if backend proxy is unresponsive
-  const timeoutMs = options.timeoutMs ?? 15000;
-  const signal = options.signal || (typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(timeoutMs) : undefined);
-  const res = await fetch(fullUrl, { ...options, headers, signal }).catch((err) => {
+  const timeoutMs = timeoutOpt ?? 20000;
+  const signal = givenSignal || (typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(timeoutMs) : undefined);
+  const res = await fetch(fullUrl, { ...rest, headers, signal }).catch((err) => {
     // Convert fetch abort/network errors into an offline error immediately
     const errorMsg = 'Backend offline or unreachable';
     const fakeRes = new Error(errorMsg);
@@ -98,6 +113,7 @@ export async function startSession(userId, username, password, recoveryToken) {
   if (password) payload.password = password;
   return request('/api/session/start', {
     method: 'POST',
+    timeoutMs: 50000,
     body: JSON.stringify(payload),
   });
 }
@@ -166,7 +182,7 @@ export async function placeDefense(userId, plotId, defenseType, modelVariant) {
 }
 
 export async function fetchRaidTargets() {
-  return request('/api/raid/targets');
+  return request('/api/raid/targets', { timeoutMs: 30000 });
 }
 
 export async function fetchRaidTarget(userId) {
