@@ -997,17 +997,6 @@ export default function StealthRaidView() {
   const settled = useRef(false);
   const [leaveFx, setLeaveFx] = useState(null); // null | 'exit' | 'caught'
 
-  // Auto-finish raid when outcome is set (after results panel shows briefly)
-  // NOTE: do NOT set settled.current here — finishRaid() owns that guard.
-  useEffect(() => {
-    if (hud.outcome && !settled.current) {
-      const timer = window.setTimeout(() => {
-        finishRaid();
-      }, 4000);
-      return () => window.clearTimeout(timer);
-    }
-  }, [hud.outcome]);
-
   const spawnLootFloat = (kind, amount) => {
     const id = `${kind}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     setLootFloats((prev) => [...prev, { id, kind, amount }]);

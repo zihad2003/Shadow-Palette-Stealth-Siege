@@ -17,7 +17,7 @@ export default function SideRaidPanel({
   wallHits = 0,
   elapsedSeconds = 0,
 }) {
-  const { raidTargetId, userId, raidSession, showToast, setCoins, setInkEnergy } = useGameState();
+  const { raidTargetId, userId, raidSession, showToast, creditRaidLoot } = useGameState();
   const [submitted, setSubmitted] = useState(false);
 
   useEffect(() => {
@@ -52,10 +52,7 @@ export default function SideRaidPanel({
         if (cancelled) return;
         const vo = res?.validatedOutcome;
         if (vo && !res.duplicate) {
-          const coins = Math.max(0, Number(vo.coinsLooted) || 0);
-          const ink = Math.max(0, Number(vo.inkLooted) || 0);
-          if (coins) setCoins?.((current) => current + coins);
-          if (ink) setInkEnergy?.((current) => current + ink);
+          creditRaidLoot?.(vo.coinsLooted, vo.inkLooted);
         }
       } catch (e) {
         if (!cancelled) showToast('Saved locally', 'info');

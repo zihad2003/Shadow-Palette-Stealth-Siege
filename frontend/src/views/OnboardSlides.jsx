@@ -23,8 +23,8 @@ export function FortressIntroView() {
       title="Fortress"
       next="INTRO_COLOR"
       lines={[
-        { n: '01', title: 'Ruins on the plot.', body: 'Four houses wait smashed.' },
-        { n: '02', title: 'Walk close. Hold F.', body: 'Sleep, Craft, Ink, Coin.' },
+        { n: '01', title: 'Ruins on the plot.', body: 'Six houses wait smashed.' },
+        { n: '02', title: 'Walk close. Hold F.', body: 'Sleep, Craft, Ink, Coin, and the Jail.' },
         { n: '03', title: 'Press M to move.', body: 'Drop a repaired house on a new tile.' },
       ]}
     />

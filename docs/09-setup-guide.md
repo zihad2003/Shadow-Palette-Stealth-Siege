@@ -34,7 +34,8 @@ Open `http://127.0.0.1:3000`. Vite sends `/api` and `/ws` to port 8080. Leave `V
 
 ## What you should see
 
-- The raid radar shows a real `Player #####`, not `Player 0null`.
+- The title waits for a click. It does not skip itself.
+- The raid radar shows a real `Player #####`, not `Player 0null`. If it says the raid server is still waking up, wait and press **Try again**.
 - Five bot bases are listed. They are seeded as users 101–105.
 - Your account id is `20161` or higher. The browser stores `sp_userId`, `sp_jwt`, and `sp_device_token`.
 

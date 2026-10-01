@@ -99,7 +99,7 @@ The codebase strictly demonstrates core **Advanced Object-Oriented Programming (
 ### 3. Co-op / Duo drop
 - Open **Co-op / Duo** on the raid radar. Online humans can be invited. You can also invite by the player id shown on their screen.
 - Accepting opens a lobby with both characters. The host picks the target base. Both players press **READY**.
-- The server locks one `raidId`, one `defenderId`, and one `launchAt`. The lobby counts **DROP IN**. When that time hits, both clients enter the same base. One player's screen updates cannot cancel the other player's drop.
+- The server locks one `raidId`, one `defenderId`, and one `launchAt`. The lobby stays on screen and counts **DROP IN**. The host cannot pick a second base during that countdown. When the time hits, both clients enter the same base.
 - House loot in a duo is split. A wall break and the alarm are shared. A caught player is pinned. The partner can keep moving.
 
 ### 4. Voice
@@ -120,10 +120,10 @@ The codebase strictly demonstrates core **Advanced Object-Oriented Programming (
     - In Duo Raids, hitting the robot synchronizes over STOMP so both players benefit from the 12-second stun window.
     - After 12 seconds, the robot reboots, reactivates its search sensors, and resumes hunting raiders.
 - **Gate Lockdown & Wall Escape**: Searchlight exposure trips the siren, slamming the South Gate. Raiders must either channel silent extraction or perform 4 melee wall hits on emergency escape spots to break out.
+- The result card stays until **Return to base**. The server records the outcome the raid ended with (`SILENT`, `ESCAPED`, or `CAUGHT`) and adds that greed loot to the saved wallet. A caught player keeps only what they already stole from houses.
 
 ### 6. Live Defense Takeover
-- If the defender is online when an attack begins, they receive an on-screen siren prompt offering a 15-second window to join as the **Live Defender**.
-- When accepted, the defender manually steers the patrol robot over STOMP to actively hunt the attacker in real time.
+- A raid on another player does not pop a join prompt. The owner stays on their own base. The attacker still plays the stealth raid.
 
 ### 7. Admin Telemetry Dashboard
 - Access `/admin` to view live player metrics, database record counts, active raids, economy controls, and server health.

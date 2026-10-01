@@ -79,7 +79,7 @@ export default function RansomModal({
     };
   }, [isOpen, attackerId, defenderId, isPrisoner, onRelease, onDecline]);
 
-  // WebRTC Voice Intercom handler
+  // Jail voice uses the same server relay as duo speech.
   useEffect(() => {
     if (!voiceActive || !isOpen) {
       if (callRef.current) {
@@ -105,6 +105,22 @@ export default function RansomModal({
     };
   }, [voiceActive, isOpen, attackerId, defenderId, isPrisoner]);
 
+  const defenderIsBot = Number(defenderId) >= 101 && Number(defenderId) <= 105;
+
+  const negotiateWithBot = () => {
+    setStatusMessage(`Negotiating terms with ${defenderName}...`);
+    window.setTimeout(() => {
+      if (offerCoins >= 100) {
+        setStatusMessage('Base AI accepted the financial terms! Releasing...');
+        soundEngine.playSuccessSound();
+        window.setTimeout(() => onRelease?.(offerCoins), 1500);
+      } else {
+        setStatusMessage('Offer too low! Base AI demands at least 100 coins.');
+        soundEngine.playWallHitSound();
+      }
+    }, 1200);
+  };
+
   const handleSendOffer = async () => {
     soundEngine.playClickSound();
     try {
@@ -117,19 +133,9 @@ export default function RansomModal({
         voiceRequested: voiceActive,
       });
       setStatusMessage(`Offer of ${offerCoins} coins dispatched to ${defenderName}!`);
+      if (defenderIsBot) negotiateWithBot();
     } catch {
-      // In offline/bot raid mode: bot automatically negotiates
-      setStatusMessage(`Negotiating terms with ${defenderName}...`);
-      setTimeout(() => {
-        if (offerCoins >= 100) {
-          setStatusMessage('Base AI accepted the financial terms! Releasing...');
-          soundEngine.playSuccessSound();
-          setTimeout(() => onRelease?.(offerCoins), 1500);
-        } else {
-          setStatusMessage('Offer too low! Base AI demands at least 100 coins.');
-          soundEngine.playWallHitSound();
-        }
-      }, 1200);
+      negotiateWithBot();
     }
   };
 
@@ -227,7 +233,7 @@ export default function RansomModal({
               )}
             </div>
 
-            {/* Live WebRTC Voice Intercom button */}
+            {/* Jail voice */}
             <div className="flex items-center justify-between p-3 rounded-2xl bg-white/5 border border-white/10">
               <div className="flex items-center gap-2">
                 <div className={`p-2 rounded-xl ${voiceActive ? 'bg-clay-success/20 text-clay-success' : 'bg-white/10 text-clay-muted'}`}>

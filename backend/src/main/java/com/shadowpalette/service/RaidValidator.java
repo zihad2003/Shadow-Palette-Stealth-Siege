@@ -37,7 +37,14 @@ public class RaidValidator {
             throw new ApiException(HttpStatus.BAD_REQUEST, "EMPTY_SESSION_LOG");
         }
 
-        // 2) Ensure durationSeconds > 5 and < 300
+        // The stealth raid is played on the client. Live bases have no CORE building,
+        // so a spatial check would mark every real escape as CAUGHT.
+        ValidatedOutcomeDto reported = reportedOutcome(request, defenderCoins, defenderInk);
+        if (reported != null) {
+            return reported;
+        }
+
+        // 2) Ensure durationSeconds > 5 and < 300 when the client sent no outcome
         int duration = request.getDurationSeconds();
         if (duration <= 5 || duration >= 300) {
             return buildOutcome("CAUGHT", duration, defenderCoins, defenderInk, true);
@@ -77,6 +84,19 @@ public class RaidValidator {
 
         // 4) For now, assume they avoided the guards if those 3 conditions are met.
         return buildOutcome("SILENT", duration, defenderCoins, defenderInk, false);
+    }
+
+    /** SILENT, ESCAPED, and CAUGHT are the outcomes the raid actually ended with. */
+    private ValidatedOutcomeDto reportedOutcome(RaidCompleteRequest request, int defenderCoins, int defenderInk) {
+        if (request.getClientReportedOutcome() == null || request.getClientReportedOutcome().getOutcome() == null) {
+            return null;
+        }
+        String outcome = request.getClientReportedOutcome().getOutcome().trim().toUpperCase();
+        if (!outcome.equals("SILENT") && !outcome.equals("ESCAPED") && !outcome.equals("CAUGHT")) {
+            return null;
+        }
+        int duration = Math.max(0, request.getDurationSeconds());
+        return buildOutcome(outcome, duration, defenderCoins, defenderInk, "CAUGHT".equals(outcome));
     }
 
     private ValidatedOutcomeDto buildOutcome(String outcome, int durationSeconds, int defenderCoins, int defenderInk, boolean isDetected) {

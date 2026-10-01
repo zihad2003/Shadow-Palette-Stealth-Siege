@@ -15,7 +15,7 @@ Two browsers party up, talk through the game server, ready on one target, and dr
 2. Window A opens **Co-op / Duo** and invites B's player id. B accepts.
 3. Both should see the lobby and a voice bar at the top left. Each clicks **Click to talk** and allows the microphone. The dot turns green when that mic is live.
 4. The host picks a faction base. Both press **READY**.
-5. The lobby counts **DROP IN**. When it hits zero, both enter that same base. Neither player should remain on the lobby while the other is already inside.
+5. The lobby stays up and counts **DROP IN**. The host cannot switch bases during that countdown. When it hits zero, both enter that same base. Neither player should remain on the lobby while the other is already inside.
 6. Walk. Each client should see the partner move. One searchlight hit raises the alarm for both. One player caught stays pinned. The other can keep going. House loot is split.
 
 ## If someone is left outside

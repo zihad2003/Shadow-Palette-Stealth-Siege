@@ -13,7 +13,7 @@ import { createMakeupHouse } from './MakeupHouse.js';
 import { createWallBreakFX } from './WallBreakFX.js';
 import { createPaintSplash } from './PaintSplash.js';
 import { createHouseReadyCue } from './HouseReadyCue.js';
-import { buildGameHouse, buildRuinedHouse, placeHouseOnTile, createGamePatrolRobot, tickBuildingMotion, buildHouseBlueprint, tintBlueprint, createGuideMarker, tickGuideMarker, createRebuildFX, tickRebuildFX } from './buildStructure.js';
+import { buildGameHouse, buildRuinedHouse, placeHouseOnTile, createGamePatrolRobot, tickBuildingMotion, buildHouseBlueprint, tintBlueprint, createGuideMarker, alignGuideMarker, tintGuideMarker, tickGuideMarker, createRebuildFX, tickRebuildFX } from './buildStructure.js';
 import { createAttacker, tickCharacter, CHAR_MESH_REV } from '../character/buildCharacter.js';
 import { canEnterTile } from './occupancy.js';
 import {
@@ -76,6 +76,7 @@ export default function GameMap({
   partSpawns = [],
   buggyRide = null,
   carriedPart = null,
+  guideAim = null,
   pickupAnim = null,
   coinBanks = null,
   dayNight = true,
@@ -104,6 +105,8 @@ export default function GameMap({
   cameraModeRef.current = cameraMode;
   const activeRuinRef = useRef(activeRuinId);
   activeRuinRef.current = activeRuinId;
+  const guideAimRef = useRef(guideAim);
+  guideAimRef.current = guideAim;
   const rebuildRef = useRef({ id: rebuildingId, progress: rebuildProgress });
   rebuildRef.current = { id: rebuildingId, progress: rebuildProgress };
   const movingRef = useRef(movingBuildingId);
@@ -1209,10 +1212,20 @@ export default function GameMap({
         getGuideScreen: () => {
           if (!guideMarker.root.visible) return null;
           guideScr.copy(guideMarker.root.position);
-          guideScr.y += 1.62;
+          guideScr.y = TILE_HEIGHT + 0.55;
           guideScr.project(camera);
-          const onScreen = guideScr.z < 1 && Math.abs(guideScr.x) < 0.9 && Math.abs(guideScr.y) < 0.78;
-          return { nx: guideScr.x, ny: guideScr.y, onScreen };
+          const aspect = mount.clientWidth / Math.max(1, mount.clientHeight);
+          const onScreen = guideScr.z < 1 && Math.abs(guideScr.x) < 0.9 && Math.abs(guideScr.y) < 0.9;
+          const ud = guideMarker.root.userData;
+          return {
+            nx: guideScr.x,
+            ny: guideScr.y,
+            onScreen,
+            aspect,
+            label: ud.label || '',
+            kind: ud.kind || 'house',
+            color: ud.color || '#F4A261',
+          };
         },
         setSprint: (multiplier) => {
           attackerSmooth.sprintMul = Math.max(0.5, Number(multiplier) || 1);
@@ -1634,49 +1647,52 @@ export default function GameMap({
         tickRebuildFX(rebuildFX, dt, false, 0);
       }
 
-      const guideId = grayscale ? null : activeRuinRef.current;
-      const guideB = guideId ? (buildingsRef.current || []).find((x) => x.id === guideId) : null;
-      if (guideB) {
-        const w = guideB.footprintWidth || getGameFootprint(guideB.buildingType).w;
-        const hgt = guideB.footprintHeight || getGameFootprint(guideB.buildingType).h;
-        const p = tileWorldPos(guideB.xPos + (w - 1) / 2, guideB.yPos + (hgt - 1) / 2);
-        guideMarker.root.visible = true;
-        guideMarker.root.position.set(p.x, TILE_HEIGHT, p.z);
-        tickGuideMarker(guideMarker, elapsed, camera);
-        buildingsGroup.children.forEach((house) => {
-          if (!house.userData.ruined) return;
-          const on = house.userData.buildingId === guideId;
-          house.traverse((n) => {
-            if (n.material?.emissive) n.material.emissiveIntensity = on ? 0.1 + Math.sin(elapsed * 1.4) * 0.04 : 0;
-          });
-        });
-      } else {
-        const vehGuide = vehicleRef.current || {};
-        const atk = attackerRef.current;
-        const carryingId = vehGuide.carriedPart;
-        const spawns = Array.isArray(vehGuide.partSpawns) ? vehGuide.partSpawns : [];
-        let mark = null;
-        if (carryingId) {
-          mark = garageCenterWorld();
-        } else if (spawns.length && atk) {
-          let best = spawns[0];
-          let bestD = Infinity;
-          spawns.forEach((p) => {
-            const d = Math.hypot((p.column || 0) - atk.column, (p.row || 0) - atk.row);
-            if (d < bestD) {
-              bestD = d;
-              best = p;
-            }
-          });
-          mark = tileWorldPos(best.column, best.row);
-        }
-        if (mark) {
+      const aim = grayscale ? null : guideAimRef.current;
+      if (aim?.kind === 'house' && aim.buildingId != null) {
+        const guideB = (buildingsRef.current || []).find((x) => x.id === aim.buildingId);
+        const w = aim.footprintW || guideB?.footprintWidth || 3;
+        const hgt = aim.footprintH || guideB?.footprintHeight || 3;
+        const house = buildingsGroup.children.find((n) => n.userData.buildingId === aim.buildingId);
+        const p = house
+          ? { x: house.position.x, z: house.position.z }
+          : guideB
+            ? tileWorldPos(guideB.xPos + (w - 1) / 2, guideB.yPos + (hgt - 1) / 2)
+            : null;
+        if (p) {
           guideMarker.root.visible = true;
-          guideMarker.root.position.set(mark.x, TILE_HEIGHT, mark.z);
+          guideMarker.root.userData.label = aim.label || 'House';
+          guideMarker.root.userData.color = aim.color || '#F4A261';
+          guideMarker.root.position.set(p.x, TILE_HEIGHT, p.z);
+          alignGuideMarker(guideMarker, w, hgt, true);
+          tintGuideMarker(guideMarker, 'house', aim.color);
           tickGuideMarker(guideMarker, elapsed, camera);
         } else {
           guideMarker.root.visible = false;
         }
+        buildingsGroup.children.forEach((node) => {
+          if (!node.userData.ruined) return;
+          const on = node.userData.buildingId === aim.buildingId;
+          node.traverse((n) => {
+            if (n.material?.emissive) n.material.emissiveIntensity = on ? 0.1 + Math.sin(elapsed * 1.4) * 0.04 : 0;
+          });
+        });
+      } else if (aim && (aim.kind === 'part' || aim.kind === 'garage')) {
+        buildingsGroup.children.forEach((node) => {
+          if (!node.userData.ruined) return;
+          node.traverse((n) => {
+            if (n.material?.emissive) n.material.emissiveIntensity = 0;
+          });
+        });
+        const p = aim.kind === 'garage' ? garageCenterWorld() : tileWorldPos(aim.column, aim.row);
+        guideMarker.root.visible = true;
+        guideMarker.root.userData.label = aim.label || (aim.kind === 'garage' ? 'Garage' : 'Cart part');
+        guideMarker.root.userData.color = aim.color || (aim.kind === 'garage' ? '#72B83F' : '#8ECAE6');
+        guideMarker.root.position.set(p.x, TILE_HEIGHT, p.z);
+        alignGuideMarker(guideMarker, aim.footprintW || 1, aim.footprintH || 1, false);
+        tintGuideMarker(guideMarker, aim.kind, aim.color);
+        tickGuideMarker(guideMarker, elapsed, camera);
+      } else {
+        guideMarker.root.visible = false;
       }
       if (searchlight) {
         const grownBase = searchlight.rangeTiles * beamRangeRatio(raidElapsedSeconds);

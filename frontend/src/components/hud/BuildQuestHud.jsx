@@ -5,31 +5,69 @@ import { GUIDE_STEPS } from '../../state/GameStateContext.jsx';
 import ClayPanel from '../ui/ClayPanel.jsx';
 import ClayButton from '../ui/ClayButton.jsx';
 
-function CompassArrow({ compass }) {
-  if (!compass || compass.onScreen) return null;
-  const padX = 0.78;
-  const padY = 0.58;
-  let x = compass.nx;
-  let y = compass.ny;
-  const scale = Math.max(Math.abs(x) / padX, Math.abs(y) / padY, 1);
-  x /= scale;
-  y /= scale;
-  const deg = (Math.atan2(compass.nx, -compass.ny) * 180) / Math.PI;
+function AimTag({ compass, color }) {
+  const kind = compass.kind === 'garage' ? 'Garage' : compass.kind === 'part' ? 'Cart part' : 'Rebuild';
   return (
     <div
-      className="absolute z-40 pointer-events-none"
+      className="px-2 py-1 rounded-xl bg-[#0d1b1e]/92 border text-[10px] font-heading font-semibold text-clay-text whitespace-nowrap shadow-lg"
+      style={{ borderColor: color }}
+    >
+      <span className="block text-[8px] uppercase tracking-wider" style={{ color }}>{kind}</span>
+      {compass.label || kind}
+    </div>
+  );
+}
+
+function CompassArrow({ compass, clearLeft }) {
+  if (!compass) return null;
+  const aspect = compass.aspect > 0 ? compass.aspect : 1;
+  const nx = Number(compass.nx) || 0;
+  const ny = Number(compass.ny) || 0;
+  const color = compass.color || '#F4A261';
+  const rawX = 50 + nx * 50;
+  const rawY = 50 - ny * 50;
+  const minX = clearLeft ? 38 : 8;
+  const maxX = 91;
+  const minY = 20;
+  const maxY = 76;
+  const blocked = rawX < minX || rawX > maxX || rawY < minY || rawY > maxY;
+  if (compass.onScreen && !blocked) {
+    return (
+      <div
+        className="absolute z-30 pointer-events-none flex flex-col items-center"
+        style={{
+          left: `${rawX}%`,
+          top: `${rawY}%`,
+          transform: 'translate(-50%, -100%)',
+        }}
+      >
+        <AimTag compass={compass} color={color} />
+        <svg viewBox="0 0 24 16" className="w-5 h-3.5 -mt-px" style={{ color }}>
+          <path fill="currentColor" d="M12 16 L3 4 H21 Z" />
+        </svg>
+      </div>
+    );
+  }
+  const x = Math.min(maxX, Math.max(minX, rawX));
+  const y = Math.min(maxY, Math.max(minY, rawY));
+  const besidePanel = clearLeft && rawX < minX;
+  const deg = (Math.atan2((rawX - x) * aspect, y - rawY) * 180) / Math.PI;
+  return (
+    <div
+      className="absolute z-30 pointer-events-none flex flex-col items-center gap-1"
       style={{
-        left: `${50 + x * 46}%`,
-        top: `${50 - y * 38}%`,
-        transform: 'translate(-50%, -50%)',
+        left: besidePanel ? '18rem' : `${x}%`,
+        top: `${y}%`,
+        transform: besidePanel ? 'translate(0, -50%)' : 'translate(-50%, -50%)',
       }}
     >
       <div className="relative w-8 h-8" style={{ transform: `rotate(${deg}deg)` }}>
-        <span className="absolute inset-0 rounded-full bg-[#f4a261]/18" />
-        <svg viewBox="0 0 24 24" className="absolute inset-1 text-[#f4a261] drop-shadow-[0_0_6px_rgba(244,162,97,0.5)]">
+        <span className="absolute inset-0 rounded-full" style={{ background: `${color}33` }} />
+        <svg viewBox="0 0 24 24" className="absolute inset-1" style={{ color }}>
           <path fill="currentColor" d="M12 3.4L18.6 18.2 12 14.6 5.4 18.2z" />
         </svg>
       </div>
+      <AimTag compass={compass} color={color} />
     </div>
   );
 }
@@ -41,6 +79,8 @@ export default function BuildQuestHud({
   rebuildProgress,
   nearActive,
   compass,
+  aim,
+  clearLeft,
   onDismissWelcome,
   onDismissMoveTip,
 }) {
@@ -49,7 +89,7 @@ export default function BuildQuestHud({
 
   return (
     <>
-      <CompassArrow compass={compass} />
+      <CompassArrow compass={compass} clearLeft={clearLeft} />
 
       <AnimatePresence>
         {guideStep === GUIDE_STEPS.WELCOME && (
@@ -62,7 +102,7 @@ export default function BuildQuestHud({
           >
             <ClayPanel depth="deep" className="p-5 rounded-3xl w-[280px] max-w-[88vw] flex flex-col gap-3 text-center">
               <h2 className="font-heading font-semibold text-sm text-clay-text">Rebuild</h2>
-              <p className="text-[11px] text-clay-muted">Follow the marker. Hold F.</p>
+              <p className="text-[11px] text-clay-muted">Rebuild the houses first. Then pick up the cart parts and mount them at the garage. Follow the pointer.</p>
               <ClayButton variant="success" onClick={onDismissWelcome} className="w-full py-2 rounded-xl text-xs">
                 Start
               </ClayButton>
@@ -92,6 +132,19 @@ export default function BuildQuestHud({
         )}
       </AnimatePresence>
 
+      {aim && aim.kind !== 'house' && (
+        <div className="absolute top-[4.75rem] left-1/2 -translate-x-1/2 z-40 pointer-events-none">
+          <ClayPanel className="h-11 px-3.5 rounded-2xl flex items-center gap-2.5">
+            <p className="text-[11px] font-heading font-semibold text-clay-text whitespace-nowrap">
+              {aim.label}
+            </p>
+            <p className="text-[10px] text-clay-muted whitespace-nowrap">
+              {aim.kind === 'garage' ? 'Hold F at the garage' : 'Press E to pick up'}
+            </p>
+          </ClayPanel>
+        </div>
+      )}
+
       {guideStep === GUIDE_STEPS.REBUILD && activeRuin && (
         <div className="absolute top-[4.75rem] left-1/2 -translate-x-1/2 z-40 pointer-events-none">
           <ClayPanel className="h-11 px-3.5 rounded-2xl flex items-center gap-2.5">
@@ -109,7 +162,7 @@ export default function BuildQuestHud({
                 ? rebuildProgress > 0.02
                   ? `${Math.round(rebuildProgress * 100)}%`
                   : `Hold F · ${REPAIR_BUILDING_COST.coins}c`
-                : 'Marker'}
+                : 'Walk to it'}
             </p>
           </ClayPanel>
         </div>

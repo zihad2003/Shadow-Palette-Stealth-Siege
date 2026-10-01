@@ -227,6 +227,13 @@ export function createGuideMarker() {
     })
   );
   pin.add(halo);
+  const tip = new THREE.Mesh(
+    new THREE.ConeGeometry(0.07, 0.16, 8),
+    new THREE.MeshBasicMaterial({ color: 0xf4a261, transparent: true, opacity: 0.95 })
+  );
+  tip.rotation.x = Math.PI;
+  tip.position.y = -0.2;
+  pin.add(tip);
   root.add(pin);
 
   root.visible = false;
@@ -234,11 +241,54 @@ export function createGuideMarker() {
   return { root, ring, disc, beam, pin, chevron: pin };
 }
 
+/** Size the ring to the house pad and sit the pin just above the roof. */
+export function alignGuideMarker(marker, footprintW = 3, footprintH = 3, ruined = true) {
+  if (!marker?.ring) return;
+  const bw = Math.max(1, footprintW) * TILE_PITCH;
+  const bd = Math.max(1, footprintH) * TILE_PITCH;
+  const baseR = TILE_PITCH * 0.58;
+  const sx = (bw * 0.5) / baseR;
+  const sy = (bd * 0.5) / baseR;
+  marker.ring.userData.sx = sx;
+  marker.ring.userData.sy = sy;
+  marker.disc.userData.sx = sx * 0.48;
+  marker.disc.userData.sy = sy * 0.48;
+  const roof = ruined ? 1.08 : 1.42;
+  marker.beam.scale.set(1, roof / 1.58, 1);
+  marker.beam.position.y = roof * 0.5;
+  marker.pin.userData.restY = roof + 0.1;
+}
+
+const GUIDE_TINTS = {
+  house: 0xf4a261,
+  part: 0x8ecae6,
+  garage: 0x72b83f,
+};
+
+export function tintGuideMarker(marker, kind = 'house', hex) {
+  if (!marker?.ring) return;
+  const color = new THREE.Color(hex || GUIDE_TINTS[kind] || GUIDE_TINTS.house);
+  marker.root.userData.kind = kind;
+  marker.ring.material.color.copy(color);
+  marker.disc.material.color.copy(color);
+  marker.beam.material.color.copy(color);
+  marker.pin.children.forEach((child) => {
+    if (child.material?.color && child.geometry?.type !== 'RingGeometry') child.material.color.copy(color);
+  });
+}
+
 export function tickGuideMarker(marker, elapsed, camera) {
   if (!marker?.root?.visible) return;
   const wave = Math.sin(elapsed * 1.28);
-  marker.pin.position.y = 1.58 + wave * 0.04;
-  marker.ring.scale.set(1 + wave * 0.03, 1 + wave * 0.03, 1);
+  const rest = marker.pin.userData.restY ?? 1.58;
+  marker.pin.position.y = rest + wave * 0.035;
+  const pulse = 1 + wave * 0.025;
+  const sx = marker.ring.userData.sx ?? 1;
+  const sy = marker.ring.userData.sy ?? 1;
+  marker.ring.scale.set(sx * pulse, sy * pulse, 1);
+  if (marker.disc) {
+    marker.disc.scale.set((marker.disc.userData.sx ?? 1) * pulse, (marker.disc.userData.sy ?? 1) * pulse, 1);
+  }
   if (marker.disc?.material) marker.disc.material.opacity = 0.09 + wave * 0.03;
   if (marker.beam?.material) marker.beam.material.opacity = 0.16 + wave * 0.05;
   if (camera) marker.pin.quaternion.copy(camera.quaternion);

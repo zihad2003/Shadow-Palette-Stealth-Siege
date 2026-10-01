@@ -124,4 +124,23 @@ class RaidValidatorTest {
         ValidatedOutcomeDto outcome = raidValidator.validateSession(request, "BLUE", 500, 100);
         assertEquals("INCOMPLETE", outcome.getOutcome());
     }
+
+    @Test
+    void testReportedEscapeCountsWithoutCore() {
+        List<SessionLogTickDto> ticks = new ArrayList<>();
+        ticks.add(SessionLogTickDto.builder().tick(1).xPos(4).yPos(4).build());
+
+        RaidCompleteRequest request = RaidCompleteRequest.builder()
+                .defenderId(101L)
+                .durationSeconds(40)
+                .sessionLog(ticks)
+                .clientReportedOutcome(ClientReportedOutcomeDto.builder().outcome("SILENT").isDetected(false).build())
+                .build();
+
+        when(plotRepository.findByOwnerId(101L)).thenReturn(List.of());
+
+        ValidatedOutcomeDto outcome = raidValidator.validateSession(request, "BLUE", 500, 100);
+        assertEquals("SILENT", outcome.getOutcome());
+        assertTrue(outcome.getCoinsLooted() > 0);
+    }
 }

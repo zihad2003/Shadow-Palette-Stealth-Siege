@@ -250,7 +250,7 @@ export default function DuoLobbyView() {
             </div>
 
             {/* Target selector pills if host */}
-            {isHost && (
+            {isHost && duoParty?.status !== 'IN_RAID' && (
               <div className="flex items-center gap-2">
                 {RAID_TARGETS.map((t) => {
                   const active = Number(t.ownerId) === Number(selectedDefenderId);

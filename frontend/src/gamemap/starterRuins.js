@@ -259,9 +259,13 @@ export function nextGuideRuin(buildings, fromTile = GATE_SPAWN_TILE) {
   if (!ruins.length) return null;
   const fx = fromTile.column ?? fromTile.x ?? GATE_SPAWN_TILE.column;
   const fy = fromTile.row ?? fromTile.y ?? GATE_SPAWN_TILE.row;
+  const center = (b) => ({
+    x: b.xPos + ((b.footprintWidth || 3) - 1) / 2,
+    y: b.yPos + ((b.footprintHeight || 3) - 1) / 2,
+  });
   return [...ruins].sort((a, b) => {
-    const da = Math.hypot(a.xPos + (a.footprintWidth || 3) / 2 - fx, a.yPos + (a.footprintHeight || 3) / 2 - fy);
-    const db = Math.hypot(b.xPos + (b.footprintWidth || 3) / 2 - fx, b.yPos + (b.footprintHeight || 3) / 2 - fy);
-    return da - db;
+    const ca = center(a);
+    const cb = center(b);
+    return Math.hypot(ca.x - fx, ca.y - fy) - Math.hypot(cb.x - fx, cb.y - fy);
   })[0];
 }

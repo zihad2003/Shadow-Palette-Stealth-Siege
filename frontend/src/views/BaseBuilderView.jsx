@@ -14,12 +14,12 @@ import GameMap from '../gamemap/GameMap.jsx';
 import { useGameState, GUIDE_STEPS } from '../state/GameStateContext.jsx';
 import { GATE_SPAWN_TILE, MAP_ROWS, WALK_TILE_SECONDS } from '../gamemap/mapConfig.js';
 import { collectSolidTiles } from '../gamemap/occupancy.js';
-import { isNearGarage, findPartNear } from '../gamemap/paletteBuggy.js';
+import { isNearGarage, findPartNear, cartPartById, garageCenterTile } from '../gamemap/paletteBuggy.js';
 import { stepDirection, attemptStep, nudgeOffSolid, TURN_RATE } from '../character/gridMover.js';
 import { noteKeyDown, noteKeyUp, walkAxes, shiftHeld, codeHeld, bindKeyReleaseGuards } from '../character/walkInput.js';
 import { soundEngine } from '../soundEngine.js';
 import { listDecorOccupiedTiles } from '../gamemap/MapDecor.js';
-import { findRuinNear, findRepairedNear, isNearMakeupHouse } from '../gamemap/starterRuins.js';
+import { findRuinNear, findRepairedNear, isNearMakeupHouse, nextGuideRuin, houseLabel } from '../gamemap/starterRuins.js';
 import { canPlaceOnGameMap } from '../gamemap/placeUtils.js';
 import { createSprintMeter, SPRINT_SPEED_MULT } from '../character/sprint.js';
 import StaminaBar from '../components/hud/StaminaBar.jsx';
@@ -283,6 +283,61 @@ export default function BaseBuilderView() {
     handleDropIntruderInJail,
   };
 
+  const nextRuin = isVisitGuest ? null : nextGuideRuin(buildings, GATE_SPAWN_TILE);
+  const guideAim = useMemo(() => {
+    if (!isVisitGuest && !garageComplete && carriedPart) {
+      const spec = cartPartById(carriedPart);
+      const pad = garageCenterTile();
+      return {
+        kind: 'garage',
+        label: spec ? `Garage · ${spec.label}` : 'Garage',
+        color: '#72B83F',
+        column: pad.column,
+        row: pad.row,
+        footprintW: 4,
+        footprintH: 4,
+      };
+    }
+    if (nextRuin) {
+      return {
+        kind: 'house',
+        label: houseLabel(nextRuin.buildingType),
+        color: '#F4A261',
+        buildingId: nextRuin.id,
+        footprintW: nextRuin.footprintWidth || 3,
+        footprintH: nextRuin.footprintHeight || 3,
+      };
+    }
+    if (isVisitGuest || garageComplete || !partSpawns.length) return null;
+    let best = partSpawns[0];
+    let bestD = Infinity;
+    partSpawns.forEach((p) => {
+      const d = Math.hypot((p.column || 0) - walker.column, (p.row || 0) - walker.row);
+      if (d < bestD) {
+        bestD = d;
+        best = p;
+      }
+    });
+    const spec = cartPartById(best.id);
+    const color = spec?.kind === 'body' && spec.color ? GAME_COLORS[spec.color] : '#8ECAE6';
+    return {
+      kind: 'part',
+      label: spec?.label || 'Cart part',
+      color,
+      column: best.column,
+      row: best.row,
+      footprintW: 1,
+      footprintH: 1,
+    };
+  }, [
+    nextRuin,
+    isVisitGuest,
+    garageComplete,
+    carriedPart,
+    partSpawns,
+    walker.column,
+    walker.row,
+  ]);
   const nearPart = findPartNear(partSpawns, walker.column, walker.row);
   const peekHouse = nearRuin || stationHouse;
   const nearActive = !!(activeRuin && nearRuin && nearRuin.id === activeRuin.id);
@@ -575,7 +630,9 @@ export default function BaseBuilderView() {
             lastCompass &&
             Math.abs(lastCompass.nx - screen.nx) < 0.016 &&
             Math.abs(lastCompass.ny - screen.ny) < 0.016 &&
-            lastCompass.onScreen === screen.onScreen;
+            lastCompass.onScreen === screen.onScreen &&
+            lastCompass.label === screen.label &&
+            lastCompass.kind === screen.kind;
           if (!same) {
             lastCompass = screen;
             setCompass(screen);
@@ -701,7 +758,9 @@ export default function BaseBuilderView() {
           lastCompass &&
           Math.abs(lastCompass.nx - screen.nx) < 0.016 &&
           Math.abs(lastCompass.ny - screen.ny) < 0.016 &&
-          lastCompass.onScreen === screen.onScreen;
+          lastCompass.onScreen === screen.onScreen &&
+          lastCompass.label === screen.label &&
+          lastCompass.kind === screen.kind;
         if (!same) {
           lastCompass = screen;
           setCompass(screen);
@@ -999,6 +1058,7 @@ export default function BaseBuilderView() {
         partSpawns={partSpawns}
         buggyRide={buggyRide}
         carriedPart={carriedPart}
+        guideAim={guideAim}
         pickupAnim={pickupAnim}
       />
 
@@ -1036,36 +1096,39 @@ export default function BaseBuilderView() {
         rebuildProgress={rebuildProgress}
         nearActive={nearActive}
         compass={compass}
+        aim={guideAim}
+        clearLeft={!!peekHouse}
         onDismissWelcome={dismissWelcome}
         onDismissMoveTip={dismissMoveTip}
       />
 
-      <HouseStation
-        building={peekHouse}
-        ruined={!!peekHouse?.ruined}
-        gameDay={gameDay}
-        storedCoins={Math.floor(Number(coinBanks[peekHouse?.id]) || 0)}
-        selectedColor={selectedColor}
-        buildings={buildings}
-        onCollect={() => {
-          if (!isVisitGuest) collectHouseCoins(peekHouse?.id);
-        }}
-        onPickColor={(key) => {
-          if (!isVisitGuest) pickPaintColor(key);
-        }}
-        onSleep={() => {
-          if (!isVisitGuest) sleepAtHouse();
-        }}
-        onUpgrade={(id) => {
-          if (!isVisitGuest) upgradeHouse(id);
-        }}
-        onOpenMakeup={() => {
-          if (!isVisitGuest) setMakeupOpen(true);
-        }}
-      />
+      <div className="absolute left-3 top-16 z-50 flex w-[220px] max-w-[46vw] max-h-[calc(100%-7.5rem)] flex-col gap-2 overflow-y-auto pointer-events-none">
+        <DailyTasksPanel hidden={guideStep !== GUIDE_STEPS.DONE || isVisitGuest} />
+        <HouseStation
+          building={peekHouse}
+          ruined={!!peekHouse?.ruined}
+          gameDay={gameDay}
+          storedCoins={Math.floor(Number(coinBanks[peekHouse?.id]) || 0)}
+          selectedColor={selectedColor}
+          buildings={buildings}
+          onCollect={() => {
+            if (!isVisitGuest) collectHouseCoins(peekHouse?.id);
+          }}
+          onPickColor={(key) => {
+            if (!isVisitGuest) pickPaintColor(key);
+          }}
+          onSleep={() => {
+            if (!isVisitGuest) sleepAtHouse();
+          }}
+          onUpgrade={(id) => {
+            if (!isVisitGuest) upgradeHouse(id);
+          }}
+          onOpenMakeup={() => {
+            if (!isVisitGuest) setMakeupOpen(true);
+          }}
+        />
+      </div>
       {guideStep !== GUIDE_STEPS.WELCOME && <ActionPrompt lines={actionLines} />}
-
-      <DailyTasksPanel hidden={guideStep !== GUIDE_STEPS.DONE || isVisitGuest} />
 
       <aside className="absolute right-4 top-[4.75rem] z-40 hidden md:flex flex-col items-end gap-2">
         <BaseStatusPanel />

@@ -200,6 +200,8 @@ export function GameStateProvider({ children }) {
     }
     return null;
   });
+  const [sessionStatus, setSessionStatus] = useState('connecting');
+  const [sessionAttempt, setSessionAttempt] = useState(0);
 
   // On first mount, resolve or allocate player identity via the server.
   // One device is guaranteed one persistent account.
@@ -243,13 +245,17 @@ export function GameStateProvider({ children }) {
             setJailStay(null);
           }
 
+          setSessionStatus('ready');
           if (res.worldSaveJson) {
             try {
               const data = JSON.parse(res.worldSaveJson);
               window.localStorage.setItem(WORLD_SAVE_KEY, res.worldSaveJson);
               if (Number.isFinite(data.coins)) setCoins(data.coins);
+              else if (Number.isFinite(res.coins)) setCoins(res.coins);
               if (Number.isFinite(data.inkEnergy)) setInkEnergy(data.inkEnergy);
+              else if (Number.isFinite(res.inkEnergy)) setInkEnergy(res.inkEnergy);
               if (Number.isFinite(data.chips)) setChips(data.chips);
+              else if (Number.isFinite(res.chips)) setChips(res.chips);
               if (data.buildings) setBuildings(data.buildings);
               if (data.paintedTiles) setPaintedTiles(data.paintedTiles);
               if (data.defenses) setDefenses(data.defenses);
@@ -269,6 +275,8 @@ export function GameStateProvider({ children }) {
       }
       if (!cancelled && attempt < 4) {
         timer = window.setTimeout(() => resolve(attempt + 1), 5000);
+      } else if (!cancelled) {
+        setSessionStatus('offline');
       }
     };
     resolve(0);
@@ -277,7 +285,13 @@ export function GameStateProvider({ children }) {
       window.clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [sessionAttempt]);
+
+  const retrySession = () => {
+    sessionStartInflight = null;
+    setSessionStatus('connecting');
+    setSessionAttempt((n) => n + 1);
+  };
 
   useEffect(() => {
     if (userId == null) return;
@@ -554,6 +568,18 @@ export function GameStateProvider({ children }) {
       showToast('Save failed', 'error');
       return false;
     }
+  };
+
+  const creditRaidLoot = (addCoins, addInk) => {
+    const coinsGain = Math.max(0, Number(addCoins) || 0);
+    const inkGain = Math.max(0, Number(addInk) || 0);
+    if (!coinsGain && !inkGain) return;
+    const nextCoins = (Number(worldRef.current.coins) || 0) + coinsGain;
+    const nextInk = (Number(worldRef.current.inkEnergy) || 0) + inkGain;
+    worldRef.current = { ...worldRef.current, coins: nextCoins, inkEnergy: nextInk };
+    setCoins(nextCoins);
+    setInkEnergy(nextInk);
+    saveWorld('');
   };
 
   const bumpDailyProgress = (id, amount = 1) => {
@@ -2041,6 +2067,9 @@ export function GameStateProvider({ children }) {
     provisionHomeBase,
     userId,
     setUserId,
+    sessionStatus,
+    retrySession,
+    creditRaidLoot,
     coins,
     setCoins,
     inkEnergy,

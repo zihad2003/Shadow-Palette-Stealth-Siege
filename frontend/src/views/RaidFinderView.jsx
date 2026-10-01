@@ -25,6 +25,8 @@ export default function RaidFinderView() {
     leaveDuoParty,
     refreshOnlinePlayers,
     userId,
+    sessionStatus,
+    retrySession,
     garageComplete,
   } = useGameState();
   const [cooldownLeft, setCooldownLeft] = useState(0);
@@ -98,7 +100,7 @@ export default function RaidFinderView() {
   const inDuo = !!duoParty?.partyId && duoParty.status !== 'ENDED';
   const isDuoHost = inDuo && Number(duoParty.hostId) === Number(userId);
 
-  if (inDuo && duoParty?.status !== 'IN_RAID') {
+  if (inDuo) {
     return <DuoLobbyView />;
   }
   const partnerLabel = inDuo
@@ -243,7 +245,7 @@ export default function RaidFinderView() {
             <p className="text-[10px] text-clay-muted mb-2">
               Your device account:{' '}
               <span className="text-clay-text font-semibold">
-                {fmtUid(userId) ? `Player ${fmtUid(userId)}` : 'Connecting…'}
+                {fmtUid(userId) ? `Player ${fmtUid(userId)}` : sessionStatus === 'offline' ? 'Server waking' : 'Connecting…'}
               </span>
             </p>
 
@@ -348,8 +350,15 @@ export default function RaidFinderView() {
           </p>
         </div>
         <div className="grid gap-5 sm:grid-cols-2 max-w-4xl mx-auto">
-          {!userId ? (
-            <p className="text-sm text-clay-muted col-span-full">Connecting to the raid server…</p>
+          {sessionStatus === 'offline' ? (
+            <div className="col-span-full flex flex-col items-start gap-3">
+              <p className="text-sm text-clay-muted">The raid server is still waking up. Wait a moment, then try again.</p>
+              <ClayButton variant="success" className="h-9 px-4 rounded-xl text-xs" onClick={retrySession}>
+                Try again
+              </ClayButton>
+            </div>
+          ) : !userId ? (
+            <p className="text-sm text-clay-muted col-span-full">Waking the raid server…</p>
           ) : targetError && targets.length === 0 ? (
             <p className="text-sm text-clay-muted col-span-full">{targetError}</p>
           ) : targets.length === 0 ? (

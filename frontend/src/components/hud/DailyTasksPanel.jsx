@@ -15,7 +15,7 @@ export default function DailyTasksPanel({ hidden = false }) {
   return (
     <ClayPanel
       depth="raised"
-      className="absolute top-16 left-3 z-30 pointer-events-auto p-3 rounded-2xl w-[200px] max-w-[46vw] flex flex-col gap-2"
+      className="pointer-events-auto p-3 rounded-2xl w-full flex flex-col gap-2"
     >
       <div className="flex items-center justify-between gap-2">
         <h3 className="font-heading font-semibold text-[11px] text-clay-text tracking-wide">Daily</h3>

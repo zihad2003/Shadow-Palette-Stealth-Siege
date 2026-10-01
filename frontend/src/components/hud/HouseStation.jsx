@@ -30,7 +30,7 @@ export default function HouseStation({
   const upgrades = (buildings || []).filter((b) => !b.ruined && (b.level || 1) < 3);
 
   return (
-    <div className="absolute left-4 top-[4.75rem] z-40 pointer-events-auto max-w-[240px]">
+    <div className="pointer-events-auto w-full">
       <ClayPanel depth="deep" className="px-3 py-2.5 rounded-2xl flex flex-col gap-2">
         <div>
           <p className="text-[11px] font-heading font-semibold text-clay-text">

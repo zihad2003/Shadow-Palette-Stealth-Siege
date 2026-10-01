@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { ArrowRight, Play } from 'lucide-react';
 import { useGameState } from '../state/GameStateContext.jsx';
@@ -13,14 +13,6 @@ export default function SplashView() {
   const [switchName, setSwitchName] = useState('');
   const [switchPass, setSwitchPass] = useState('');
   const [loginError, setLoginError] = useState('');
-
-  useEffect(() => {
-    // Only auto-advance for first-time onboarding if user does not click
-    if (isFirstRun) {
-      const t = window.setTimeout(() => transitionTo('STORY'), 2800);
-      return () => window.clearTimeout(t);
-    }
-  }, [isFirstRun, transitionTo]);
 
   const handleResume = (e) => {
     e?.stopPropagation?.();

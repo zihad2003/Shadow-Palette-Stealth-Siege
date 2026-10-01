@@ -48,10 +48,10 @@ If the variable is missing on a `vercel.app` host, the client falls back to `htt
 
 ## After deploy
 
-1. Open the Vercel site, reach the raid radar, and confirm the account line is `Player` plus a number, not `Player 0null`.
+1. Open the Vercel site, reach the raid radar, and confirm the account line is `Player` plus a number, not `Player 0null`. If the radar says the server is still waking up, wait and press **Try again**.
 2. The five faction bases should be listed (Crimson Citadel through Amethyst Sanctum).
 3. From a second device, open **Co-op / Duo**, invite the first player's id, accept, and click **Click to talk** on both sides.
-4. Both press **READY**. The lobby should count **DROP IN**, then both should enter the same base.
+4. Both press **READY**. The lobby stays up and counts **DROP IN**, then both should enter the same base. After a solo escape, the result card stays until **Return to base**.
 
 ## When it breaks
 
