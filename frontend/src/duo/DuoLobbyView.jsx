@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useGameState } from '../state/GameStateContext.jsx';
 import CharacterPreview from '../components/three/CharacterPreview.jsx';
 import ClayPanel from '../components/ui/ClayPanel.jsx';
@@ -31,6 +31,19 @@ export default function DuoLobbyView() {
   const bothReady = hostReady && guestReady;
 
   const [toggling, setToggling] = useState(false);
+  const [dropMs, setDropMs] = useState(null);
+
+  useEffect(() => {
+    if (duoParty?.status !== 'IN_RAID') {
+      setDropMs(null);
+      return undefined;
+    }
+    const launchAt = Number(duoParty.launchAt) || Date.now() + 900;
+    const tick = () => setDropMs(Math.max(0, launchAt - Date.now()));
+    tick();
+    const id = window.setInterval(tick, 40);
+    return () => window.clearInterval(id);
+  }, [duoParty?.status, duoParty?.launchAt]);
 
   const handleToggleReady = async () => {
     if (!duoParty?.partyId || toggling) return;
@@ -261,9 +274,17 @@ export default function DuoLobbyView() {
             {/* Launch / Ready Button */}
             <div className="flex items-center gap-3">
               {bothReady ? (
-                <div className="flex items-center gap-2 px-6 py-3 rounded-2xl bg-emerald-500 text-black font-semibold text-[13px] tracking-wide animate-bounce shadow-[0_0_25px_rgba(16,185,129,0.5)]">
-                  <Sparkles size={16} />
-                  BREACHING IN PROGRESS...
+                <div className="flex flex-col items-center gap-1 min-w-[14rem]">
+                  <div className="flex items-center gap-2 px-6 py-3 rounded-2xl bg-emerald-500 text-black font-semibold text-[13px] tracking-wide shadow-[0_0_25px_rgba(16,185,129,0.5)]">
+                    <Sparkles size={16} />
+                    {dropMs == null ? 'LOCKING DROP' : `DROP IN ${(dropMs / 1000).toFixed(1)}s`}
+                  </div>
+                  <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-emerald-400 origin-left"
+                      style={{ transform: `scaleX(${dropMs == null ? 1 : Math.max(0, Math.min(1, dropMs / 900))})` }}
+                    />
+                  </div>
                 </div>
               ) : (
                 <ClayButton

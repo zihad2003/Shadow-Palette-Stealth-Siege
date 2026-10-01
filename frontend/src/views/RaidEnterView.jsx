@@ -9,7 +9,8 @@ export const RAID_ENTER_SCREEN_MS = 1400;
 
 export default function RaidEnterView() {
   const { transitionTo, raidTargetId, raidLoot, showToast } = useGameState();
-  const started = React.useRef(false);
+  const nav = React.useRef({ transitionTo, raidLoot, showToast });
+  nav.current = { transitionTo, raidLoot, showToast };
 
   useEffect(() => {
     try {
@@ -19,25 +20,22 @@ export default function RaidEnterView() {
     }
 
     const go = window.setTimeout(() => {
-      if (started.current) return;
-      started.current = true;
-      const defender = raidTargetId || raidLoot?.ownerId || raidLoot?.id;
+      const loot = nav.current.raidLoot;
+      const defender = raidTargetId || loot?.ownerId || loot?.id;
       if (!defender) {
-        showToast('No target', 'error');
-        transitionTo('RAID_FINDER');
+        nav.current.showToast('No target', 'error');
+        nav.current.transitionTo('RAID_FINDER');
         return;
       }
-      transitionTo('STEALTH_RAID', {
+      nav.current.transitionTo('STEALTH_RAID', {
         defenderId: defender,
-        raidLoot: raidLoot || undefined,
+        raidLoot: loot || undefined,
         skipEnterCinematic: true,
       });
     }, RAID_ENTER_SCREEN_MS);
 
-    return () => {
-      window.clearTimeout(go);
-    };
-  }, [raidTargetId, raidLoot, transitionTo, showToast]);
+    return () => window.clearTimeout(go);
+  }, [raidTargetId]);
 
   const targetName = raidLoot?.name || 'Target Fortress';
 

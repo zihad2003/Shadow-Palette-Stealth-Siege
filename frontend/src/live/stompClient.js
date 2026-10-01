@@ -88,7 +88,7 @@ export function ensureStompConnected() {
       connectHeaders['Authorization'] = `Bearer ${jwt}`;
     }
     const c = new Client({
-      webSocketFactory: () => new SockJS(wsUrl()),
+      webSocketFactory: () => new SockJS(wsUrl(), null, { transports: ['websocket'] }),
       connectHeaders,
       reconnectDelay: 3000,
       heartbeatIncoming: 10000,
@@ -174,13 +174,26 @@ export function stompUnsubscribe(destination, onMessage) {
   subscriptions.delete(destination);
 }
 
-export async function stompPublish(destination, body) {
-  const c = await ensureStompConnected();
+function publishNow(c, destination, body) {
   c.publish({
     destination,
     body: JSON.stringify(body ?? {}),
     headers: { 'content-type': 'application/json' },
   });
+}
+
+/** Hot path for voice. Skips the connect promise when the socket is already up. */
+export function stompPublishNow(destination, body) {
+  if (client?.connected) {
+    publishNow(client, destination, body);
+    return;
+  }
+  stompPublish(destination, body).catch(() => {});
+}
+
+export async function stompPublish(destination, body) {
+  const c = await ensureStompConnected();
+  publishNow(c, destination, body);
 }
 
 export async function disconnectStomp() {

@@ -136,12 +136,19 @@ public class DuoService {
         String raidId = (request.getRaidId() != null && !request.getRaidId().isBlank())
                 ? request.getRaidId().trim()
                 : "duo_raid_" + UUID.randomUUID();
-        party.setDefenderId(request.getDefenderId());
-        party.setRaidId(raidId);
-        party.setStatus("IN_RAID");
-        party.setAlarmLatched(false);
-        party.setHostCaught(false);
-        party.setGuestCaught(false);
+        synchronized (party) {
+            party.setDefenderId(request.getDefenderId());
+            party.setRaidId(raidId);
+            party.setStatus("IN_RAID");
+            party.setHostReady(true);
+            party.setGuestReady(true);
+            party.setAlarmLatched(false);
+            party.setHostCaught(false);
+            party.setGuestCaught(false);
+            if (party.getLaunchAt() == null) {
+                party.setLaunchAt(Instant.now().plusMillis(900));
+            }
+        }
         broadcast(party);
         return toState(party, "RAID_STARTED");
     }
@@ -263,28 +270,40 @@ public class DuoService {
         boolean isGuest = SecurityUtils.getCurrentUserId().equals(party.getGuestId());
         if (!isHost && !isGuest) return fail("NOT_IN_PARTY");
 
-        if (isHost) {
-            party.setHostReady(request.isReady());
-            if (request.getModel() != null) party.setHostModel(request.getModel());
-            if (request.getCamo() != null) party.setHostCamo(request.getCamo());
-            if (request.getDefenderId() != null) party.setDefenderId(request.getDefenderId());
-        } else {
-            party.setGuestReady(request.isReady());
-            if (request.getModel() != null) party.setGuestModel(request.getModel());
-            if (request.getCamo() != null) party.setGuestCamo(request.getCamo());
-        }
-
-        if (party.isHostReady() && party.isGuestReady()) {
-            party.setStatus("IN_RAID");
-            if (party.getRaidId() == null || party.getRaidId().isBlank()) {
-                party.setRaidId("duo_" + System.currentTimeMillis());
+        synchronized (party) {
+            if (isHost) {
+                party.setHostReady(request.isReady());
+                if (request.getModel() != null) party.setHostModel(request.getModel());
+                if (request.getCamo() != null) party.setHostCamo(request.getCamo());
+                if (request.getDefenderId() != null) party.setDefenderId(request.getDefenderId());
+            } else {
+                party.setGuestReady(request.isReady());
+                if (request.getModel() != null) party.setGuestModel(request.getModel());
+                if (request.getCamo() != null) party.setGuestCamo(request.getCamo());
             }
-        } else if ("IN_RAID".equals(party.getStatus()) && (!party.isHostReady() || !party.isGuestReady())) {
-            party.setStatus("LOBBY");
+
+            boolean bothReady = party.isHostReady() && party.isGuestReady();
+            boolean launched = party.getLaunchAt() != null && !Instant.now().isBefore(party.getLaunchAt());
+            if (bothReady && party.getDefenderId() != null) {
+                if (!"IN_RAID".equals(party.getStatus())) {
+                    party.setStatus("IN_RAID");
+                    party.setAlarmLatched(false);
+                    party.setHostCaught(false);
+                    party.setGuestCaught(false);
+                    if (party.getRaidId() == null || party.getRaidId().isBlank()) {
+                        party.setRaidId("duo_" + System.currentTimeMillis());
+                    }
+                    party.setLaunchAt(Instant.now().plusMillis(900));
+                }
+            } else if ("IN_RAID".equals(party.getStatus()) && !launched) {
+                party.setStatus("LOBBY");
+                party.setLaunchAt(null);
+                party.setRaidId(null);
+            }
         }
 
         broadcast(party);
-        return toState(party, null);
+        return toState(party, "IN_RAID".equals(party.getStatus()) ? "BREACH" : null);
     }
 
     private static DuoPartyState toState(DuoParty party, String message) {
@@ -298,6 +317,7 @@ public class DuoService {
                 .status(party.getStatus())
                 .defenderId(party.getDefenderId())
                 .raidId(party.getRaidId())
+                .launchAt(party.getLaunchAt() == null ? null : party.getLaunchAt().toEpochMilli())
                 .hostX(party.getHostX())
                 .hostY(party.getHostY())
                 .guestX(party.getGuestX())

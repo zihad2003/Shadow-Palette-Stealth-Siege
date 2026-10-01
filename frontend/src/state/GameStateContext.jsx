@@ -171,6 +171,7 @@ export function GameStateProvider({ children }) {
   const [gameState, setGameState] = useState(startView);
   const gameStateRef = useRef(gameState);
   gameStateRef.current = gameState;
+  const transitionToRef = useRef(null);
   const enteredDuoRaidRef = useRef('');
   const [isFirstRun, setIsFirstRun] = useState(!introDone);
 
@@ -684,7 +685,7 @@ export function GameStateProvider({ children }) {
   const transitionTo = (nextState, params = {}) => {
     if (isJailed && (nextState === 'RAID_ENTER' || nextState === 'STEALTH_RAID')) {
       showToast('You are detained in Base Jail! Settle ransom or wait for release.', 'error');
-      return;
+      return false;
     }
     soundEngine.playTabSound();
     if (visitSessionRef.current && nextState !== 'BASE_BUILDER') {
@@ -717,18 +718,19 @@ export function GameStateProvider({ children }) {
         setGameState('RAID_FINDER');
       });
     } else if (nextState === 'RAID_ENTER') {
-      if (Date.now() < raidCooldownUntil) {
+      if (!params.duoBreach && Date.now() < raidCooldownUntil) {
         const secs = Math.ceil((raidCooldownUntil - Date.now()) / 1000);
         showToast(`Cooldown ${secs}s`, 'error');
-        return;
+        return false;
       }
       if (!isGameColor(camoColor)) {
         showToast('Set camo', 'error');
-        return;
+        return false;
       }
       if (params.defenderId) setRaidTargetId(params.defenderId);
       if (params.raidLoot) setRaidLoot(params.raidLoot);
       setGameState('RAID_ENTER');
+      return true;
     } else if (nextState === 'STEALTH_RAID') {
       if (Date.now() < raidCooldownUntil) {
         const secs = Math.ceil((raidCooldownUntil - Date.now()) / 1000);
@@ -796,7 +798,9 @@ export function GameStateProvider({ children }) {
     } else {
       setGameState(nextState);
     }
+    return true;
   };
+  transitionToRef.current = transitionTo;
 
   const hasMakeupHouse = true;
   const [hasRecamoed, setHasRecamoed] = useState(false);
@@ -1026,7 +1030,6 @@ export function GameStateProvider({ children }) {
         return false;
       }
       setDuoParty(res);
-      transitionTo('RAID_ENTER', { defenderId, raidLoot, duoPartyId: res.partyId, skipSoloOnly: true });
       return true;
     } catch {
       showToast('Duo raid start failed', 'error');
@@ -2188,6 +2191,30 @@ export function GameStateProvider({ children }) {
     });
   }, [mountedParts, carriedPart, partSpawns, cartScattered, visitRole]);
 
+  // One shared drop clock. Both players enter the same base when the server says launchAt.
+  useEffect(() => {
+    if (!duoParty?.partyId || duoParty.status !== 'IN_RAID' || duoParty.defenderId == null) return undefined;
+    const key = `${duoParty.partyId}:${duoParty.raidId || duoParty.defenderId}`;
+    if (enteredDuoRaidRef.current === key) return undefined;
+    const launchAt = Number(duoParty.launchAt) || Date.now();
+    const wait = Math.max(0, launchAt - Date.now());
+    const timer = window.setTimeout(() => {
+      if (enteredDuoRaidRef.current === key) return;
+      const gs = gameStateRef.current;
+      if (gs === 'RAID_ENTER' || gs === 'STEALTH_RAID') {
+        enteredDuoRaidRef.current = key;
+        return;
+      }
+      const ok = transitionToRef.current?.('RAID_ENTER', {
+        defenderId: duoParty.defenderId,
+        duoPartyId: duoParty.partyId,
+        duoBreach: true,
+      });
+      if (ok !== false) enteredDuoRaidRef.current = key;
+    }, wait);
+    return () => window.clearTimeout(timer);
+  }, [duoParty?.partyId, duoParty?.status, duoParty?.raidId, duoParty?.defenderId, duoParty?.launchAt]);
+
   // Keep duo party state + pull guest into raid when host starts.
   useEffect(() => {
     const partyId = duoParty?.partyId;
@@ -2204,25 +2231,6 @@ export function GameStateProvider({ children }) {
             enteredDuoRaidRef.current = '';
             setDuoParty(null);
             return;
-          }
-          const gs = gameStateRef.current;
-          const me = Number(userId);
-          const inParty = Number(state.guestId) === me || Number(state.hostId) === me;
-          const raidKey = `${state.partyId}:${state.raidId || state.defenderId}`;
-          if (
-            state.status === 'IN_RAID' &&
-            state.defenderId != null &&
-            inParty &&
-            gs !== 'STEALTH_RAID' &&
-            gs !== 'RAID_ENTER' &&
-            enteredDuoRaidRef.current !== raidKey
-          ) {
-            enteredDuoRaidRef.current = raidKey;
-            transitionTo('RAID_ENTER', {
-              defenderId: state.defenderId,
-              duoPartyId: state.partyId,
-              skipSoloOnly: true,
-            });
           }
         });
       } catch {
@@ -2274,7 +2282,10 @@ export function GameStateProvider({ children }) {
             prev?.guestX === res.guestX &&
             prev?.hostReady === res.hostReady &&
             prev?.guestReady === res.guestReady &&
-            !!prev?.guestJoined === !!res.guestJoined
+            !!prev?.guestJoined === !!res.guestJoined &&
+            prev?.defenderId === res.defenderId &&
+            prev?.raidId === res.raidId &&
+            prev?.launchAt === res.launchAt
           ) {
             return prev;
           }
@@ -2282,23 +2293,6 @@ export function GameStateProvider({ children }) {
         });
 
         if (res.status === 'ENDED') enteredDuoRaidRef.current = '';
-        const gs = gameStateRef.current;
-        const raidKey = `${res.partyId}:${res.raidId || res.defenderId}`;
-        if (
-          res.status === 'IN_RAID' &&
-          res.defenderId != null &&
-          (iAmGuest || iAmHost) &&
-          gs !== 'STEALTH_RAID' &&
-          gs !== 'RAID_ENTER' &&
-          enteredDuoRaidRef.current !== raidKey
-        ) {
-          enteredDuoRaidRef.current = raidKey;
-          transitionTo('RAID_ENTER', {
-            defenderId: res.defenderId,
-            duoPartyId: res.partyId,
-            skipSoloOnly: true,
-          });
-        }
       } catch {
         /* backend optional */
       }

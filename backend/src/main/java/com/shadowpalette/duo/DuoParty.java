@@ -19,6 +19,8 @@ public class DuoParty {
 
     private Long defenderId;
     private String raidId;
+    /** Both clients drop into the raid at this instant. */
+    private Instant launchAt;
 
     private Double hostX;
     private Double hostY;

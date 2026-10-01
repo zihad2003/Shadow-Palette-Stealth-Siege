@@ -5,6 +5,7 @@ import com.shadowpalette.duo.dto.DuoInviteRequest;
 import com.shadowpalette.duo.dto.DuoPartyState;
 import com.shadowpalette.duo.dto.DuoPositionMessage;
 import com.shadowpalette.duo.dto.DuoRaidStartRequest;
+import com.shadowpalette.duo.dto.DuoReadyRequest;
 import com.shadowpalette.service.PresenceService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -87,6 +88,40 @@ class DuoFlowTest {
         assertTrue(after.isAlarmLatched());
         assertEquals(10.1, after.getHostX());
         
+    }
+
+    @Test
+    @DisplayName("Both ready locks one target and one shared drop time")
+    void bothReadyShareDrop() {
+        when(presenceService.isOnline(34L)).thenReturn(true);
+        DuoPartyState invited = duoService.invite(DuoInviteRequest.builder()
+                .guestId(34L).hostName("Host12").build());
+        setUserId(34L);
+        assertTrue(duoService.accept(DuoDecisionRequest.builder().partyId(invited.getPartyId()).build()).isSuccess());
+
+        setUserId(34L);
+        DuoReadyRequest guest = new DuoReadyRequest();
+        guest.setPartyId(invited.getPartyId());
+        guest.setReady(true);
+        DuoPartyState guestReady = duoService.setReady(guest);
+        assertEquals("LOBBY", guestReady.getStatus());
+
+        setUserId(1L);
+        DuoReadyRequest host = new DuoReadyRequest();
+        host.setPartyId(invited.getPartyId());
+        host.setReady(true);
+        host.setDefenderId(101L);
+        DuoPartyState breach = duoService.setReady(host);
+        assertEquals("IN_RAID", breach.getStatus());
+        assertEquals(101L, breach.getDefenderId());
+        assertNotNull(breach.getRaidId());
+        assertNotNull(breach.getLaunchAt());
+        assertTrue(breach.getLaunchAt() > System.currentTimeMillis());
+
+        DuoPartyState seenByGuest = duoService.forUser(34L);
+        assertEquals(breach.getRaidId(), seenByGuest.getRaidId());
+        assertEquals(breach.getLaunchAt(), seenByGuest.getLaunchAt());
+        assertEquals(101L, seenByGuest.getDefenderId());
     }
 
     private void setUserId(Long userId) {

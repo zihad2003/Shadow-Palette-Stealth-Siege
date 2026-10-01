@@ -3,10 +3,12 @@
  * Both players already reach the API, so this works across NATs after a Vercel deploy
  * without a separate TURN relay.
  */
-import { stompPublish, stompSubscribe, stompUnsubscribe } from '../live/stompClient.js';
+import { stompPublishNow, stompSubscribe, stompUnsubscribe } from '../live/stompClient.js';
 
 const RATE = 16000;
-const FRAME = 640;
+const FRAME = 320;
+const PLAY_LEAD = 0.02;
+const PLAY_MAX = 0.055;
 
 function downsample(input, inRate, outRate) {
   if (!input || input.length === 0) return new Float32Array(0);
@@ -33,6 +35,8 @@ export function createDuoVoiceCall({ partyId, userId, onStatus }) {
   let deafened = false;
   let disposed = false;
   let nextPlay = 0;
+  let heard = false;
+  let workletNode = null;
   let hold = new Float32Array(0);
   let micStarting = null;
   let listenPromise = null;
@@ -52,8 +56,8 @@ export function createDuoVoiceCall({ partyId, userId, onStatus }) {
 
   function primeAudio() {
     if (disposed) return;
-    if (!contextUsable(playCtx)) playCtx = new AudioContext();
-    if (!contextUsable(captureCtx)) captureCtx = new AudioContext();
+    if (!contextUsable(playCtx)) playCtx = new AudioContext({ latencyHint: 'interactive' });
+    if (!contextUsable(captureCtx)) captureCtx = new AudioContext({ latencyHint: 'interactive' });
     playCtx.resume?.().catch(() => {});
     captureCtx.resume?.().catch(() => {});
     try {
@@ -92,11 +96,13 @@ export function createDuoVoiceCall({ partyId, userId, onStatus }) {
     src.buffer = buf;
     src.connect(playCtx.destination);
     const now = playCtx.currentTime;
-    if (nextPlay < now + 0.02) nextPlay = now + 0.05;
+    if (nextPlay < now + 0.005 || nextPlay > now + PLAY_MAX) nextPlay = now + PLAY_LEAD;
     src.start(nextPlay);
     nextPlay += buf.duration;
-    if (nextPlay > now + 0.45) nextPlay = now + 0.05;
-    setStatus('connected');
+    if (!heard) {
+      heard = true;
+      setStatus('connected');
+    }
   }
 
   function onVoice(msg) {
@@ -121,10 +127,10 @@ export function createDuoVoiceCall({ partyId, userId, onStatus }) {
     const bytes = new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength);
     let bin = '';
     for (let i = 0; i < bytes.length; i += 1) bin += String.fromCharCode(bytes[i]);
-    stompPublish(`/app/voice/${partyId}`, {
+    stompPublishNow(`/app/voice/${partyId}`, {
       pcm: btoa(bin),
       rate: RATE,
-    }).catch(() => {});
+    });
   }
 
   function enqueue(samples) {
@@ -149,20 +155,40 @@ export function createDuoVoiceCall({ partyId, userId, onStatus }) {
     return listenPromise;
   }
 
-  function attachMic() {
-    if (!localStream || !contextUsable(captureCtx) || processor) return;
-    const source = captureCtx.createMediaStreamSource(localStream);
-    processor = captureCtx.createScriptProcessor(2048, 1, 1);
+  function onCaptured(samples, inRate) {
+    if (muted || disposed) return;
+    enqueue(downsample(samples, inRate, RATE));
+  }
+
+  function attachScriptProcessor(source, inRate) {
+    processor = captureCtx.createScriptProcessor(512, 1, 1);
     const sink = captureCtx.createGain();
     sink.gain.value = 0;
-    const inRate = captureCtx.sampleRate || 48000;
     processor.onaudioprocess = (ev) => {
-      if (muted || disposed) return;
-      enqueue(downsample(ev.inputBuffer.getChannelData(0), inRate, RATE));
+      onCaptured(ev.inputBuffer.getChannelData(0), inRate);
     };
     source.connect(processor);
     processor.connect(sink);
     sink.connect(captureCtx.destination);
+  }
+
+  async function attachMic() {
+    if (!localStream || !contextUsable(captureCtx) || processor || workletNode) return;
+    const source = captureCtx.createMediaStreamSource(localStream);
+    const inRate = captureCtx.sampleRate || 48000;
+    try {
+      await captureCtx.audioWorklet.addModule(new URL('./voiceCaptureWorklet.js', import.meta.url));
+      if (disposed) return;
+      workletNode = new AudioWorkletNode(captureCtx, 'voice-capture');
+      workletNode.port.onmessage = (ev) => onCaptured(ev.data, inRate);
+      const sink = captureCtx.createGain();
+      sink.gain.value = 0;
+      source.connect(workletNode);
+      workletNode.connect(sink);
+      sink.connect(captureCtx.destination);
+    } catch {
+      attachScriptProcessor(source, inRate);
+    }
     localStream.getAudioTracks().forEach((t) => {
       t.enabled = !muted;
     });
@@ -171,7 +197,7 @@ export function createDuoVoiceCall({ partyId, userId, onStatus }) {
 
   async function enableMic() {
     primeAudio();
-    if (localStream && processor) {
+    if (localStream && (processor || workletNode)) {
       setStatus(captureCtx?.state === 'running' ? 'live' : 'needs-gesture');
       return;
     }
@@ -182,7 +208,13 @@ export function createDuoVoiceCall({ partyId, userId, onStatus }) {
         setStatus('requesting-mic');
         try {
           localStream = await navigator.mediaDevices.getUserMedia({
-            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
+            audio: {
+              channelCount: 1,
+              echoCancellation: true,
+              noiseSuppression: false,
+              autoGainControl: false,
+              latency: 0,
+            },
             video: false,
           });
         } catch (err) {
@@ -197,7 +229,7 @@ export function createDuoVoiceCall({ partyId, userId, onStatus }) {
       }
       primeAudio();
       try {
-        attachMic();
+        await attachMic();
       } catch (err) {
         setStatus('mic-denied');
         throw err;
@@ -233,7 +265,10 @@ export function createDuoVoiceCall({ partyId, userId, onStatus }) {
 
   function setDeafened(next) {
     deafened = !!next;
-    if (deafened) nextPlay = 0;
+    if (deafened) {
+      nextPlay = 0;
+      heard = false;
+    }
   }
 
   function isDeafened() {
@@ -245,10 +280,13 @@ export function createDuoVoiceCall({ partyId, userId, onStatus }) {
     stompUnsubscribe(voiceDest, onVoice);
     try {
       processor?.disconnect();
+      workletNode?.disconnect();
     } catch {
       /* ignore */
     }
     processor = null;
+    workletNode = null;
+    heard = false;
     hold = new Float32Array(0);
     localStream?.getTracks().forEach((t) => t.stop());
     localStream = null;

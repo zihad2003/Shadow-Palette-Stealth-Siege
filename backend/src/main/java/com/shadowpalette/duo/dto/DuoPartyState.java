@@ -19,6 +19,8 @@ public class DuoPartyState {
     private String status;
     private Long defenderId;
     private String raidId;
+    /** Epoch millis. Both players enter together when this time is reached. */
+    private Long launchAt;
     private Double hostX;
     private Double hostY;
     private Double guestX;
