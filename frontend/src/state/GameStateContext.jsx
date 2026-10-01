@@ -2387,10 +2387,21 @@ export function GameStateProvider({ children }) {
     if (!buggySeated && gameState !== 'RAID_FINDER' && gameState !== 'BASE_BUILDER') return undefined;
     const poll = async () => {
       try {
+        await postPresenceHeartbeat({
+          userId,
+          username,
+          characterModel,
+          camoColor,
+          snapshot: snapshotRef.current,
+        });
+      } catch {
+        /* still try the list */
+      }
+      try {
         const res = await fetchOnlinePlayers(userId);
         setOnlinePlayers(res.players || []);
       } catch {
-        setOnlinePlayers([]);
+        /* keep the last list — a slow server is not an empty lobby */
       }
     };
     poll();

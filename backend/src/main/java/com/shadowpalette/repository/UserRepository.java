@@ -6,6 +6,7 @@ import org.springframework.stereotype.Repository;
 
 import org.springframework.data.jpa.repository.Query;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -22,6 +23,9 @@ public interface UserRepository extends JpaRepository<User, Long> {
     boolean existsByUsernameIgnoreCase(String username);
 
     List<User> findByUsernameContainingIgnoreCase(String username);
+
+    @Query("SELECT u FROM User u WHERE u.isBot = false AND u.lastSeenAt IS NOT NULL AND u.lastSeenAt > :since")
+    List<User> findRecentHumans(@Param("since") LocalDateTime since);
 
     @Query("SELECT COALESCE(MAX(u.id), 0) FROM User u")
     long findMaxId();

@@ -133,7 +133,27 @@ export default function RaidFinderView() {
     }
   };
 
-  const players = (onlinePlayers || []).filter((p) => Number(p.userId) !== Number(userId));
+  const players = (() => {
+    const byId = new Map();
+    for (const p of onlinePlayers || []) {
+      const id = Number(p.userId);
+      if (!id || id === Number(userId)) continue;
+      byId.set(id, p);
+    }
+    for (const t of targets || []) {
+      if (t.isBot || t.bot) continue;
+      const id = Number(t.ownerId || t.id);
+      if (!id || id === Number(userId)) continue;
+      if (byId.has(id)) continue;
+      byId.set(id, {
+        userId: id,
+        username: t.username || t.name,
+        camoColor: t.camoColor || t.camo || 'BLUE',
+        online: !!(t.online || t.isOnline),
+      });
+    }
+    return [...byId.values()];
+  })();
 
   const onRefresh = async () => {
     setRefreshing(true);

@@ -35,7 +35,9 @@ import java.util.concurrent.ConcurrentHashMap;
 @RequiredArgsConstructor
 public class PresenceService {
 
-    public static final int PRESENCE_TTL_SECONDS = 20;
+    public static final int PRESENCE_TTL_SECONDS = 90;
+    /** Players seen in the database within this window still show up for duo invite. */
+    public static final int RECENT_SEEN_SECONDS = 180;
     public static final int INVITE_TTL_SECONDS = 45;
 
     private final UserRepository userRepository;
@@ -64,10 +66,14 @@ public class PresenceService {
         Instant lastWrite = lastDbHeartbeat.get(id);
         if (lastWrite == null || lastWrite.plusSeconds(10).isBefore(now)) {
             lastDbHeartbeat.put(id, now);
-            userRepository.findById(id).ifPresent(user -> {
-                user.setLastSeenAt(LocalDateTime.now());
-                userRepository.save(user);
-            });
+            try {
+                userRepository.findById(id).ifPresent(user -> {
+                    user.setLastSeenAt(LocalDateTime.now());
+                    userRepository.save(user);
+                });
+            } catch (Exception ignored) {
+                lastDbHeartbeat.remove(id);
+            }
         }
 
         return PresenceHeartbeatResponse.builder().success(true).build();
@@ -76,8 +82,9 @@ public class PresenceService {
     public PresenceOnlineResponse listOnline(Long userId) {
         prunePresence();
         List<PresencePlayerDto> players = new ArrayList<>();
+        java.util.Set<Long> seen = new java.util.HashSet<>();
         for (PresenceRecord rec : presence.values()) {
-            if (userId != null && rec.userId.equals(userId)) continue;
+            if (rec.userId == null || (userId != null && rec.userId.equals(userId))) continue;
             boolean gc = rec.snapshot != null && Boolean.TRUE.equals(rec.snapshot.get("garageComplete"));
             players.add(PresencePlayerDto.builder()
                     .userId(rec.userId)
@@ -85,6 +92,18 @@ public class PresenceService {
                     .characterModel(rec.characterModel)
                     .camoColor(rec.camoColor)
                     .garageComplete(gc)
+                    .build());
+            seen.add(rec.userId);
+        }
+        LocalDateTime recent = LocalDateTime.now().minusSeconds(RECENT_SEEN_SECONDS);
+        for (User user : userRepository.findRecentHumans(recent)) {
+            if (user.getId() == null || seen.contains(user.getId())) continue;
+            if (userId != null && user.getId().equals(userId)) continue;
+            players.add(PresencePlayerDto.builder()
+                    .userId(user.getId())
+                    .username(user.getUsername())
+                    .characterModel(user.getCharacterModel())
+                    .camoColor(user.getCamoColor() != null ? user.getCamoColor() : "BLUE")
                     .build());
         }
         return PresenceOnlineResponse.builder().success(true).players(players).build();

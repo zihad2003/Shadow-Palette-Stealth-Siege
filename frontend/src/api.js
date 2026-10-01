@@ -32,7 +32,8 @@ async function request(url, options = {}) {
     headers['Authorization'] = `Bearer ${_jwtToken}`;
   }
   // Add a timeout so the UI doesn't hang if backend proxy is unresponsive
-  const signal = options.signal || (typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(5000) : undefined);
+  const timeoutMs = options.timeoutMs ?? 15000;
+  const signal = options.signal || (typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(timeoutMs) : undefined);
   const res = await fetch(fullUrl, { ...options, headers, signal }).catch((err) => {
     // Convert fetch abort/network errors into an offline error immediately
     const errorMsg = 'Backend offline or unreachable';
@@ -225,13 +226,14 @@ export async function seedAdminUsers() {
 export async function postPresenceHeartbeat(payload) {
   return request('/api/presence', {
     method: 'POST',
+    timeoutMs: 20000,
     body: JSON.stringify(payload),
   });
 }
 
 export async function fetchOnlinePlayers(userId) {
   const q = userId != null ? `?userId=${encodeURIComponent(userId)}` : '';
-  return request(`/api/presence/online${q}`);
+  return request(`/api/presence/online${q}`, { timeoutMs: 20000 });
 }
 
 export async function sendVisitInvite(hostId, guestId) {
