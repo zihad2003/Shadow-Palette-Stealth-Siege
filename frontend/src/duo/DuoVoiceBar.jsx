@@ -67,8 +67,8 @@ export default function DuoVoiceBar() {
           onStatus: (s) => {
             if (cancelled) return;
             setVoiceStatus(s);
-            if (s === 'needs-gesture') setAutoplayBlocked(true);
-            if (s === 'connected') setAutoplayBlocked(false);
+            if (s === 'needs-gesture' || s === 'mic-denied' || s === 'listening') setAutoplayBlocked(true);
+            if (s === 'connected' || s === 'live') setAutoplayBlocked(false);
           },
         });
         callRef.current = call;
@@ -76,14 +76,17 @@ export default function DuoVoiceBar() {
       } catch (err) {
         if (!cancelled) {
           setVoiceStatus('mic-denied');
-          showToastRef.current?.('Please allow microphone in browser', 'error');
+          setAutoplayBlocked(true);
         }
       }
     })();
 
-    // Continuous audio unlocker on any mouse click or keyboard interaction (essential for laptops)
+    // A click is the browser gesture that unlocks both playback and the microphone.
     const unlockAudio = () => {
-      callRef.current?.resume?.();
+      const live = callRef.current;
+      if (!live) return;
+      live.primeAudio?.();
+      live.enableMic?.().catch(() => {});
       setAutoplayBlocked(false);
     };
     window.addEventListener('pointerdown', unlockAudio, { passive: true });
@@ -126,11 +129,16 @@ export default function DuoVoiceBar() {
 
   const handleManualUnmuteClick = (e) => {
     e.stopPropagation();
-    callRef.current?.resume?.();
-    setAutoplayBlocked(false);
+    const live = callRef.current;
+    live?.primeAudio?.();
+    live?.enableMic?.().then(() => setAutoplayBlocked(false)).catch(() => {
+      setVoiceStatus('mic-denied');
+      showToast('Please allow microphone in browser', 'error');
+    });
   };
 
-  const isConnected = voiceStatus === 'connected';
+  const isConnected = voiceStatus === 'connected' || voiceStatus === 'live';
+  const needsUnlock = autoplayBlocked || voiceStatus === 'needs-gesture' || voiceStatus === 'mic-denied' || voiceStatus === 'listening';
 
   return (
     <div className="fixed top-16 left-4 z-[180] pointer-events-auto select-none">
@@ -176,14 +184,14 @@ export default function DuoVoiceBar() {
         </button>
 
         {/* Autoplay unlock pill if browser blocked initial sound */}
-        {(autoplayBlocked || voiceStatus === 'needs-gesture') && (
+        {needsUnlock && (
           <button
             onClick={handleManualUnmuteClick}
             className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse hover:bg-amber-500/30"
-            title="Click to enable incoming voice"
+            title="Click to talk and hear your partner"
           >
             <Volume1 size={11} />
-            <span>Click to hear</span>
+            <span>Click to talk</span>
           </button>
         )}
       </div>

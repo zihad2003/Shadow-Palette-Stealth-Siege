@@ -2273,7 +2273,8 @@ export function GameStateProvider({ children }) {
             prev?.hostX === res.hostX &&
             prev?.guestX === res.guestX &&
             prev?.hostReady === res.hostReady &&
-            prev?.guestReady === res.guestReady
+            prev?.guestReady === res.guestReady &&
+            !!prev?.guestJoined === !!res.guestJoined
           ) {
             return prev;
           }
