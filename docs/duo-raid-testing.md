@@ -1,66 +1,51 @@
-# Duo voice + co-op raid — local testing
+# Duo raid and voice — how to test
 
-Invite an online friend, open a WebRTC audio call (signaled over STOMP), then both attack the same base as independent characters. Alarm is shared; catch and extract are per-player; greed loot is half for each duo member.
+Two browsers party up, talk through the game server, ready on one target, and drop into that base together.
 
-## Prerequisites
+## Before you start
 
-- Backend: `http://localhost:8080` with H2 local profile  
-  `mvn spring-boot:run -Dspring-boot.run.profiles=local`
-- Frontend Vite: `http://127.0.0.1:3000` (proxies `/api` and `/ws`)
-- Two browsers (or one normal + one Incognito) with mic permission
-- Same Wi‑Fi / localhost first (no TURN yet)
+- Backend: `mvn spring-boot:run -Dspring-boot.run.profiles=local` so `http://localhost:8080/api/health` is ok.
+- Frontend: `http://127.0.0.1:3000` (proxies `/api` and `/ws`).
+- Two browsers, or one normal window and one private window.
+- Each window shows its own `Player #####` on **Co-op / Duo**. Invite that number. Do not type `12` or `34`.
 
-## Two-browser manual test
+## Steps
 
-1. **Window A** → `http://127.0.0.1:3000/?userId=12`  
-   Finish intro / reach Raid Finder so presence heartbeats run.
+1. Both windows finish the intro and open the raid radar so presence heartbeats run.
+2. Window A opens **Co-op / Duo** and invites B's player id. B accepts.
+3. Both should see the lobby and a voice bar at the top left. Each clicks **Click to talk** and allows the microphone. The dot turns green when that mic is live.
+4. The host picks a faction base. Both press **READY**.
+5. The lobby counts **DROP IN**. When it hits zero, both enter that same base. Neither player should remain on the lobby while the other is already inside.
+6. Walk. Each client should see the partner move. One searchlight hit raises the alarm for both. One player caught stays pinned. The other can keep going. House loot is split.
 
-2. **Window B** → `http://127.0.0.1:3000/?userId=34` (Incognito)  
-   Same — open Raid Finder.
+## If someone is left outside
 
-3. **Invite**  
-   On A, open **Duo** on Raid Finder → Invite player 34.  
-   B shows “wants a duo raid” → **Accept**.  
-   Both should see the bottom **Duo** voice bar; allow mic; status → `connected`.
+- The account line must be a real player id. `Player 0null` means the session never started.
+- Both must be in the lobby when they press ready. The server sets one `defenderId`, one `raidId`, and one `launchAt`.
+- A client that missed the socket update still polls `/api/duo/user/{id}` and uses the same `launchAt`.
+- Camo has to be one of the game colors or that client refuses to enter. Fix the color and ready again.
 
-4. **Raid**  
-   Host (A) picks any target (e.g. North Citadel). Guest is pulled into the same raid.  
-   Each should see the other move on the grayscale map.
+## Voice
 
-5. **Expected**  
-   - One enters the searchlight → both get siren / gate lock.  
-   - One caught by patrol → only that client ends CAUGHT; partner can keep raiding.  
-   - Successful extract → greed loot is **half** of the solo payout for that member.
+- Room: `/app/voice/{partyId}` up, `/topic/voice/{partyId}` down.
+- Audio is 16 kHz PCM, about 20 ms per message. The receiver does not build a long delay buffer.
+- The mic stops when the party ends or the player leaves the raid screens.
+- Jail intercom uses a different room, `jail_{smallerId}_{largerId}`.
 
-## Curl smoke (invite without UI)
+## Sockets
 
-```bash
-# Heartbeat both users
-curl -s -X POST http://127.0.0.1:8080/api/presence \
-  -H 'Content-Type: application/json' \
-  -d '{"userId":12,"username":"Host12","characterModel":1,"camoColor":"BLUE"}'
-curl -s -X POST http://127.0.0.1:8080/api/presence \
-  -H 'Content-Type: application/json' \
-  -d '{"userId":34,"username":"Guest34","characterModel":1,"camoColor":"RED"}'
+- Invite: `/topic/duo-invite/{userId}`
+- Party: `/topic/duo/{partyId}/state`
+- Signals (loot, wall): `/topic/duo/{partyId}/signal`
+- Position: `/app/duo/{partyId}/position`
 
-# Invite
-curl -s -X POST http://127.0.0.1:8080/api/duo/invite \
-  -H 'Content-Type: application/json' \
-  -d '{"hostId":12,"guestId":34,"hostName":"Host12"}'
-```
+Duo raids do not also send the solo live-defender invite.
 
-## Automated backend test
+## Automated test
 
 ```bash
 cd backend
 mvn -q test -Dtest=DuoFlowTest
 ```
 
-Covers: offline guest reject, invite → accept → start raid → position + shared alarm latch.
-
-## Notes
-
-- STOMP: `/topic/duo-invite/{userId}`, `/topic/duo/{partyId}/state`, `/topic/duo/{partyId}/signal`  
-  App destinations: `/app/duo/{partyId}/position`, `/app/duo/{partyId}/signal`
-- Duo skips the solo live-defender invite path for that raid.
-- Voice is audio-only WebRTC; hard NAT may need TURN later.
+That test checks invite, accept, a shared ready drop (same raid id, same target, `launchAt` still in the future), and position sync.

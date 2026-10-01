@@ -1,113 +1,65 @@
-# ডিপ্লয়মেন্ট গাইড (বাংলা)
+# ডিপ্লয়মেন্ট গাইড
 
-এই গাইডে Shadow Palette প্রজেক্ট প্রোডাকশনে ডিপ্লয় করার উপায় বাংলায় দেওয়া হলো।
+লাইভ গেমের স্ক্রিন Vercel-এ, সার্ভার Render-এ। দুইজন আলাদা নেটওয়ার্কে Co-op / Duo করতে পারবে। কথা বলাও সেই সার্ভারের ওয়েবসকেটে যায়। আলাদা TURN সার্ভার লাগে না।
 
-## প্রয়োজনীয় জিনিসপত্র
+## যা ঠিক থাকতে হবে
 
-- GitHub রিপোজিটরি
-- Render অ্যাকাউন্ট (ফ্রি প্ল্যান আছে)
-- Vercel অ্যাকাউন্ট (ফ্রি প্ল্যান আছে)
+1. Render চালু আছে। `GET /api/health` দিলে `{"status":"ok"}` আসে।
+2. সার্ভিস `local` প্রোফাইলে আছে, অথবা এমন MySQL আছে যার ঠিকানা এখনো খোলে।
+3. Vercel বিল্ডে `VITE_API_BASE_URL` সেই Render `https` ঠিকানা, শেষে `/` ছাড়া।
 
-## Backend ডিপ্লয় (Render)
+রেইড স্ক্রিনে `Player 0null` এবং খালি টার্গেট মানে ব্রাউজার অ্যাকাউন্ট পায়নি। API ঠিকানা খালি, অথবা ব্যাকএন্ড বন্ধ।
 
-### ১. Render-এ MySQL ডাটাবেস তৈরি করুন
+## Backend (Render)
 
-1. [Render Dashboard](https://dashboard.render.com/) এ যান
-2. "New" → "Database" ক্লিক করুন
-3. "MySQL" বেছে নিন
-4. Database name: `shadow_palette`
-5. User: `shadow_palette_user`
-6. Region: আপনার কাছাকাছি রিজিন বেছে নিন
-7. "Create Database" ক্লিক করুন
+`render.yaml` ব্লুপ্রিন্ট: Docker, কনটেক্সট `./backend`, `SPRING_PROFILES_ACTIVE=local`, `PORT=8080`, হেলথ চেক `/api/health`।
 
-### ২. Backend সার্ভিস ডিপ্লয় করুন
+1. নতুন **Web Service**। এই GitHub রিপো, ব্রাঞ্চ `main`।
+2. Runtime **Docker**। Dockerfile `./backend/Dockerfile`। Context `./backend`।
+3. Environment:
+   - `SPRING_PROFILES_ACTIVE` = `local`
+   - `PORT` = `8080`
+   - `FLYWAY_ENABLED` = `false`
+4. `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD`, `SPRING_DATASOURCE_DRIVER` মুছে দিন, যদি না আজকে সেই ডাটাবেসের ঠিকানা সত্যিই খোলে।
+5. `ALLOWED_ORIGINS` খালি রাখুন। খালি থাকলে Vercel ডোমেইন ঢুকতে পারে।
+6. ডিপ্লয় করুন। `https://<your-service>.onrender.com/api/health` খুলুন।
 
-1. [Render Dashboard](https://dashboard.render.com/) এ যান
-2. "New" → "Web Service" ক্লিক করুন
-3. আপনার GitHub রিপোজিটরি কানেক্ট করুন
-4. কনফিগার করুন:
-   - **Name**: `shadow-palette-backend`
-   - **Runtime**: Docker
-   - **Dockerfile path**: `./backend/Dockerfile`
-   - **Docker Context**: `./backend`
-   - **Branch**: `main` (বা আপনার ডিপ্লয়মেন্ট ব্রাঞ্চ)
-5. Environment Variables যোগ করুন:
-   - `SPRING_DATASOURCE_URL`: আপনার Render ডাটাবেস থেকে নিন
-   - `SPRING_DATASOURCE_USERNAME`: আপনার Render ডাটাবেস থেকে নিন
-   - `SPRING_DATASOURCE_PASSWORD`: আপনার Render ডাটাবেস থেকে নিন
-   - `SPRING_PROFILES_ACTIVE`: `prod`
-   - `PORT`: `8080`
-6. "Deploy Web Service" ক্লিক করুন
+`backend/docker-entrypoint.sh` সেফটি নেট। `SPRING_DATASOURCE_URL`-এর হোস্ট যদি DNS-এ না মেলে, কন্টেইনার H2-তে উঠবে, Flyway-তে ক্র্যাশ করবে না। যে হোস্ট নাম মেলে কিন্তু কানেকশন নেয় না, সেটা এই স্ক্রিপ্ট ধরে না। সেই URL মুছে দিন।
 
-### ৩. Backend URL সংগ্রহ করুন
+### ফ্রি প্ল্যান
 
-ডিপ্লয়মেন্টের পর Render আপনাকে একটি URL দেবে:
-```
-https://shadow-palette-backend.onrender.com
+H2 ফাইল কন্টেইনারের ভিতরে থাকে। ফ্রি সার্ভিস ঘুমালে বা নতুন ডিপ্লয় হলে ডিস্ক মুছে যায়। বট বেস আবার তৈরি হয়। প্লেয়ারের সেভ থাকে না।
+
+সেভ রাখতে হলে এমন MySQL দিন যার হোস্ট Render-এর ভিতর থেকে খোলে। `SPRING_DATASOURCE_URL`, ইউজার, পাসওয়ার্ড, এবং `SPRING_DATASOURCE_DRIVER=com.mysql.cj.jdbc.Driver` সেট করুন। সেই বুটে `SPRING_PROFILES_ACTIVE=local` রাখবেন না।
+
+## Frontend (Vercel)
+
+1. রিপো ইমপোর্ট। Root directory `frontend`। Framework Vite।
+2. Build `npm run build`। Output `dist`।
+3. বিল্ডের আগে:
+
+```text
+VITE_API_BASE_URL=https://<your-service>.onrender.com
 ```
 
-এই URL সেভ রাখুন frontend কনফিগারেশনের জন্য।
+শেষে স্ল্যাশ নেই। Vite এটা বিল্ডের সময় ঢুকিয়ে দেয়। পরে বদলালে আবার ডিপ্লয় করতে হবে।
 
-## Frontend ডিপ্লয় (Vercel)
+ভ্যারিয়েবল খালি থাকলে `vercel.app` সাইট `https://shadow-palette-backend.onrender.com` ধরে। সেই নামে সার্ভিস না থাকলে কাজ করবে না। লোকালহোস্ট এই ফলব্যাক ব্যবহার করে না।
 
-### ১. Vercel-এ কানেক্ট করুন
+## ডিপ্লয়ের পর
 
-1. [Vercel Dashboard](https://vercel.com/dashboard) এ যান
-2. "Add New Project" ক্লিক করুন
-3. আপনার GitHub রিপোজিটরি ইমপোর্ট করুন
+1. সাইট খুলে রেইড রাডারে অ্যাকাউন্ট `Player` এবং একটা সংখ্যা কিনা দেখুন। `Player 0null` হলে সেশন হয়নি।
+2. পাঁচটা ফ্যাকশন বেস থাকবে।
+3. দ্বিতীয় ডিভাইস থেকে **Co-op / Duo** খুলে প্রথম খেলোয়াড়ের আইডি ইনভাইট করুন। দুজনে **Click to talk** চাপুন।
+4. দুজনে **READY** দিন। লবিতে **DROP IN** গুনবে, তারপর দুজন একই বেসে ঢুকবে।
 
-### ২. প্রজেক্ট কনফিগার করুন
+## ভাঙলে
 
-1. **Framework Preset**: Vite
-2. **Root Directory**: খালি রাখুন (বা `frontend` সেট করুন)
-3. **Build Command**: `npm run build --prefix frontend`
-4. **Output Directory**: `frontend/dist`
-
-### ৩. Environment Variables যোগ করুন
-
-নিচের environment variable যোগ করুন:
-- `VITE_API_BASE_URL`: আপনার Render backend URL (যেমন `https://shadow-palette-backend.onrender.com`)
-
-### ৪. ডিপ্লয় করুন
-
-"Deploy" ক্লিক করুন এবং বিল্ড শেষ হওয়া পর্যন্ত অপেক্ষা করুন।
-
-## ডিপ্লয়মেন্টের পর
-
-### ১. Backend CORS আপডেট করুন
-
-আপনার backend এ Vercel ডোমেইন থেকে রিকোয়েস্ট নিতে CORS কনফিগারেশন লাগতে পারে।
-
-### ২. ডিপ্লয়মেন্ট টেস্ট করুন
-
-1. আপনার Vercel URL ভিজিট করুন
-2. ইউজার রেজিস্ট্রেশন/লগিন টেস্ট করুন
-3. গেমপ্লে ফিচার টেস্ট করুন
-4. WebSocket কানেকশন চেক করুন
-
-### ৩. লগ মনিটর করুন
-
-- **Render**: Render Dashboard এ সার্ভিস লগ চেক করুন
-- **Vercel**: Vercel Dashboard এ ডিপ্লয়মেন্ট লগ চেক করুন
-
-## সমস্যা সমাধান
-
-### Backend সমস্যা
-
-- **ডাটাবেস কানেকশন**: MySQL credentials চেক করুন
-- **পোর্ট সমস্যা**: PORT 8080 সেট করুন
-- **বিল্ড ফেইল**: Docker build লগ চেক করুন
-
-### Frontend সমস্যা
-
-- **API কানেকশন**: VITE_API_BASE_URL সঠিকভাবে সেট করুন
-- **WebSocket সমস্যা**: Backend WebSocket সাপোর্ট করে কিনা চেক করুন
-- **বিল্ড ফেইল**: Vercel build লগ চেক করুন
-
-## খরচ
-
-- **Render ফ্রি টিয়ার**: সীমিত রিসোর্স, নিষ্ক্রিয় থাকলে স্লিপ হতে পারে
-- **Vercel ফ্রি টিয়ার**: হবি প্রজেক্টের জন্য ভালো লিমিট
-- **ডাটাবেস**: Render ফ্রি MySQL এ সীমিত কানেকশন
-
-প্রোডাকশনের জন্য পেইড প্ল্যান বিবেচনা করুন।
+| যা দেখছেন | যা করবেন |
+|---|---|
+| লগে `UnknownHostException` এবং MySQL হোস্ট | ডাটাসোর্স এনভ মুছুন, `SPRING_PROFILES_ACTIVE=local`, আবার ডিপ্লয় |
+| `No active profile set` এবং Flyway MySQL খুলছে | একই কাজ। ড্যাশবোর্ডের এনভ `render.yaml`-কে সরিয়ে দিচ্ছে |
+| খালি রাডার, `Player 0null` | ব্যাকএন্ড বন্ধ, অথবা Vercel বিল্ডে `VITE_API_BASE_URL` ছিল না |
+| বন্ধু দেখা যাচ্ছে না | দুজনকেই রেইড স্ক্রিনে থাকতে হবে। ফ্রি ব্যাকএন্ড জেগে থাকতে হবে |
+| ভয়েস শোনা যাচ্ছে না | দুজনে **Click to talk** এবং মাইক অনুমতি |
+| একজন রেইডে ঢোকে, অন্যজন লবিতে থাকে | যে বিল্ডে `launchAt` আছে সেটা ডিপ্লয় করুন |

@@ -1,17 +1,16 @@
 # Shadow Palette: Stealth & Siege
 
 [![Java](https://img.shields.io/badge/Java-17-orange.svg)](https://www.oracle.com/java/)
-[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.3.4-brightgreen.svg)](https://spring.io/projects/spring-boot)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.3-brightgreen.svg)](https://spring.io/projects/spring-boot)
 [![React](https://img.shields.io/badge/React-18-blue.svg)](https://react.dev/)
 [![Three.js](https://img.shields.io/badge/Three.js-0.160+-black.svg)](https://threejs.org/)
 [![Vite](https://img.shields.io/badge/Vite-5-purple.svg)](https://vitejs.dev/)
-[![MySQL](https://img.shields.io/badge/MySQL-8.0+-blue.svg)](https://www.mysql.com/)
-[![Flyway](https://img.shields.io/badge/Flyway-Migration-red.svg)](https://flywaydb.org/)
-[![WebRTC](https://img.shields.io/badge/WebRTC-Voice%20Chat-teal.svg)](https://webrtc.org/)
+[![H2](https://img.shields.io/badge/H2-embedded-blue.svg)](https://www.h2database.com/)
+[![STOMP](https://img.shields.io/badge/STOMP-live%20sync-teal.svg)](https://stomp.github.io/)
 
-**Shadow Palette: Stealth & Siege** is a full-stack, tactical 3D isometric stealth fortress and raid game. Players construct and customize clay fortresses with color-coded defenses, station searchlights, and deploy autonomous patrol robots. Raiders infiltrate enemy grayscale strongholds using dynamic color camouflage to blend with floor tiles, disable security systems, strike and stun patrol robots, and extract with greed-scaled loot.
+**Shadow Palette: Stealth & Siege** is a browser 3D stealth game. You build a clay fortress, paint it, and raid other bases in grayscale by matching your camouflage to the floor. There is no Unity or Unreal project. The world is drawn with Three.js.
 
-The game supports **asynchronous raids** (with deterministic server-side replay validation), **live two-player defense takeovers**, and **co-op duo raids** complete with dual 3D character lobby previews and low-latency **WebRTC voice chat** powered by STUN and Open Relay TURN.
+Two players on different networks can party up from **Co-op / Duo**, talk through the game server, and drop into the **same base at the same time**. Raids can also stay solo. If the base owner is online, they can join for a short window and drive the patrol robot.
 
 ---
 
@@ -20,14 +19,14 @@ The game supports **asynchronous raids** (with deterministic server-side replay 
 1. [Architectural Overview](#architectural-overview)
 2. [AOOP & Software Engineering Design Patterns](#aoop--software-engineering-design-patterns)
 3. [Key Gameplay Systems](#key-gameplay-systems)
-   - [Persistent Save & PIN Authentication](#1-persistent-save--pin-authentication)
+   - [Device account](#1-device-account)
    - [Base Building & Color Quotas](#2-base-building--color-quotas)
-   - [Tactical Duo Lobby & Ready Sync](#3-tactical-duo-lobby--ready-sync)
-   - [Low-Latency WebRTC Voice Chat](#4-low-latency-webrtc-voice-chat)
+   - [Co-op / Duo drop](#3-co-op--duo-drop)
+   - [Voice](#4-voice)
    - [Stealth Raids & 12-Second Robot Stun](#5-stealth-raids--12-second-robot-stun)
    - [Live Defense Takeover](#6-live-defense-takeover)
    - [Admin Telemetry Dashboard](#7-admin-telemetry-dashboard)
-4. [Database Schema & Migrations](#database-schema--migrations)
+4. [Database](#database)
 5. [Local Development Setup](#local-development-setup)
 6. [Cloud Deployment Guide (Render + Vercel)](#cloud-deployment-guide-render--vercel)
 7. [Automated Test Suite](#automated-test-suite)
@@ -41,24 +40,24 @@ The game supports **asynchronous raids** (with deterministic server-side replay 
 │                        React 18 + Vite Frontend                        │
 │  Three.js 3D Voxel Renderer · GameStateContext FSM · Lucide · Tailwind │
 └──────────────────┬─────────────────────────────────┬───────────────────┘
-                   │ HTTPS / REST                    │ STOMP (SockJS) / WebRTC
+                   │ HTTPS / REST                    │ STOMP over WebSocket
                    ▼                                 ▼
 ┌────────────────────────────────────────────────────────────────────────┐
-│                      Spring Boot 3.3.4 Backend                         │
-│  Controllers · LiveRaid & Duo STOMP · RaidValidator · PresenceService   │
+│                      Spring Boot 3.3 Backend                           │
+│  REST · Duo & live-raid STOMP · voice relay · presence · raid pots        │
 └──────────────────┬─────────────────────────────────────────────────────┘
-                   │ Spring Data JPA + Flyway Migrations
+                   │ Spring Data JPA
                    ▼
 ┌────────────────────────────────────────────────────────────────────────┐
-│                      MySQL 8.0+ Database / H2                          │
-│  `user` · `plot` · `building` · `patrol_robot` · `lighthouse` · `raid` │
+│              H2 file database (local profile) or MySQL                 │
+│  `user` · `plot` · `building` · `patrol_robot` · `lighthouse` · raids  │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Frontend**: Single-page application built with React 18, Vite, Three.js (custom isometric camera, raycasting, soft clay shading, procedural mesh decors), and Framer Motion.
-- **Backend**: Spring Boot 3.3.4 utilizing Spring MVC for REST endpoints, Spring WebSocket with STOMP messaging for sub-second multiplayer synchronization, and Spring Data JPA.
-- **Database**: Relational MySQL with automated Flyway schema versioning (`classpath:db/migration`) and optional in-memory H2 profile for zero-config local testing.
-- **Audio & Networking**: WebRTC peer-to-peer audio channels supplemented by Open Relay TURN fallback servers to guarantee connectivity across NATs, mobile networks, and restrictive firewalls.
+- **Frontend**: React 18, Vite, Three.js, Tailwind, and Framer Motion. The dev server proxies `/api` and `/ws` to port 8080.
+- **Backend**: Spring Boot 3.3. REST for accounts, raids, and presence. STOMP for duo state, positions, and voice.
+- **Database**: The `local` profile uses a file-backed H2 database and creates tables on startup. Flyway stays off unless `FLYWAY_ENABLED=true`. A live MySQL URL is optional and only works when that host resolves.
+- **Voice**: PCM audio is sent through the same STOMP socket as the raid. Players do not open a WebRTC call and do not need a TURN server.
 
 ---
 
@@ -88,25 +87,25 @@ The codebase strictly demonstrates core **Advanced Object-Oriented Programming (
 
 ## Key Gameplay Systems
 
-### 1. Persistent Save & PIN Authentication
-- **Onboarding Modal**: First-time players provide a unique username, agree to game terms via interactive checkboxes, and set a 4-digit security PIN.
-- **Resume Session**: Returning players enter their username and PIN to instantly restore their base fortress, painted tiles, economy balances, and customized 3D character model.
-- **Database Backed**: Saved states are stored in the `world_save_json` column of the MySQL `user` table.
+### 1. Device account
+- The first visit calls `POST /api/session/start`. The server creates one account for that browser and returns a user id plus a JWT.
+- The id is shown in Co-op / Duo as `Player #####`. A recovery token in `localStorage` (`sp_device_token`) brings the same account back.
+- Fortress progress is stored on that user as `world_save_json`. Named username/password login exists for accounts that set one. Guest play does not ask for a PIN.
 
 ### 2. Base Building & Color Quotas
 - **Isometric Grid**: Build and upgrade structures including Coin Generators (passively accumulate coins), Ink Houses (gather ink energy), Makeup Houses (character customizer), and Searchlight Towers.
 - **Camouflage Rule**: Players paint floor and wall tiles with primary and secondary clay pigments. The anti-camo rule mandates that **no single color can exceed 35% of total base tiles**, enforcing tactical defense layouts.
 
-### 3. Tactical Duo Lobby & Ready Sync
-- **Online Presence**: Real-time lobby displays available online players. Players can send instant duo raid invites over `/topic/duo-invite/{userId}`.
-- **Dual 3D Character Previews**: Both Host and Guest characters are rendered in real-time 3D, showing character models, customized colors, and animated idle stances side-by-side.
-- **Synchronized Ready Check**: Host and Guest must both click **READY** before the Host's "START RAID" button unlocks.
+### 3. Co-op / Duo drop
+- Open **Co-op / Duo** on the raid radar. Online humans can be invited. You can also invite by the player id shown on their screen.
+- Accepting opens a lobby with both characters. The host picks the target base. Both players press **READY**.
+- The server locks one `raidId`, one `defenderId`, and one `launchAt`. The lobby counts **DROP IN**. When that time hits, both clients enter the same base. One player's screen updates cannot cancel the other player's drop.
+- House loot in a duo is split. A wall break and the alarm are shared. A caught player is pinned. The partner can keep moving.
 
-### 4. Low-Latency WebRTC Voice Chat
-- **Seamless Peer-to-Peer Voice**: Built-in voice channel between duo teammates with mic and sound toggles.
-- **TURN Fallback**: Uses Google/Twilio STUN plus Open Relay TURN fallback (`turn:openrelay.metered.ca`) to ensure voice connectivity across all network topologies.
-- **Autoplay Handling**: Integrated user-gesture unlock listener handles browser autoplay restrictions on laptops and mobile devices.
-- **Strict Session Teardown**: Voice connection immediately stops and releases browser microphone hardware when leaving the lobby, raid, or party (*"er theke ber hoye gele ar kotha bola jabe na"*).
+### 4. Voice
+- After the friend accepts, a bar appears at the top left. Each player clicks **Click to talk** once and allows the microphone.
+- Mic audio is cut into short PCM chunks and published to `/app/voice/{partyId}`. The server relays them on `/topic/voice/{partyId}`.
+- The play clock stays short on purpose, so speech does not drift half a second behind. Leaving the party, the base, or the menus stops the microphone.
 
 ### 5. Stealth Raids & 12-Second Robot Stun
 - **Grayscale Reconnaissance**: Enemy fortresses appear in grayscale; only the raider and searchlight cone display color.
@@ -131,43 +130,29 @@ The codebase strictly demonstrates core **Advanced Object-Oriented Programming (
 
 ---
 
-## Database Schema & Migrations
+## Database
 
-The backend utilizes **Flyway** for database migrations located in `backend/src/main/resources/db/migration`:
+Normal local and Render boots use the `local` profile. Hibernate updates the H2 file at `backend/data/shadow_palette`. Five faction bot bases (ids 101–105) are seeded on startup. New human accounts start at id `20161`.
 
-### Migration History
-1. **`V1__baseline.sql`**: Baseline table schema:
-   - `user`: Player identity, currency (`coins`, `ink_energy`, `chips`), character model, camo color, prestige.
-   - `plot`: World coordinate tiles and ownership.
-   - `building`: Base building entity using `JOINED` inheritance for `coin_generator`, `ink_house`, `craft_house`, `sleep_house`.
-   - `lighthouse`: Searchlight tower range, cone angle, and rotation speed.
-   - `patrol_robot`: Defense bot state and base movement speed.
-   - `wall_block`: Defensive perimeter blocks, gate status, and break progress.
-   - `raid_log`: Historical raid session outcomes and stolen resources.
-2. **`V2__add_user_save_and_auth.sql`**: Extends `user` table with:
-   - `password`: 4-digit PIN for session security.
-   - `world_save_json`: Full JSON serialized fortress state for cross-device resume.
-   - `terms_accepted`: Bit flag recording user agreement to game terms.
+Flyway scripts in `backend/src/main/resources/db/migration` describe the same tables (`user`, `plot`, `building`, `lighthouse`, `patrol_robot`, `wall_block`, `raid_log`, plus save JSON on `user`). They run only when `FLYWAY_ENABLED=true`.
+
+On Render's free plan the H2 file lives on the container disk. It is wiped when the service sleeps or redeploys. A reachable MySQL `SPRING_DATASOURCE_URL` is what keeps accounts across restarts. If that hostname does not resolve, `backend/docker-entrypoint.sh` drops the dead URL and boots H2 instead of crash-looping.
 
 ---
 
 ## Local Development Setup
 
 ### Prerequisites
-- **JDK 17+**
+- **JDK 17**
 - **Maven 3.9+**
 - **Node.js 20+** and npm
-- **MySQL 8.0+** (or use the in-memory H2 profile)
+
+MySQL is not required for local play.
 
 ### 1. Backend Setup
 
 ```bash
 cd backend
-
-# Option A: Run with MySQL (configure credentials in application.yml)
-mvn spring-boot:run
-
-# Option B: Run with in-memory H2 database (zero configuration required)
 mvn spring-boot:run -Dspring-boot.run.profiles=local
 ```
 
@@ -190,25 +175,19 @@ npm run dev -- --host 127.0.0.1 --port 3000
 
 ## Cloud Deployment Guide (Render + Vercel)
 
-### Backend Deployment on Render
-1. Create a new **Web Service** on [Render](https://render.com) pointing to the GitHub repository.
-2. Root Directory: `backend`
-3. Environment: `Docker` or `Java`
-4. Build Command: `mvn clean package -DskipTests`
-5. Start Command: `java -jar target/shadow-palette-backend-0.0.1-SNAPSHOT.jar`
-6. Environment Variables:
-   - `SPRING_DATASOURCE_URL`: JDBC connection string for your cloud MySQL (Aiven, Neon, or Railway)
-   - `SPRING_DATASOURCE_USERNAME`: Database username
-   - `SPRING_DATASOURCE_PASSWORD`: Database password
-   - `PORT`: `8080`
+`render.yaml` is the backend blueprint: Docker, `SPRING_PROFILES_ACTIVE=local`, health check `/api/health`.
 
-### Frontend Deployment on Vercel
-1. Create a new Project on [Vercel](https://vercel.com) pointing to the repository.
-2. Root Directory: `frontend`
-3. Framework Preset: `Vite`
-4. Build Command: `npm run build`
-5. Output Directory: `dist`
-6. Configure `VITE_API_URL` and `VITE_WS_URL` to point to your live Render backend URL.
+### Backend on Render
+1. New **Web Service** from this repo. Runtime **Docker**. Dockerfile `./backend/Dockerfile`. Context `./backend`.
+2. Set `SPRING_PROFILES_ACTIVE` to `local` and `PORT` to `8080`.
+3. Do not leave a `SPRING_DATASOURCE_URL` that points at a deleted host. That was the Aiven `UnknownHostException` crash. Either delete those MySQL variables, or replace them with a host that still resolves.
+4. Leave `ALLOWED_ORIGINS` empty unless you want to lock CORS to one Vercel domain. Empty means any origin.
+5. Redeploy after env changes. Free-tier sleep wipes the embedded database.
+
+### Frontend on Vercel
+1. Root directory `frontend`. Framework Vite. Output `dist`.
+2. Set `VITE_API_BASE_URL` to the Render `https` URL with **no trailing slash**, then redeploy. The value is baked in at build time.
+3. If that variable is empty, a Vercel hostname falls back to `https://shadow-palette-backend.onrender.com`. Localhost still uses the Vite proxy.
 
 ---
 
@@ -223,7 +202,7 @@ mvn test
 
 ### Test Coverage Highlights
 - **`RaidValidatorTest` (16 tests)**: Validates server-side replay logs, verifying legal movement vectors, searchlight cone exposures, and anti-cheat outcome validation.
-- **`DuoFlowTest` (2 tests)**: Validates two-player party creation, real-time STOMP position broadcasting, ready synchronization, and clean teardown.
+- **`DuoFlowTest`**: Party invite, accept, shared ready drop (`launchAt` + one `defenderId`), and position sync.
 - **`LiveRaidFlowTest` (4 tests)**: Tests live defender invite dispatch, 15-second acceptance timeout, and robot takeover messaging.
 - **`PatrolRobotStateObserverTest` (2 tests)**: Tests the 5-state State Pattern escalation ladder and sensor alert observer dispatch.
 - **`ColorCamouflageTest` (5 tests)**: Verifies exact and edge-zone stealth score algorithms.
@@ -242,12 +221,12 @@ npm run build
 
 | Key / Action | In Base Builder | In Stealth Raid |
 |---|---|---|
-| **W, A, S, D / Arrows** | Camera Pan | Character Movement |
-| **Shift (Hold)** | — | Sprint |
-| **[E]** | Inspect / Upgrade | Steal from Coin Vault or Ink House |
-| **[F]** or **[SPACE]** | — | **HIT ROBOT (Stun for 12s)** / Channel Gate / Hit Wall |
-| **Left Click** | Paint Tile / Select | Trigger Interaction / Click Stun Prompt |
-| **Scroll / +/-** | Zoom In / Out | Zoom In / Out |
+| **W, A, S, D / Arrows** | Walk | Walk |
+| **Shift (Hold)** | Sprint | Sprint |
+| **[E]** | House action (coins, ink, sleep, craft, makeup) | Steal from a house |
+| **[F]** | Enter or leave the buggy when you are near it | Hit the patrol robot / gate / wall |
+| **Left Click** | Paint or select | Interact |
+| **Scroll / +/-** | Zoom | Zoom |
 
 ---
 
@@ -255,11 +234,13 @@ npm run build
 
 | File | Purpose |
 |------|---------|
-| `backend/.../application.yml` | MySQL URL, credentials, port `8080` |
-| `backend/.../application-local.yml` | H2 in-memory profile |
-| `frontend/vite.config.js` | Dev server `3000`, proxies `/api` + `/ws` |
+| `backend/src/main/resources/application.yml` | Defaults. H2 unless `SPRING_DATASOURCE_URL` is set. Flyway off. Port `8080`. |
+| `backend/src/main/resources/application-local.yml` | File H2, Flyway off. This is the profile Render should use. |
+| `backend/docker-entrypoint.sh` | If the configured database host does not resolve, boot H2 instead. |
+| `frontend/vite.config.js` | Dev server `3000`, proxies `/api` and `/ws`. |
+| `frontend/.env.example` | `VITE_API_BASE_URL` for production. Leave it empty on localhost. |
 
-Player id for local multi-window tests: `?userId=34` (persisted in `localStorage` as `sp_userId`).
+Open two browsers for a duo test. Each one gets its own `Player #####` from the server. Invite that id. Do not reuse old ids such as `12`. The server only resumes an id at or above `20161` when the device token matches.
 
 ---
 
@@ -269,7 +250,8 @@ Player id for local multi-window tests: `?userId=34` (persisted in `localStorage
 |-----|----------|
 | [`docs/02-game-design-document-v2.md`](docs/02-game-design-document-v2.md) | Economy, stealth, buildings |
 | [`docs/05-api-contract-v2.md`](docs/05-api-contract-v2.md) | REST contract |
-| [`docs/09-setup-guide.md`](docs/09-setup-guide.md) | Tooling / first-time setup |
+| [`docs/09-setup-guide.md`](docs/09-setup-guide.md) | Local run, no MySQL required |
+| [`docs/duo-raid-testing.md`](docs/duo-raid-testing.md) | Two-browser co-op, drop, and voice |
 | [`docs/live-raid-testing.md`](docs/live-raid-testing.md) | Hybrid live defense playbook |
 | [`docs/deployment-guide.md`](docs/deployment-guide.md) | Production deployment (Render + Vercel) |
 | [`docs/deployment-guide-bn.md`](docs/deployment-guide-bn.md) | ডিপ্লয়মেন্ট গাইড (বাংলা) |

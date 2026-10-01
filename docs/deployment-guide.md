@@ -1,145 +1,74 @@
 # Deployment Guide
 
-This guide covers deploying Shadow Palette to production using Render (backend) and Vercel (frontend).
+The live game is a Vite frontend on Vercel and a Docker backend on Render. Two players on different networks meet through that backend. Voice uses the same websocket. There is no TURN server.
 
-## Prerequisites
+## What must be true
 
-- GitHub repository with the code
-- Render account (free tier available)
-- Vercel account (free tier available)
+1. Render is actually running. `GET /api/health` returns `{"status":"ok"}`.
+2. The service uses the `local` profile, or a MySQL host that still resolves.
+3. The Vercel build has `VITE_API_BASE_URL` set to that Render `https` URL, with no trailing slash.
 
-## Backend Deployment (Render)
+If the raid screen says `Player 0null` and the target list is empty, the browser never got an account. The API URL is missing, or the backend is down.
 
-### 1. Create MySQL Database on Render
+## Backend (Render)
 
-1. Go to [Render Dashboard](https://dashboard.render.com/)
-2. Click "New" → "Database"
-3. Choose "MySQL"
-4. Database name: `shadow_palette`
-5. User: `shadow_palette_user`
-6. Region: Choose closest to your users
-7. Click "Create Database"
+`render.yaml` is the blueprint: Docker, context `./backend`, `SPRING_PROFILES_ACTIVE=local`, `PORT=8080`, health check `/api/health`.
 
-### 2. Deploy Backend Service
+1. New **Web Service**, connect this GitHub repo, branch `main`.
+2. Runtime **Docker**. Dockerfile path `./backend/Dockerfile`. Docker context `./backend`.
+3. Environment:
+   - `SPRING_PROFILES_ACTIVE` = `local`
+   - `PORT` = `8080`
+   - `FLYWAY_ENABLED` = `false`
+4. Delete `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD`, and `SPRING_DATASOURCE_DRIVER` unless you have a database that answers DNS today.
+5. Leave `ALLOWED_ORIGINS` empty. Empty allows the Vercel domain. Set it only when you want to lock the API to specific `https://….vercel.app` origins.
+6. Deploy. Open `https://<your-service>.onrender.com/api/health`.
 
-1. Go to [Render Dashboard](https://dashboard.render.com/)
-2. Click "New" → "Web Service"
-3. Connect your GitHub repository
-4. Configure:
-   - **Name**: `shadow-palette-backend`
-   - **Runtime**: Docker
-   - **Dockerfile path**: `./backend/Dockerfile`
-   - **Docker Context**: `./backend`
-   - **Branch**: `main` (or your deployment branch)
-5. Add Environment Variables:
-   - `SPRING_DATASOURCE_URL`: Get from your Render database (connection string)
-   - `SPRING_DATASOURCE_USERNAME`: Get from your Render database
-   - `SPRING_DATASOURCE_PASSWORD`: Get from your Render database
-   - `SPRING_PROFILES_ACTIVE`: `prod`
-   - `PORT`: `8080`
-6. Click "Deploy Web Service"
+`backend/docker-entrypoint.sh` is the safety net. If `SPRING_DATASOURCE_URL` names a host that does not resolve, the container logs that and starts on H2 instead of exiting in Flyway. A host that resolves but refuses connections is not covered. Remove that URL.
 
-### 3. Get Backend URL
+### Free plan limits
 
-After deployment, Render will provide a URL like:
-```
-https://shadow-palette-backend.onrender.com
+The embedded database is a file inside the container. Render sleeps the free service and redeploys replace the disk. Accounts, bases, and the five bot seeds come back on the next boot, but player progress does not survive that restart.
+
+To keep progress, point `SPRING_DATASOURCE_URL` at a MySQL server you control, set the username, password, and `SPRING_DATASOURCE_DRIVER=com.mysql.cj.jdbc.Driver`, and do not set `SPRING_PROFILES_ACTIVE=local` for that boot. The host must resolve from inside Render.
+
+## Frontend (Vercel)
+
+1. Import the repo. Root directory `frontend`. Framework Vite.
+2. Build command `npm run build`. Output directory `dist`.
+3. Environment variable, set before the build:
+
+```text
+VITE_API_BASE_URL=https://<your-service>.onrender.com
 ```
 
-Save this URL for the frontend configuration.
+No trailing slash. Vite inlines this at build time. Changing it later requires another deploy.
 
-## Frontend Deployment (Vercel)
+If the variable is missing on a `vercel.app` host, the client falls back to `https://shadow-palette-backend.onrender.com`. That name only works when that exact Render service exists. Localhost never uses the fallback. It uses the Vite proxy.
 
-### 1. Connect to Vercel
+## After deploy
 
-1. Go to [Vercel Dashboard](https://vercel.com/dashboard)
-2. Click "Add New Project"
-3. Import your GitHub repository
+1. Open the Vercel site, reach the raid radar, and confirm the account line is `Player` plus a number, not `Player 0null`.
+2. The five faction bases should be listed (Crimson Citadel through Amethyst Sanctum).
+3. From a second device, open **Co-op / Duo**, invite the first player's id, accept, and click **Click to talk** on both sides.
+4. Both press **READY**. The lobby should count **DROP IN**, then both should enter the same base.
 
-### 2. Configure Project
+## When it breaks
 
-1. **Framework Preset**: Vite
-2. **Root Directory**: Leave empty (or set to `frontend` if needed)
-3. **Build Command**: `npm run build --prefix frontend`
-4. **Output Directory**: `frontend/dist`
+| What you see | What to change |
+|---|---|
+| Render log: `UnknownHostException` and a MySQL hostname | Delete the datasource env vars, set `SPRING_PROFILES_ACTIVE=local`, redeploy |
+| `No active profile set` and Flyway opens MySQL | Same as above. The dashboard env is overriding `render.yaml` |
+| Raid radar empty, `Player 0null` | Backend down, or Vercel built without `VITE_API_BASE_URL` |
+| Friend never appears | Both must be on the raid screen. The free backend must be awake |
+| Voice is silent | Each player clicks **Click to talk** and allows the mic |
+| One player enters the raid and the other stays in the lobby | Redeploy the backend and frontend that share `launchAt` |
 
-### 3. Add Environment Variables
+## Local versus production
 
-Add the following environment variable:
-- `VITE_API_BASE_URL`: Your Render backend URL (e.g., `https://shadow-palette-backend.onrender.com`)
-
-### 4. Deploy
-
-Click "Deploy" and wait for the build to complete.
-
-## Post-Deployment Steps
-
-### 1. Update Backend CORS
-
-Your backend may need CORS configuration to allow requests from your Vercel domain. Update `application.yml` or add a CORS configuration in your Spring Boot application.
-
-### 2. Test the Deployment
-
-1. Visit your Vercel URL
-2. Test user registration/login
-3. Test gameplay features
-4. Check WebSocket connections for live raids
-
-### 3. Monitor Logs
-
-- **Render**: Check service logs in Render Dashboard
-- **Vercel**: Check deployment logs in Vercel Dashboard
-
-## Troubleshooting
-
-### Backend Issues
-
-- **Database Connection**: Verify MySQL credentials in Render environment variables
-- **Port Issues**: Ensure PORT is set to 8080
-- **Build Failures**: Check Render build logs for Docker build errors
-
-### Frontend Issues
-
-- **API Connection**: Verify VITE_API_BASE_URL is set correctly
-- **WebSocket Issues**: Ensure backend supports WebSocket connections
-- **Build Failures**: Check Vercel build logs for dependency issues
-
-### Common Problems
-
-1. **CORS Errors**: Add your Vercel domain to backend CORS allowed origins
-2. **WebSocket Failures**: Ensure Render supports WebSocket connections (may need paid plan)
-3. **Database Timeouts**: Consider using Render's internal database for better performance
-
-## Local Development vs Production
-
-### Local Development
-- Frontend: `http://localhost:3000` (with Vite proxy)
-- Backend: `http://localhost:8080`
-- Database: Local MySQL or H2
-
-### Production
-- Frontend: Your Vercel URL
-- Backend: Your Render URL
-- Database: Render MySQL
-
-## Cost Considerations
-
-- **Render Free Tier**: Limited resources, may sleep when inactive
-- **Vercel Free Tier**: Generous limits for hobby projects
-- **Database**: Render free MySQL has limited connections
-
-For production usage, consider upgrading to paid plans for better performance and reliability.
-
-## Backup and Maintenance
-
-1. **Database Backups**: Render automatically backs up databases
-2. **Code Updates**: Deploy via git push to connected branches
-3. **Monitoring**: Set up alerts for service health
-
-## Support
-
-For issues specific to:
-- **Render**: https://render.com/docs
-- **Vercel**: https://vercel.com/docs
-- **Spring Boot**: https://spring.io/projects/spring-boot
-- **React/Vite**: https://vitejs.dev/guide/
+| | Local | Production |
+|---|---|---|
+| Site | `http://127.0.0.1:3000` | Vercel |
+| API | Vite proxy to `localhost:8080` | `VITE_API_BASE_URL` |
+| Data | `backend/data/shadow_palette` | H2 on the container, unless MySQL is set |
+| Profile | `local` | `local`, unless a real MySQL URL is set |

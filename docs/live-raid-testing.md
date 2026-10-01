@@ -4,22 +4,21 @@ Default raids stay fully async (sessionLog → `RaidValidator`). Live takeover i
 
 ## Prerequisites
 
-- Backend on `http://localhost:8080`
-  - MySQL (default `application.yml`), **or**
-  - H2 smoke profile: `mvn spring-boot:run -Dspring-boot.run.profiles=local`
+- Backend on `http://localhost:8080` with the H2 `local` profile:
+  `mvn spring-boot:run -Dspring-boot.run.profiles=local`
 - Frontend Vite on `http://127.0.0.1:3000` (proxies `/api` and `/ws`)
-- Two user ids that exist or will be auto-created (defaults: attacker `12`, defender e.g. `34`)
+- Two browsers. Each keeps the account the server assigns (`Player #####`, id `20161` or higher). Do not assume ids `12` and `34`.
 
 ## Two-browser manual test
 
-1. **Window A (defender)** — normal Chrome profile → `http://127.0.0.1:3000`
-   - Finish intro / enter base so presence heartbeats run (`GameStateContext` posts `/api/presence` every 8s).
-   - Stay on Base / Raid finder / any authenticated view (not splash).
-   - Optionally set `userId` to `34` via Options / admin if your build exposes it; otherwise use whatever id the heartbeats send and raid *that* id from the attacker.
+1. **Window A (defender)** — normal browser → `http://127.0.0.1:3000`
+   - Finish intro and enter the base so presence heartbeats run.
+   - Stay on Base or the raid radar (not the splash).
+   - Note the `Player #####` id on Co-op / Duo. That id is the defender.
 
-2. **Window B (attacker)** — Incognito (or second browser) → `http://127.0.0.1:3000`
-   - Log in / play as a **different** `userId` (e.g. `12`).
-   - Open Raid finder and raid the defender’s base id (must match the presence heartbeat userId of Window A).
+2. **Window B (attacker)** — a private window → `http://127.0.0.1:3000`
+   - This window gets a different account.
+   - Open the raid radar and raid A's base. A human base appears when that player has a plot and the session is live.
 
 3. **Expected**
    - Attacker’s `POST /api/raid/start` sees defender online → STOMP `/topic/raid-invite/{defenderId}`.
@@ -28,24 +27,11 @@ Default raids stay fully async (sessionLog → `RaidValidator`). Live takeover i
    - If defender catches (server distance ≤ `ROBOT_CATCH_DISTANCE`) → both get terminal `CAUGHT`; loot 0 + cooldown via `RaidService.completeLiveCaught`.
    - If defender ignores / disconnects → invite expires or `DEFENDER_LEFT`; attacker keeps AI patrol (no raid abort).
 
-## Curl smoke: mark defender online without a browser
+## API notes
 
-```bash
-# Heartbeat defender 34 (TTL 20s — repeat if needed)
-curl -s -X POST http://127.0.0.1:8080/api/presence \
-  -H 'Content-Type: application/json' \
-  -d '{"userId":34,"username":"Defender34","characterModel":1,"camoColor":"BLUE"}'
+`POST /api/session/start` is public and returns a JWT. Presence, raid start, and the online list need `Authorization: Bearer <jwt>`. A heartbeat that only sends `userId: 12` does not create that player. Use the two-browser steps above.
 
-# Confirm online list
-curl -s 'http://127.0.0.1:8080/api/presence/online?userId=12'
-
-# Start raid as attacker 12 → should return liveInviteSent:true
-curl -s -X POST http://127.0.0.1:8080/api/raid/start \
-  -H 'Content-Type: application/json' \
-  -d '{"attackerId":12,"defenderId":34,"raidId":"smoke-1","attackerName":"Raider12"}'
-```
-
-Invite is pushed on `/topic/raid-invite/34` (needs a STOMP client subscribed to observe the frame). The JSON response alone proves the presence hook fired.
+The invite frame is `/topic/raid-invite/{defenderId}`. STOMP connect also needs that JWT.
 
 ## Automated backend test
 
