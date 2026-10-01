@@ -34,18 +34,18 @@ Open `http://127.0.0.1:3000`. Vite sends `/api` and `/ws` to port 8080. Leave `V
 
 ## What you should see
 
-- The title waits for a click. It does not skip itself.
-- The raid radar shows a real `Player #####`, not `Player 0null`. If it says the raid server is still waking up, wait and press **Try again**.
+- The title waits for a click. A new browser asks for a player name and PIN first. It does not skip itself.
+- After you sign in, the title is Resume or Begin. Open the gear menu for that player's name, id, coins, and raid count. The raid radar uses the same name, not `Player 0null`. If it says the account server is still waking up, wait and press **Try again**.
 - Five bot bases are listed. They are seeded as users 101–105.
-- Your account id is `20161` or higher. The browser stores `sp_userId`, `sp_jwt`, and `sp_device_token`.
+- Your account id is `20161` or higher. The browser stores `sp_userId`, `sp_jwt`, and `sp_device_token` for the player who just signed in.
 
 The H2 file is `backend/data/shadow_palette`. Deleting those files starts a fresh world the next boot.
 
 ## Two players on one computer
 
-Use a normal window and a private window. Each gets its own account. On the raid screen, open **Co-op / Duo** and invite the other window's player id. Both click **Click to talk**, then both press **READY**. The drop countdown should take both into the same base.
+Use a normal window and a private window. Create a different name and PIN in each. On the raid screen, open **Co-op / Duo** and invite the other window's player id. Both click **Click to talk**, then both press **READY**. The drop countdown should take both into the same base.
 
-Do not force `?userId=12`. Ids below `20161` are not resumed unless the device token matches, and `12` never matches a guest account.
+Signing in with a name that already has a PIN loads that player's saved base. Do not force `?userId=12`.
 
 ## Optional MySQL
 

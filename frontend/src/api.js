@@ -104,18 +104,38 @@ export function getOrCreateDeviceToken() {
   }
 }
 
-/** Resolve or create a player identity server-side locked to device token. */
-export async function startSession(userId, username, password, recoveryToken) {
-  const deviceToken = recoveryToken || getOrCreateDeviceToken();
-  const payload = { recoveryToken: deviceToken };
-  if (userId != null) payload.userId = userId;
+/**
+ * Resolve a player.
+ * action: resume | login | register | claim.
+ * Resume uses the stored device token. Login and register use a name and PIN.
+ */
+export async function startSession(userId, username, password, recoveryToken, action) {
+  const mode = action || (username ? 'login' : 'resume');
+  const payload = { action: mode };
+  if (mode === 'resume' || mode === 'claim') {
+    payload.recoveryToken = recoveryToken || getOrCreateDeviceToken();
+    if (userId != null) payload.userId = userId;
+  }
   if (username) payload.username = username;
   if (password) payload.password = password;
-  return request('/api/session/start', {
+  const data = await request('/api/session/start', {
     method: 'POST',
     timeoutMs: 50000,
     body: JSON.stringify(payload),
   });
+  if (data?.needsLogin) {
+    setJwtToken(null);
+    return data;
+  }
+  if (data?.jwt) setJwtToken(data.jwt);
+  if (data?.recoveryToken) {
+    try {
+      window.localStorage.setItem('sp_device_token', data.recoveryToken);
+    } catch {
+      /* private mode */
+    }
+  }
+  return data;
 }
 
 export async function savePlayerProgress(payload) {

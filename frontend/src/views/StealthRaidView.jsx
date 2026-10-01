@@ -1159,26 +1159,21 @@ export default function StealthRaidView() {
 
   const finishRaid = () => {
     if (settled.current) return;
-    const { outcome, greedCoins, greedInk } = hudRef.current;
+    const { outcome } = hudRef.current;
     if (!outcome) return;
     settled.current = true;
-    recordRaidResult(outcome);
-
-    if (outcome === 'SILENT' || outcome === 'ESCAPED') {
-      soundEngine.playRaidExitSound();
-      sceneApi.current?.playBump?.();
-
-      const coins = greedCoins ?? stolenRef.current.coins;
-      const ink = greedInk ?? stolenRef.current.ink;
-      const drops = [];
-      if (coins > 0) drops.push({ id: `win-c`, kind: 'coin', amount: coins, x: 0.45, y: 0.4 });
-      if (ink > 0) drops.push({ id: `win-i`, kind: 'ink', amount: ink, x: 0.55, y: 0.4 });
-      if (drops.length) setFloatingLoot((p) => [...p, ...drops]);
-    } else if (outcome === 'CAUGHT') {
-      soundEngine.playRaidCaughtSound?.();
+    if (document.pointerLockElement) document.exitPointerLock?.();
+    try {
+      recordRaidResult(outcome);
+      if (outcome === 'SILENT' || outcome === 'ESCAPED') {
+        soundEngine.playRaidExitSound();
+        sceneApi.current?.playBump?.();
+      } else if (outcome === 'CAUGHT') {
+        soundEngine.playRaidCaughtSound?.();
+      }
+    } catch {
+      /* loot sound must not trap the player on the result card */
     }
-
-    // Go straight to base — no cinematic overlay delay
     transitionTo('BASE_BUILDER', {
       loadingTitle: 'Base',
       loadingSubtitle: '',

@@ -29,4 +29,8 @@ public class SessionStartResponse {
     private String recoveryToken;
     private Boolean isJailed;
     private JailStayDto jailStay;
+    /** True when this browser has no matching player and must sign in or create one. */
+    private Boolean needsLogin;
+    /** True when this player already has a PIN, so another device can open the same progress. */
+    private Boolean hasPin;
 }

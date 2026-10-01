@@ -7,7 +7,7 @@ Two browsers party up, talk through the game server, ready on one target, and dr
 - Backend: `mvn spring-boot:run -Dspring-boot.run.profiles=local` so `http://localhost:8080/api/health` is ok.
 - Frontend: `http://127.0.0.1:3000` (proxies `/api` and `/ws`).
 - Two browsers, or one normal window and one private window.
-- Each window shows its own `Player #####` on **Co-op / Duo**. Invite that number. Do not type `12` or `34`.
+- Each window signs in as its own player, then shows that name and id on **Co-op / Duo**. Invite that number. Do not type `12` or `34`.
 
 ## Steps
 

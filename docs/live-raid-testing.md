@@ -7,7 +7,7 @@ Default raids stay fully async (sessionLog → `RaidValidator`). Live takeover i
 - Backend on `http://localhost:8080` with the H2 `local` profile:
   `mvn spring-boot:run -Dspring-boot.run.profiles=local`
 - Frontend Vite on `http://127.0.0.1:3000` (proxies `/api` and `/ws`)
-- Two browsers. Each keeps the account the server assigns (`Player #####`, id `20161` or higher). Do not assume ids `12` and `34`.
+- Two browsers. Each signs in as its own player (name and PIN, id `20161` or higher). Do not assume ids `12` and `34`.
 
 ## Two-browser manual test
 

@@ -82,9 +82,16 @@ export const BUGGY_STORAGE_KEY = 'sp_palette_buggy_v1';
 export const BUGGY_SCATTER_VERSION = 2;
 export { CART_PARTS, CART_PART_IDS, BUGGY_GEAR_SPEED, WHEEL_PART_IDS, BODY_PART_IDS };
 
-function readBuggySave() {
+function buggySlotKey(userId) {
+  return userId ? `${BUGGY_STORAGE_KEY}_${userId}` : BUGGY_STORAGE_KEY;
+}
+
+function readBuggySave(userId) {
   try {
-    const raw = JSON.parse(window.localStorage.getItem(BUGGY_STORAGE_KEY) || 'null');
+    const raw = JSON.parse(window.localStorage.getItem(buggySlotKey(userId)) || 'null');
+    if (userId && (!raw || typeof raw !== 'object')) {
+      return { mountedParts: [], carriedPart: null, remaining: [], scattered: false };
+    }
     if (!raw || typeof raw !== 'object') {
       return { mountedParts: [], carriedPart: null, remaining: [], scattered: false };
     }
@@ -108,15 +115,19 @@ function readBuggySave() {
   }
 }
 
-function writeBuggySave(data) {
+function writeBuggySave(data, userId) {
   try {
-    window.localStorage.setItem(
-      BUGGY_STORAGE_KEY,
-      JSON.stringify({ ...data, scatterVersion: BUGGY_SCATTER_VERSION })
-    );
+    const payload = JSON.stringify({ ...data, scatterVersion: BUGGY_SCATTER_VERSION });
+    window.localStorage.setItem(BUGGY_STORAGE_KEY, payload);
+    if (userId) window.localStorage.setItem(buggySlotKey(userId), payload);
   } catch {
     /* private mode */
   }
+}
+
+function storeWorldJson(serialized, userId) {
+  window.localStorage.setItem(WORLD_SAVE_KEY, serialized);
+  if (userId) window.localStorage.setItem(`${WORLD_SAVE_KEY}_${userId}`, serialized);
 }
 
 function readWorldSave() {
@@ -202,9 +213,10 @@ export function GameStateProvider({ children }) {
   });
   const [sessionStatus, setSessionStatus] = useState('connecting');
   const [sessionAttempt, setSessionAttempt] = useState(0);
+  const [hasPin, setHasPin] = useState(false);
+  const applyAccountRef = useRef(() => {});
 
-  // On first mount, resolve or allocate player identity via the server.
-  // One device is guaranteed one persistent account.
+  // Resume the player this browser already proved it owns. A new browser must sign in.
   // Strict Mode mounts the effect twice; share one in-flight request so we do not create two accounts.
   useEffect(() => {
     let cancelled = false;
@@ -213,59 +225,20 @@ export function GameStateProvider({ children }) {
       try {
         const deviceToken = getOrCreateDeviceToken();
         if (!sessionStartInflight) {
-          sessionStartInflight = startSession(userId, undefined, undefined, deviceToken).catch((err) => {
+          sessionStartInflight = startSession(userId, undefined, undefined, deviceToken, 'resume').catch((err) => {
             sessionStartInflight = null;
             throw err;
           });
         }
         const res = await sessionStartInflight;
-        if (!cancelled && res?.success && res.userId) {
-          setUserId(res.userId);
-          if (res.username) setUsername(res.username);
-          if (res.jwt) {
-            setJwtToken(res.jwt);
-            disconnectStomp().catch(() => {});
-          }
-          try {
-            window.sessionStorage.setItem('sp_userId', String(res.userId));
-            window.localStorage.setItem('sp_userId', String(res.userId));
-            if (res.recoveryToken) {
-              window.localStorage.setItem('sp_device_token', res.recoveryToken);
-            }
-            if (res.username) window.localStorage.setItem('sp_username', res.username);
-          } catch {
-            /* private mode */
-          }
-
-          if (res.isJailed) {
-            setIsJailed(true);
-            setJailStay(res.jailStay || null);
-          } else {
-            setIsJailed(false);
-            setJailStay(null);
-          }
-
+        if (cancelled) return;
+        if (res?.needsLogin) {
+          setSessionStatus('login');
+          return;
+        }
+        if (res?.success && res.userId) {
+          applyAccountRef.current(res, { resetIfEmpty: false });
           setSessionStatus('ready');
-          if (res.worldSaveJson) {
-            try {
-              const data = JSON.parse(res.worldSaveJson);
-              window.localStorage.setItem(WORLD_SAVE_KEY, res.worldSaveJson);
-              if (Number.isFinite(data.coins)) setCoins(data.coins);
-              else if (Number.isFinite(res.coins)) setCoins(res.coins);
-              if (Number.isFinite(data.inkEnergy)) setInkEnergy(data.inkEnergy);
-              else if (Number.isFinite(res.inkEnergy)) setInkEnergy(res.inkEnergy);
-              if (Number.isFinite(data.chips)) setChips(data.chips);
-              else if (Number.isFinite(res.chips)) setChips(res.chips);
-              if (data.buildings) setBuildings(data.buildings);
-              if (data.paintedTiles) setPaintedTiles(data.paintedTiles);
-              if (data.defenses) setDefenses(data.defenses);
-              if (data.characterModel) setCharacterModel(data.characterModel);
-              if (data.camoColor) setCamoColor(data.camoColor);
-              if (data.prestigeLevel) setPrestigeLevel(data.prestigeLevel);
-            } catch {
-              /* ignore parse error */
-            }
-          }
           return;
         }
       } catch (err) {
@@ -456,54 +429,8 @@ export function GameStateProvider({ children }) {
     }
   }, [username, defaultUsername]);
 
-  const loginOrRegister = async (name, password) => {
-    const trimmed = (name || '').trim();
-    if (!trimmed) return false;
-    try {
-      const res = await startSession(null, trimmed, password);
-      if (res?.success && res.userId) {
-        setUserId(res.userId);
-        setUsername(res.username || trimmed);
-        if (res.jwt) {
-          setJwtToken(res.jwt);
-          disconnectStomp().catch(() => {});
-        }
-        try {
-          window.sessionStorage.setItem('sp_userId', String(res.userId));
-          window.localStorage.setItem('sp_userId', String(res.userId));
-          window.localStorage.setItem('sp_username', res.username || trimmed);
-        } catch {
-          /* ignore */
-        }
-
-        if (res.worldSaveJson) {
-          try {
-            const data = JSON.parse(res.worldSaveJson);
-            window.localStorage.setItem(WORLD_SAVE_KEY, res.worldSaveJson);
-            if (Number.isFinite(data.coins)) setCoins(data.coins);
-            if (Number.isFinite(data.inkEnergy)) setInkEnergy(data.inkEnergy);
-            if (Number.isFinite(data.chips)) setChips(data.chips);
-            if (data.buildings) setBuildings(data.buildings);
-            if (data.paintedTiles) setPaintedTiles(data.paintedTiles);
-            if (data.defenses) setDefenses(data.defenses);
-            if (data.characterModel) setCharacterModel(data.characterModel);
-            if (data.camoColor) setCamoColor(data.camoColor);
-            if (data.prestigeLevel) setPrestigeLevel(data.prestigeLevel);
-          } catch {
-            /* ignore parse error */
-          }
-        }
-        return res;
-      }
-      return res;
-    } catch (err) {
-      if (err?.message === 'INVALID_PASSWORD' || err?.data?.error === 'INVALID_PASSWORD') {
-        return { success: false, error: 'INVALID_PASSWORD' };
-      }
-      setUsername(trimmed);
-      return { success: true, offline: true };
-    }
-  };
+  const loginOrRegisterRef = useRef(async () => ({ success: false, error: 'NOT_READY' }));
+  const loginOrRegister = (name, password, action) => loginOrRegisterRef.current(name, password, action);
   const isVisitGuest = visitRole === 'guest';
   visitSessionRef.current = visitSession;
   visitRoleRef.current = visitRole;
@@ -547,7 +474,7 @@ export function GameStateProvider({ children }) {
   const saveWorld = (message = 'Saved') => {
     try {
       const serialized = JSON.stringify(worldRef.current);
-      window.localStorage.setItem(WORLD_SAVE_KEY, serialized);
+      storeWorldJson(serialized, userId);
       if (message) showToast(message, 'success');
 
       if (userId) {
@@ -567,6 +494,170 @@ export function GameStateProvider({ children }) {
     } catch {
       showToast('Save failed', 'error');
       return false;
+    }
+  };
+
+  const applyAccount = (res, { resetIfEmpty = false } = {}) => {
+    if (!res?.userId) return;
+    const previousId = userId;
+    const switching = previousId && Number(previousId) !== Number(res.userId);
+    if (switching) {
+      writeBuggySave({
+        mountedParts,
+        carriedPart,
+        remaining: partSpawns,
+        scattered: cartScattered,
+      }, previousId);
+      writeDailyState(dailyTasksRef.current, previousId);
+    }
+    setUserId(res.userId);
+    setUsername(res.username || `Player${String(res.userId).padStart(5, '0')}`);
+    setHasPin(!!res.hasPin);
+    if (res.jwt) {
+      setJwtToken(res.jwt);
+      disconnectStomp().catch(() => {});
+    }
+    try {
+      window.sessionStorage.setItem('sp_userId', String(res.userId));
+      window.localStorage.setItem('sp_userId', String(res.userId));
+      if (res.username) window.localStorage.setItem('sp_username', res.username);
+    } catch {
+      /* private mode */
+    }
+    if (res.isJailed) {
+      setIsJailed(true);
+      setJailStay(res.jailStay || null);
+    } else {
+      setIsJailed(false);
+      setJailStay(null);
+    }
+
+    let data = null;
+    if (res.worldSaveJson) {
+      try {
+        data = JSON.parse(res.worldSaveJson);
+      } catch {
+        data = null;
+      }
+    }
+    if (data && typeof data === 'object') {
+      storeWorldJson(res.worldSaveJson, res.userId);
+      setCoins(Number.isFinite(data.coins) ? data.coins : (Number.isFinite(res.coins) ? res.coins : 500));
+      setInkEnergy(Number.isFinite(data.inkEnergy) ? data.inkEnergy : (Number.isFinite(res.inkEnergy) ? res.inkEnergy : 100));
+      setChips(Number.isFinite(data.chips) ? data.chips : (Number.isFinite(res.chips) ? res.chips : 200));
+      if (Array.isArray(data.buildings)) setBuildings(migrateHouseFootprints(data.buildings));
+      if (data.paintedTiles) setPaintedTiles(data.paintedTiles);
+      if (Array.isArray(data.defenses)) setDefenses(data.defenses);
+      if (data.characterModel) setCharacterModel(data.characterModel);
+      if (data.camoColor) setCamoColor(data.camoColor);
+      if (data.prestigeLevel != null) setPrestigeLevel(data.prestigeLevel);
+      if (data.successfulRaids != null) setSuccessfulRaids(data.successfulRaids);
+      if (data.searchlightLevel) setSearchlightLevel(data.searchlightLevel);
+      if (data.selectedColor) setSelectedColor(data.selectedColor);
+      if (Number.isFinite(Number(data.gameDay))) setGameDay(Math.max(1, Math.floor(Number(data.gameDay))));
+      if (data.coinBanks && typeof data.coinBanks === 'object') setCoinBanks(data.coinBanks);
+      const list = Array.isArray(data.buildings) ? data.buildings : [];
+      const defs = Array.isArray(data.defenses) ? data.defenses : [];
+      setNextEntityId(Math.max(0, ...list.map((b) => Number(b.id) || 0), ...defs.map((d) => Number(d.id) || 0)) + 1);
+    } else if (resetIfEmpty) {
+      const ruins = createStarterRuins();
+      const tiles = generate5ColorTechniqueTiles(res.userId);
+      const fresh = {
+        coins: Number.isFinite(res.coins) ? res.coins : 500,
+        inkEnergy: Number.isFinite(res.inkEnergy) ? res.inkEnergy : 100,
+        chips: Number.isFinite(res.chips) ? res.chips : 200,
+        buildings: ruins,
+        paintedTiles: tiles,
+        defenses: [],
+        camoColor: res.camoColor || 'BLUE',
+        characterModel: res.characterModel || 1,
+        searchlightLevel: DEFAULT_SEARCHLIGHT_LEVEL,
+        prestigeLevel: 0,
+        successfulRaids: 0,
+        selectedColor: 'GREEN',
+        gameDay: 1,
+        coinBanks: {},
+      };
+      storeWorldJson(JSON.stringify(fresh), res.userId);
+      setCoins(fresh.coins);
+      setInkEnergy(fresh.inkEnergy);
+      setChips(fresh.chips);
+      setBuildings(ruins);
+      setPaintedTiles(tiles);
+      setDefenses([]);
+      setCharacterModel(fresh.characterModel);
+      setCamoColor(fresh.camoColor);
+      setPrestigeLevel(0);
+      setSuccessfulRaids(0);
+      setSearchlightLevel(DEFAULT_SEARCHLIGHT_LEVEL);
+      setSelectedColor('GREEN');
+      setGameDay(1);
+      setCoinBanks({});
+      setNextEntityId(ruins.length + 1);
+      setSelectedBuildingId(null);
+    }
+
+    let buggySlot = false;
+    let dailySlot = false;
+    try {
+      buggySlot = !!window.localStorage.getItem(`${BUGGY_STORAGE_KEY}_${res.userId}`);
+      dailySlot = !!window.localStorage.getItem(`sp_daily_tasks_v1_${res.userId}`);
+    } catch {
+      /* private mode */
+    }
+    const buggy = (switching || resetIfEmpty || buggySlot)
+      ? readBuggySave(res.userId)
+      : { mountedParts, carriedPart, remaining: partSpawns, scattered: cartScattered };
+    setMountedParts(buggy.mountedParts);
+    setCarriedPart(buggy.carriedPart);
+    setPartSpawns(buggy.remaining);
+    setCartScattered(buggy.scattered);
+    setGarageComplete(buggy.mountedParts.length >= CART_PART_IDS.length);
+    setBuggySeated(false);
+    setBuggyGear(0);
+    setBuggyTrackT(0);
+    writeBuggySave(buggy, res.userId);
+
+    const daily = (switching || resetIfEmpty || dailySlot)
+      ? readDailyState(res.userId)
+      : dailyTasksRef.current;
+    dailyTasksRef.current = daily;
+    setDailyTasks(daily);
+    writeDailyState(daily, res.userId);
+
+    if (res.newUser) setIsFirstRun(true);
+    else if (switching || resetIfEmpty) setIsFirstRun(false);
+  };
+  applyAccountRef.current = applyAccount;
+
+  loginOrRegisterRef.current = async (name, password, action) => {
+    const trimmed = (name || '').trim();
+    const pin = (password || '').trim();
+    const mode = action === 'register' ? 'register' : 'login';
+    if (!trimmed) return { success: false, error: 'INVALID_USERNAME' };
+    if (pin.length < 4) return { success: false, error: 'WEAK_PIN' };
+    if (userId) saveWorld('');
+    try {
+      const res = await startSession(null, trimmed, pin, undefined, mode);
+      if (res?.success && res.userId) {
+        applyAccount(res, { resetIfEmpty: true });
+        setSessionStatus('ready');
+        return res;
+      }
+      return { success: false, error: 'OFFLINE' };
+    } catch (err) {
+      const code = err?.data?.error || err?.message;
+      if (
+        code === 'INVALID_PASSWORD'
+        || code === 'UNKNOWN_PLAYER'
+        || code === 'USERNAME_TAKEN'
+        || code === 'WEAK_PIN'
+        || code === 'INVALID_USERNAME'
+        || code === 'PIN_NOT_SET'
+      ) {
+        return { success: false, error: code };
+      }
+      return { success: false, error: 'OFFLINE' };
     }
   };
 
@@ -596,7 +687,7 @@ export function GameStateProvider({ children }) {
     }
     dailyTasksRef.current = next;
     setDailyTasks(next);
-    writeDailyState(next);
+    writeDailyState(next, userId);
   };
 
   const claimDailyTasks = () => {
@@ -612,7 +703,7 @@ export function GameStateProvider({ children }) {
     const next = { ...cur, claimed: true };
     dailyTasksRef.current = next;
     setDailyTasks(next);
-    writeDailyState(next);
+    writeDailyState(next, userId);
     setCoins((v) => v + DAILY_TASK_REWARD.coins);
     setInkEnergy((v) => Math.min(INK_CAP, v + DAILY_TASK_REWARD.ink));
     soundEngine.playSuccessSound();
@@ -2165,6 +2256,8 @@ export function GameStateProvider({ children }) {
     showToast,
     username,
     setUsername,
+    hasPin,
+    setHasPin,
     loginOrRegister,
     mountedParts,
     carriedPart,

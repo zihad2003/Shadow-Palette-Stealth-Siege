@@ -21,6 +21,12 @@ public class SessionStartRequest {
     /** Optional passcode for the player account. */
     private String password;
 
-    /** Recovery token for guest accounts. */
+    /** Recovery token for this browser. Resume and claim must send the token that belongs to the account. */
     private String recoveryToken;
+
+    /**
+     * resume (default), login, register, or claim.
+     * login and register identify a player by name and PIN. claim sets a name and PIN on the device account already resumed.
+     */
+    private String action;
 }

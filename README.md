@@ -87,10 +87,10 @@ The codebase strictly demonstrates core **Advanced Object-Oriented Programming (
 
 ## Key Gameplay Systems
 
-### 1. Device account
-- The first visit calls `POST /api/session/start`. The server creates one account for that browser and returns a user id plus a JWT.
-- The id is shown in Co-op / Duo as `Player #####`. A recovery token in `localStorage` (`sp_device_token`) brings the same account back.
-- Fortress progress is stored on that user as `world_save_json`. Named username/password login exists for accounts that set one. Guest play does not ask for a PIN.
+### 1. Player login
+- A new browser asks for a player name and a PIN (4 or more characters) before the fortress opens. That pair is one player. The same name and PIN on another device load that player's coins, base, and raids.
+- A browser that already resumed its player opens straight to Resume. The gear menu shows that name, id, coins, and raids. **Different player** there switches accounts and loads the other save.
+- The server stores the fortress on that user as `world_save_json`, and writes coins, ink, chips, and prestige on the user row as well. The id is `20161` or higher.
 
 ### 2. Base Building & Color Quotas
 - **Isometric Grid**: Build and upgrade structures including Coin Generators (passively accumulate coins), Ink Houses (gather ink energy), Makeup Houses (character customizer), and Searchlight Towers.

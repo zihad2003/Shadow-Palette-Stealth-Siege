@@ -7,12 +7,34 @@ import OnboardShell from '../components/ui/OnboardShell.jsx';
 import ClayButton from '../components/ui/ClayButton.jsx';
 import { soundEngine } from '../soundEngine.js';
 
+function loginErrorText(code) {
+  if (code === 'INVALID_PASSWORD') return 'That PIN does not match this player.';
+  if (code === 'UNKNOWN_PLAYER') return 'No player uses that name. Create one instead.';
+  if (code === 'USERNAME_TAKEN') return 'That name already has a player. Sign in instead.';
+  if (code === 'WEAK_PIN') return 'PIN needs 4 to 20 characters.';
+  if (code === 'INVALID_USERNAME') return 'Use 3–16 letters or numbers, starting with a letter.';
+  if (code === 'PIN_NOT_SET') return 'This player has no PIN yet. Open them on the device that created them, then add a PIN.';
+  if (code === 'OFFLINE') return 'The account server is not reachable yet.';
+  return 'Could not open that player.';
+}
+
 export default function SplashView() {
-  const { transitionTo, isFirstRun, username, userId, loginOrRegister, provisionHomeBase } = useGameState();
-  const [showSwitchModal, setShowSwitchModal] = useState(false);
+  const {
+    transitionTo,
+    isFirstRun,
+    userId,
+    loginOrRegister,
+    provisionHomeBase,
+    sessionStatus,
+    retrySession,
+  } = useGameState();
+  const [mode, setMode] = useState('register');
   const [switchName, setSwitchName] = useState('');
   const [switchPass, setSwitchPass] = useState('');
   const [loginError, setLoginError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const identified = !!userId && (sessionStatus === 'ready' || sessionStatus === 'offline');
+  const showForm = sessionStatus === 'login' || (!userId && sessionStatus !== 'connecting');
 
   const handleResume = (e) => {
     e?.stopPropagation?.();
@@ -29,24 +51,25 @@ export default function SplashView() {
 
   const handleSwitchSubmit = async (e) => {
     e?.preventDefault?.();
+    e?.stopPropagation?.();
     setLoginError('');
-    if (!switchName.trim()) return;
-    const res = await loginOrRegister(switchName.trim(), switchPass.trim() || undefined);
-    if (res?.error) {
-      setLoginError(res.error === 'INVALID_PASSWORD' ? 'Incorrect passcode for this agent' : res.error);
+    if (busy) return;
+    setBusy(true);
+    const res = await loginOrRegister(switchName.trim(), switchPass.trim(), mode);
+    setBusy(false);
+    if (!res?.success || !res.userId) {
+      setLoginError(loginErrorText(res?.error));
       return;
     }
-    setShowSwitchModal(false);
     setSwitchName('');
     setSwitchPass('');
     provisionHomeBase();
-    transitionTo('BASE_BUILDER');
   };
 
   return (
     <div
       className="w-full h-full"
-      onClick={isFirstRun ? () => transitionTo('STORY') : undefined}
+      onClick={isFirstRun && identified && !showForm ? () => transitionTo('STORY') : undefined}
     >
       <OnboardShell step={0}>
         <div className="flex flex-col items-center gap-6 text-center">
@@ -79,101 +102,102 @@ export default function SplashView() {
             Stealth &amp; Siege
           </motion.p>
 
-          {!isFirstRun ? (
+          {sessionStatus === 'connecting' && (
+            <p className="text-[12px] text-clay-muted mt-4">Checking your player…</p>
+          )}
+
+          {sessionStatus === 'offline' && (
+            <div className="mt-3 flex flex-col items-center gap-2">
+              <p className="text-[12px] text-clay-muted">The account server is still waking up.</p>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  retrySession();
+                }}
+                className="text-[11px] text-clay-accent"
+              >
+                Try again
+              </button>
+            </div>
+          )}
+
+          {identified && !showForm && (
             <motion.div
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.55, duration: 0.3 }}
               className="flex flex-col items-center gap-3 mt-4"
             >
-              <div className="px-4 py-2 rounded-2xl bg-black/20 border border-white/5 flex items-center gap-2 text-[12px] text-clay-muted">
-                <span>Agent:</span>
-                <span className="text-clay-text font-semibold">{username || `Player ${userId}`}</span>
-                <span className="text-[10px] text-clay-muted/70 font-mono">#{userId}</span>
-              </div>
-
-              <ClayButton
-                variant="success"
-                onClick={handleResume}
-                className="h-12 px-8 rounded-2xl text-[14px] font-semibold flex items-center gap-2 shadow-lg hover:scale-105 transition-transform"
-              >
-                <Play size={16} fill="currentColor" /> Resume Game
-              </ClayButton>
-
-              <div className="flex items-center gap-4 mt-2">
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    soundEngine.playClickSound();
-                    setShowSwitchModal(true);
-                  }}
-                  className="text-[11px] text-clay-muted/70 hover:text-clay-accent transition-colors"
+              {isFirstRun ? (
+                <ClayButton
+                  variant="primary"
+                  onClick={handleStartNew}
+                  className="h-11 px-8 rounded-2xl text-[13px] font-semibold flex items-center gap-2"
                 >
-                  Switch / Login by Username
-                </button>
-                <span className="text-clay-muted/30">·</span>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    soundEngine.playClickSound();
-                    transitionTo('MAIN_MENU');
-                  }}
-                  className="text-[11px] text-clay-muted/70 hover:text-clay-text transition-colors"
+                  Begin Journey <ArrowRight size={15} />
+                </ClayButton>
+              ) : (
+                <ClayButton
+                  variant="success"
+                  onClick={handleResume}
+                  className="h-12 px-8 rounded-2xl text-[14px] font-semibold flex items-center gap-2 shadow-lg hover:scale-105 transition-transform"
                 >
-                  Customize Agent
-                </button>
-              </div>
-            </motion.div>
-          ) : (
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.55, duration: 0.3 }}
-              className="flex flex-col items-center gap-2 mt-4"
-            >
-              <ClayButton
-                variant="primary"
-                onClick={handleStartNew}
-                className="h-11 px-8 rounded-2xl text-[13px] font-semibold flex items-center gap-2"
-              >
-                Begin Journey <ArrowRight size={15} />
-              </ClayButton>
+                  <Play size={16} fill="currentColor" /> Resume Game
+                </ClayButton>
+              )}
+
             </motion.div>
           )}
 
-          {showSwitchModal && (
+          {showForm && (
             <div
-              className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
-              onClick={(e) => {
-                e.stopPropagation();
-                setShowSwitchModal(false);
-              }}
+              className="mt-4 w-full max-w-sm"
+              onClick={(e) => e.stopPropagation()}
             >
               <div
                 className="w-full max-w-sm p-6 rounded-3xl bg-[#141b22] border border-clay-border/60 shadow-2xl flex flex-col gap-4 text-left"
                 onClick={(e) => e.stopPropagation()}
               >
                 <div>
-                  <h3 className="text-[16px] font-heading font-semibold text-clay-text">Switch Agent / Login</h3>
+                  <h3 className="text-[16px] font-heading font-semibold text-clay-text">
+                    {mode === 'register' ? 'Create your player' : 'Sign in'}
+                  </h3>
                   <p className="text-[11px] text-clay-muted mt-0.5">
-                    Enter your username to resume your account, or enter a new name to register a new player ID.
+                    {mode === 'register'
+                      ? 'Your name and PIN are how this fortress is found again. Progress stays on that player.'
+                      : 'The same name and PIN load that player’s coins, base, and raids.'}
                   </p>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => { setMode('register'); setLoginError(''); }}
+                    className={`text-[11px] ${mode === 'register' ? 'text-clay-accent' : 'text-clay-muted'}`}
+                  >
+                    New player
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setMode('login'); setLoginError(''); }}
+                    className={`text-[11px] ${mode === 'login' ? 'text-clay-accent' : 'text-clay-muted'}`}
+                  >
+                    I already play
+                  </button>
                 </div>
                 <form onSubmit={handleSwitchSubmit} className="flex flex-col gap-3">
                   <input
                     type="text"
                     autoFocus
-                    placeholder="Username or Player ID"
+                    placeholder="Player name"
                     value={switchName}
                     onChange={(e) => setSwitchName(e.target.value)}
                     className="w-full h-10 px-3.5 rounded-xl bg-black/40 border border-white/10 text-[13px] text-clay-text placeholder:text-clay-muted/50 focus:outline-none focus:border-clay-accent"
-                    maxLength={20}
+                    maxLength={16}
                   />
                   <input
                     type="password"
-                    placeholder="Passcode / PIN (if set)"
+                    placeholder="PIN, 4 or more characters"
                     value={switchPass}
                     onChange={(e) => setSwitchPass(e.target.value)}
                     className="w-full h-10 px-3.5 rounded-xl bg-black/40 border border-white/10 text-[13px] text-clay-text placeholder:text-clay-muted/50 focus:outline-none focus:border-clay-accent"
@@ -184,19 +208,12 @@ export default function SplashView() {
                   )}
                   <div className="flex items-center justify-end gap-2 mt-1">
                     <ClayButton
-                      type="button"
-                      variant="ghost"
-                      onClick={() => setShowSwitchModal(false)}
-                      className="h-9 px-4 rounded-xl text-[12px]"
-                    >
-                      Cancel
-                    </ClayButton>
-                    <ClayButton
                       type="submit"
                       variant="success"
+                      disabled={busy}
                       className="h-9 px-5 rounded-xl text-[12px] font-semibold"
                     >
-                      Login / Resume
+                      {busy ? 'Saving…' : mode === 'register' ? 'Create player' : 'Sign in'}
                     </ClayButton>
                   </div>
                 </form>

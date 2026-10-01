@@ -36,18 +36,25 @@ export function ensureToday(state) {
   };
 }
 
-export function readDailyState() {
+function dailyKey(userId) {
+  return userId ? `${DAILY_TASKS_KEY}_${userId}` : DAILY_TASKS_KEY;
+}
+
+export function readDailyState(userId) {
   try {
-    const raw = JSON.parse(window.localStorage.getItem(DAILY_TASKS_KEY) || 'null');
+    const raw = JSON.parse(window.localStorage.getItem(dailyKey(userId)) || 'null');
+    if (userId && (!raw || typeof raw !== 'object')) return defaultDailyState();
     return ensureToday(raw);
   } catch {
     return defaultDailyState();
   }
 }
 
-export function writeDailyState(state) {
+export function writeDailyState(state, userId) {
   try {
-    window.localStorage.setItem(DAILY_TASKS_KEY, JSON.stringify(ensureToday(state)));
+    const payload = JSON.stringify(ensureToday(state));
+    window.localStorage.setItem(DAILY_TASKS_KEY, payload);
+    if (userId) window.localStorage.setItem(dailyKey(userId), payload);
   } catch {
     /* private mode */
   }

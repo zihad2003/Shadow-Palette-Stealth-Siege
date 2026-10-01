@@ -24,6 +24,7 @@ export default function MainMenuView() {
     markIntroDone,
     provisionHomeBase,
     showToast,
+    setHasPin,
   } = useGameState();
   const [selectedChar, setSelectedChar] = useState(Number(characterModel) === 2 ? 2 : 1);
   const [selectedCamo, setSelectedCamo] = useState(camoColor || 'BLUE');
@@ -41,26 +42,56 @@ export default function MainMenuView() {
       return;
     }
     soundEngine.playClickSound();
-    const finalName = inputName.trim() || `Player${userId || 20161}`;
-    setUsername(finalName);
+    const finalName = inputName.trim();
+    const pin = inputPass.trim();
+    if (!finalName) {
+      showToast('Enter a player name', 'error');
+      return;
+    }
+    const nameChanged = finalName.toLowerCase() !== String(username || '').trim().toLowerCase();
+    if ((nameChanged || pin) && pin.length < 4) {
+      showToast('PIN needs 4 characters so this player can be found again', 'error');
+      return;
+    }
     setCharacterModel(selectedChar);
     setCamoColor(selectedCamo);
-    provisionHomeBase();
-    markIntroDone();
 
     try {
-      const sessionRes = await startSession(userId, finalName, inputPass.trim() || undefined);
-      const activeId = sessionRes?.userId || userId;
-      if (sessionRes?.userId) {
-        setUserId(sessionRes.userId);
-        if (sessionRes.username) setUsername(sessionRes.username);
+      if (nameChanged || pin) {
+        const sessionRes = await startSession(userId, finalName, pin, undefined, 'claim');
+        if (sessionRes?.username) setUsername(sessionRes.username);
+        else setUsername(finalName);
+        if (sessionRes?.userId) setUserId(sessionRes.userId);
+        if (sessionRes?.hasPin) setHasPin(true);
+      } else {
+        setUsername(finalName);
       }
-      const setupRes = await setupPlayer(activeId, selectedChar, selectedCamo, finalName);
+      const setupRes = await setupPlayer(userId, selectedChar, selectedCamo, finalName);
       if (setupRes?.plotId) provisionHomeBase(setupRes.plotId);
-    } catch {
-      // offline / saved locally
+    } catch (err) {
+      const code = err?.data?.error || err?.message;
+      if (code === 'USERNAME_TAKEN') {
+        showToast('That name is already a player', 'error');
+        return;
+      }
+      if (code === 'INVALID_PASSWORD') {
+        showToast('PIN does not match this player', 'error');
+        return;
+      }
+      if (code === 'INVALID_USERNAME') {
+        showToast('Use 3–16 letters or numbers', 'error');
+        return;
+      }
+      if (code === 'WEAK_PIN') {
+        showToast('PIN needs 4 characters', 'error');
+        return;
+      }
+      setUsername(finalName);
+      showToast('Name saved on this device', 'info');
     }
 
+    provisionHomeBase();
+    markIntroDone();
     transitionTo(isFirstRun ? 'PAINT_TUTORIAL' : 'BASE_BUILDER');
   };
 
@@ -87,7 +118,7 @@ export default function MainMenuView() {
                 type="password"
                 value={inputPass}
                 onChange={(e) => setInputPass(e.target.value)}
-                placeholder="PIN / Pass (opt)"
+                placeholder="PIN"
                 maxLength={20}
                 className="w-full bg-transparent text-[13px] text-clay-text font-medium outline-none placeholder:text-clay-muted/40"
               />
