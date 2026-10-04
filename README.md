@@ -123,7 +123,10 @@ The codebase strictly demonstrates core **Advanced Object-Oriented Programming (
 - The result card stays until **Return to base**. The server records the outcome the raid ended with (`SILENT`, `ESCAPED`, or `CAUGHT`) and adds that greed loot to the saved wallet. A caught player keeps only what they already stole from houses.
 
 ### 6. Live Defense Takeover
-- A raid on another player does not pop a join prompt. The owner stays on their own base. The attacker still plays the stealth raid.
+- A raid on another player never pops a notification — the owner gets no toast or join prompt. If the owner is on their base, the two players simply see each other: the raider's character appears walking through the base, and the raider sees the owner's character (not a robot) moving in person.
+- The owner chases with their own character. Within 2.5 tiles a prompt appears: **Hold F 3s to catch and send to jail**. Holding F for 3 seconds locks the raider in the Base Jail; the server validates the catch distance (`LIVE_CATCH_DISTANCE`).
+- That records the raid as `CAUGHT` (loot forfeited, cooldown applied) and opens the jail ransom sequence — intercom voice plus coin offers — on both screens.
+- When the raider escapes or extracts instead, the live session closes and the raider vanishes from the owner's base.
 
 ### 7. Admin Telemetry Dashboard
 - Access `/admin` to view live player metrics, database record counts, active raids, economy controls, and server health.
@@ -203,7 +206,7 @@ mvn test
 ### Test Coverage Highlights
 - **`RaidValidatorTest` (16 tests)**: Validates server-side replay logs, verifying legal movement vectors, searchlight cone exposures, and anti-cheat outcome validation.
 - **`DuoFlowTest`**: Party invite, accept, shared ready drop (`launchAt` + one `defenderId`), and position sync.
-- **`LiveRaidFlowTest` (4 tests)**: Tests live defender invite dispatch, 15-second acceptance timeout, and robot takeover messaging.
+- **`LiveRaidFlowTest` (7 tests)**: Tests live defender invite dispatch, silent join, hold-F catch range validation, jail-drop raid recording, attacker run-end cleanup, and disconnect fallback.
 - **`PatrolRobotStateObserverTest` (2 tests)**: Tests the 5-state State Pattern escalation ladder and sensor alert observer dispatch.
 - **`ColorCamouflageTest` (5 tests)**: Verifies exact and edge-zone stealth score algorithms.
 - **`LighthouseDetectionEngineTest` (5 tests)**: Tests mathematical searchlight cone intersection geometry.

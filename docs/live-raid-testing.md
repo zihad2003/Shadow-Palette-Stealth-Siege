@@ -1,6 +1,6 @@
 # Live Raid Hybrid — local testing
 
-Default raids stay fully async (sessionLog → `RaidValidator`). Live takeover is **optional**: if the defender is online when a raid starts, they get a 15s STOMP invite to manually drive the PatrolRobot.
+Default raids stay fully async (sessionLog → `RaidValidator`). Live defense is **silent**: when the defender is online, their client auto-joins the session without any toast or popup. The owner defends in person with their own character — there is no robot takeover.
 
 ## Prerequisites
 
@@ -12,8 +12,7 @@ Default raids stay fully async (sessionLog → `RaidValidator`). Live takeover i
 ## Two-browser manual test
 
 1. **Window A (defender)** — normal browser → `http://127.0.0.1:3000`
-   - Finish intro and enter the base so presence heartbeats run.
-   - Stay on Base or the raid radar (not the splash).
+   - Finish intro and stay on the Base Builder screen so presence heartbeats run and the base view can auto-join.
    - Note the `Player #####` id on Co-op / Duo. That id is the defender.
 
 2. **Window B (attacker)** — a private window → `http://127.0.0.1:3000`
@@ -22,10 +21,12 @@ Default raids stay fully async (sessionLog → `RaidValidator`). Live takeover i
 
 3. **Expected**
    - Attacker’s `POST /api/raid/start` sees defender online → STOMP `/topic/raid-invite/{defenderId}`.
-   - Window A shows “Someone is raiding your base — Join?” with countdown.
-   - **Join** within 15s → Window A mounts live defense; Window B toast “A live defender has joined!”; robot follows defender WASD; attacker position syncs.
-   - If defender catches (server distance ≤ `ROBOT_CATCH_DISTANCE`) → both get terminal `CAUGHT`; loot 0 + cooldown via `RaidService.completeLiveCaught`.
-   - If defender ignores / disconnects → invite expires or `DEFENDER_LEFT`; attacker keeps AI patrol (no raid abort).
+   - Window A shows **no notification**. Its Base Builder auto-joins as DEFENDER and the raider's character appears walking in the base.
+   - Window B toast “A live defender has joined!” and the owner's character (model + camo, not a robot) appears chasing.
+   - Window A walks within 2.5 tiles of the raider → prompt `Hold F 3s to catch and send to jail`. Holding F for 3 seconds locks them in jail; the server validates distance ≤ `LIVE_CATCH_DISTANCE` (`CATCH` + `CAUGHT_IN_JAIL`).
+   - The server records the raid via `RaidService.completeLiveCaught` (loot 0 + cooldown + jail stay) and both windows enter the ransom sequence.
+   - If the raider escapes or extracts first, the attacker publishes `RAID_ENDED` and the raider vanishes from Window A.
+   - If defender never enters the base / disconnects → invite expires or `DEFENDER_LEFT`; attacker keeps AI patrol (no raid abort).
 
 ## API notes
 
@@ -40,9 +41,9 @@ cd backend
 mvn -q test -Dtest=LiveRaidFlowTest
 ```
 
-Covers: offline skip, invite+join+catch → `completeLiveCaught`, speed reject helpers, defender disconnect → AI fallback (`joined=false`).
+Covers: silent live session for a human even without a heartbeat, join, CATCH range rejection, hold-F catch → jail (`completeLiveCaught`), attacker `RAID_ENDED` cleanup, speed reject helpers, defender disconnect → AI fallback (`joined=false`).
 
 ## Notes
 
-- Server catch is authoritative; clients must not invent CAUGHT.
+- The catch is defender-initiated: proximity alone never ends the raid. The server validates the `CATCH` distance; clients must not invent `CAUGHT`.
 - SockJS endpoint: `/ws` (proxied by Vite). STOMP destinations: `/app/live-raid/{id}/join|position`, topics `/topic/live-raid/{id}/state` and `/topic/raid-invite/{userId}`.

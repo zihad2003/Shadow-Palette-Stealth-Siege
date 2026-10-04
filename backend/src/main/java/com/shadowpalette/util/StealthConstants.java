@@ -31,8 +31,10 @@ public final class StealthConstants {
     public static final double GATE_X = 24.0;
     public static final double GATE_Y = 39.0;
 
-    /** Live-raid join window (defender must accept before this elapses). */
-    public static final int LIVE_RAID_JOIN_SECONDS = 15;
+    /** Live-raid join window — the owner can see the raider for the whole raid. */
+    public static final int LIVE_RAID_JOIN_SECONDS = RAID_DURATION_SECONDS;
+    /** Hold-F seconds for a live base owner to catch and jail the raider. */
+    public static final double LIVE_CATCH_HOLD_SECONDS = 3.0;
     /** Slack multiplier on speed checks for network jitter. */
     public static final double LIVE_POSITION_SPEED_SLACK = 1.75;
     public static final double EXTRACTION_RADIUS = 1.75;
@@ -61,6 +63,8 @@ public final class StealthConstants {
     public static final double PLAYER_WALK_SPEED = 3.68;
     public static final double ROBOT_CATCH_DISTANCE = 0.65;
     public static final double ROBOT_CATCH_HOLD_SECONDS = 0.28;
+    /** Hold-F catch range for a live base owner (client prompts at 2.5; slack for latency). */
+    public static final double LIVE_CATCH_DISTANCE = 3.2;
 
     public static final int LOOT_INTERVAL_SECONDS = 10;
     public static final double LOOT_PERCENT_PER_INTERVAL = 0.05;

@@ -13,6 +13,7 @@ import ClayButton from '../components/ui/ClayButton.jsx';
 import GameMap from '../gamemap/GameMap.jsx';
 import { useGameState, GUIDE_STEPS } from '../state/GameStateContext.jsx';
 import { GATE_SPAWN_TILE, MAP_ROWS, WALK_TILE_SECONDS } from '../gamemap/mapConfig.js';
+import { LIVE_CATCH_HOLD_SECONDS } from '../raid/stealthConstants.js';
 import { collectSolidTiles } from '../gamemap/occupancy.js';
 import { isNearGarage, findPartNear, cartPartById, garageCenterTile } from '../gamemap/paletteBuggy.js';
 import { stepDirection, attemptStep, nudgeOffSolid, TURN_RATE } from '../character/gridMover.js';
@@ -31,6 +32,10 @@ import { ensureStompConnected, stompPublish, stompSubscribe, stompUnsubscribe } 
 import RansomModal from '../components/raid/RansomModal.jsx';
 
 const BASE_DECOR_SEED = 7;
+
+/** Live defense: chase range + hold time to catch and jail an intruding raider. */
+const CATCH_RANGE_TILES = 2.5;
+const CATCH_HOLD_SECONDS = LIVE_CATCH_HOLD_SECONDS;
 
 /** Tiles covered by the walk-brush around the character. */
 function brushFootprint(column, row, size) {
@@ -124,10 +129,12 @@ export default function BaseBuilderView() {
   const [intruder, setIntruder] = useState(null);
   const [carriedIntruder, setCarriedIntruder] = useState(null);
   const [showJailRansomModal, setShowJailRansomModal] = useState(false);
+  const [catchProgress, setCatchProgress] = useState(0);
   const carriedIntruderRef = useRef(null);
   carriedIntruderRef.current = carriedIntruder;
   const intruderRef = useRef(null);
   intruderRef.current = intruder;
+  const catchHoldRef = useRef(0);
   const [walker, setWalker] = useState({
     column: GATE_SPAWN_TILE.column,
     row: GATE_SPAWN_TILE.row,
@@ -190,23 +197,45 @@ export default function BaseBuilderView() {
   const distToJail = jailBuilding ? Math.hypot(walker.column - (jailBuilding.xPos ?? 15), walker.row - (jailBuilding.yPos ?? 15)) : Infinity;
   const isNearJailCell = distToJail <= 3.8 || !!nearJail;
   const distToIntruder = intruder ? Math.hypot(walker.column - intruder.column, walker.row - intruder.row) : Infinity;
-  const canCatchIntruder = !carriedIntruder && distToIntruder <= 2.5;
+  const canCatchIntruder = !carriedIntruder && distToIntruder <= CATCH_RANGE_TILES;
 
   const handleCatchIntruder = () => {
-    if (!intruder || carriedIntruder) return;
+    if (!intruder || jailedIntruderRef.current) return;
     const target = intruder;
-    setCarriedIntruder(target);
+    const pos = walkerRef.current;
+    const jailPos = {
+      column: jailBuilding?.xPos ?? jailBuilding?.column ?? 15,
+      row: jailBuilding?.yPos ?? jailBuilding?.row ?? 15,
+    };
+    const locked = {
+      ...target,
+      column: jailPos.column,
+      row: jailPos.row,
+      camoColor: target.camoColor || 'RED',
+      characterModel: target.characterModel || 1,
+    };
     setIntruder(null);
-    soundEngine.playWallHitSound?.();
-    showToast(`Caught ${target.name || 'Intruder'}! Picked up. Carry them to your Base Jail!`, 'warning');
+    setCarriedIntruder(null);
+    jailedIntruderRef.current = locked;
+    sceneApi.current?.clearPartnerPose?.();
+    sceneApi.current?.setPrisonerPose?.(locked.column, locked.row, {
+      camoColor: locked.camoColor,
+      characterModel: locked.characterModel,
+    });
+    soundEngine.playGateSlamSound?.();
+    showToast(`${target.name || 'Raider'} locked in Base Jail. Ransom is open.`, 'success');
+    setShowJailRansomModal(true);
     const raidId = liveRaidInvite?.raidId;
     if (raidId) {
       stompPublish(`/app/live-raid/${raidId}/position`, {
         userId,
         role: 'DEFENDER',
-        x: walker.column,
-        y: walker.row,
-        status: 'CARRIED',
+        x: pos.column,
+        y: pos.row,
+        model: pos.characterModel || 1,
+        camo: pos.camoColor || null,
+        status: 'CATCH',
+        outcome: 'CAUGHT_IN_JAIL',
       }).catch(() => {});
     }
   };
@@ -558,6 +587,17 @@ export default function BaseBuilderView() {
             sceneApi.current?.clearPrisonerPose?.();
             setLiveRaidInvite(null);
           }
+          // Raider escaped or quit — clear the intruder unless they're already jailed.
+          if (
+            state.terminal &&
+            (state.outcome === 'RAID_ENDED' || state.outcome === 'ABORTED' || state.message === 'ATTACKER_LEFT') &&
+            !jailedIntruderRef.current
+          ) {
+            setIntruder(null);
+            setCarriedIntruder(null);
+            sceneApi.current?.clearPartnerPose?.();
+            setLiveRaidInvite(null);
+          }
         });
       } catch {
         /* fallback */
@@ -571,6 +611,8 @@ export default function BaseBuilderView() {
         role: 'DEFENDER',
         x: pos.column,
         y: pos.row,
+        model: pos.characterModel || 1,
+        camo: pos.camoColor || null,
         status: carriedIntruderRef.current ? 'CARRIED' : null,
       }).catch(() => {});
       if (carriedIntruderRef.current) {
@@ -609,6 +651,7 @@ export default function BaseBuilderView() {
     let lastHud = { stamina: 1, sprinting: false, exhausted: false };
     let lastCompass = null;
     let lastParkedKey = '';
+    let lastCatchPct = 0;
 
     const loop = (now) => {
       const dt = Math.min(0.05, (now - last) / 1000);
@@ -721,7 +764,31 @@ export default function BaseBuilderView() {
       }
       const holdingF = !rk.buggySeated && codeHeld(keys.current, 'KeyF');
       const pos = walkerRef.current;
+
+      // Hold F 3s next to a live raider to catch them — takes priority over other F holds.
+      const intr = carriedIntruderRef.current ? null : intruderRef.current;
+      const intruderNear =
+        !!intr && Math.hypot(pos.column - intr.column, pos.row - intr.row) <= CATCH_RANGE_TILES;
+      const catchActive = holdingF && intruderNear;
+      if (catchActive) {
+        catchHoldRef.current += dt;
+        soundEngine.startRebuildHum();
+        if (catchHoldRef.current >= CATCH_HOLD_SECONDS) {
+          catchHoldRef.current = 0;
+          soundEngine.stopRebuildHum();
+          rk.handleCatchIntruder?.();
+        }
+      } else {
+        catchHoldRef.current = 0;
+      }
+      const catchPct = catchActive ? Math.min(1, catchHoldRef.current / CATCH_HOLD_SECONDS) : 0;
+      if (Math.abs(catchPct - lastCatchPct) >= 0.03 || (catchPct === 0) !== (lastCatchPct === 0)) {
+        lastCatchPct = catchPct;
+        setCatchProgress(catchPct);
+      }
+
       const canMount =
+        !catchActive &&
         holdingF &&
         !!rk.carriedPart &&
         !rk.isVisitGuest &&
@@ -741,6 +808,7 @@ export default function BaseBuilderView() {
             : null;
       const canHold =
         !canMount &&
+        !catchActive &&
         holdingF &&
         !!target &&
         rk.guideStep !== GUIDE_STEPS.WELCOME &&
@@ -750,7 +818,7 @@ export default function BaseBuilderView() {
         soundEngine.stopRebuildHum();
         rk.repairBuilding(doneId);
       } else if (canHold) soundEngine.startRebuildHum();
-      else if (!canMount) soundEngine.stopRebuildHum();
+      else if (!canMount && !catchActive) soundEngine.stopRebuildHum();
 
       const screen = sceneApi.current?.getGuideScreen?.();
       if (screen) {
@@ -831,10 +899,6 @@ export default function BaseBuilderView() {
           } else {
             rk.showToast?.('Carry the intruder to the Base Jail to lock them in!', 'info');
           }
-          return;
-        }
-        if (rk.canCatchIntruder) {
-          rk.handleCatchIntruder?.();
           return;
         }
         const pos = walkerRef.current;
@@ -1005,12 +1069,11 @@ export default function BaseBuilderView() {
     : buggySeated
       ? [visitRole === 'guest' ? 'F leave' : 'W drive · A/D steer · S back · F stand']
       : [
-          carriedIntruder
-            ? isNearJailCell
-              ? 'E Drop Intruder in Base Jail'
-              : 'Carrying Intruder · Carry to Base Jail'
+          canCatchIntruder
+            ? catchProgress > 0.01
+              ? `Catching ${intruder?.name || 'Raider'}… ${Math.round(catchProgress * 100)}%`
+              : 'Hold F 3s to catch and send to jail'
             : null,
-          canCatchIntruder ? `E Catch Intruder (${intruder?.name || 'Raider'})` : null,
           nearGarage && carriedPart
             ? mountProgress > 0.02
               ? `Hold F · ${Math.round(mountProgress * 100)}%`
@@ -1128,6 +1191,24 @@ export default function BaseBuilderView() {
           }}
         />
       </div>
+      {canCatchIntruder && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[160] pointer-events-none flex flex-col items-center gap-2 min-w-[260px] max-w-[86vw]">
+          <div className="px-4 py-2.5 rounded-2xl bg-black/80 border border-amber-400/70 shadow-[0_0_24px_rgba(245,158,11,0.35)] text-amber-200 text-center">
+            <p className="text-xs font-extrabold tracking-wide">
+              {catchProgress > 0.01
+                ? `Catching ${intruder?.name || 'Raider'}… ${Math.round(catchProgress * 100)}%`
+                : 'Hold F 3s to catch and send to jail'}
+            </p>
+            <div className="mt-1.5 h-1.5 w-full rounded-full bg-black/70 overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-amber-400 to-yellow-300 transition-[width] duration-100"
+                style={{ width: `${Math.min(100, catchProgress * 100)}%` }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
       {guideStep !== GUIDE_STEPS.WELCOME && <ActionPrompt lines={actionLines} />}
 
       <aside className="absolute right-4 top-[4.75rem] z-40 hidden md:flex flex-col items-end gap-2">

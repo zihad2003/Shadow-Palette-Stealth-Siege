@@ -72,16 +72,6 @@ public class LiveRaidService {
                     .build();
         }
 
-        boolean online = presenceService.isOnline(request.getDefenderId());
-        if (!online) {
-            return LiveRaidStartResponse.builder()
-                    .success(true)
-                    .raidId(raidId)
-                    .liveInviteSent(false)
-                    .message("DEFENDER_OFFLINE_ASYNC")
-                    .build();
-        }
-
         Instant now = Instant.now();
         Instant deadline = now.plus(StealthConstants.LIVE_RAID_JOIN_SECONDS, ChronoUnit.SECONDS);
         String attackerName = request.getAttackerName() != null && !request.getAttackerName().isBlank()
@@ -228,6 +218,10 @@ public class LiveRaidService {
             session.setAttackerUpdatedAt(now);
             if (msg.getModel() != null) session.setAttackerModel(msg.getModel());
             if (msg.getCamo() != null && !msg.getCamo().isBlank()) session.setAttackerCamo(msg.getCamo());
+            // Attacker announces a finished run (escaped/left) so the defender clears the intruder.
+            if ("RAID_ENDED".equals(msg.getOutcome()) && !"CARRIED".equals(session.getStatus())) {
+                return finalizeEnded(session);
+            }
         } else if ("DEFENDER".equals(role)) {
             if (!session.isJoined() || !callerUserId.equals(session.getDefenderUserId())) {
                 return toState(session, "DEFENDER_NOT_JOINED");
@@ -240,31 +234,43 @@ public class LiveRaidService {
             session.setRobotX(x);
             session.setRobotY(y);
             session.setRobotUpdatedAt(now);
+            if (msg.getModel() != null) session.setDefenderModel(msg.getModel());
+            if (msg.getCamo() != null && !msg.getCamo().isBlank()) session.setDefenderCamo(msg.getCamo());
+
+            // Only the base owner can change status/outcome (catch, carry, jail, release).
+            String reqStatus = msg.getStatus();
+            if (reqStatus != null) {
+                boolean startingCarry = ("CATCH".equals(reqStatus) || "CARRIED".equals(reqStatus))
+                        && !"CARRIED".equals(session.getStatus())
+                        && !"JAIL_LOCKED".equals(session.getStatus());
+                if (startingCarry) {
+                    boolean inRange = session.getAttackerX() != null
+                            && Math.hypot(session.getAttackerX() - x, session.getAttackerY() - y)
+                            <= StealthConstants.LIVE_CATCH_DISTANCE;
+                    if (!inRange) {
+                        return toState(session, "CATCH_TOO_FAR");
+                    }
+                    session.setStatus("CARRIED");
+                } else if (!"CATCH".equals(reqStatus)) {
+                    session.setStatus(reqStatus);
+                }
+            }
+            if (msg.getOutcome() != null) {
+                session.setOutcome(msg.getOutcome());
+                if ("CAUGHT".equals(msg.getOutcome()) || "CAUGHT_IN_JAIL".equals(msg.getOutcome()) || "RELEASED".equals(msg.getOutcome())) {
+                    session.setTerminal(true);
+                }
+            }
+            // Jail drop ends the raid: record the caught raid + jail stay like a server catch.
+            if (session.isTerminal() && "CAUGHT_IN_JAIL".equals(session.getOutcome())) {
+                LiveRaidStateMessage state = toState(session, "CAUGHT");
+                broadcast(raidId, state);
+                recordCaught(session);
+                registry.remove(raidId);
+                return state;
+            }
         } else {
             return toState(session, "BAD_ROLE");
-        }
-
-        if (msg.getStatus() != null) {
-            session.setStatus(msg.getStatus());
-        }
-        if (msg.getOutcome() != null) {
-            session.setOutcome(msg.getOutcome());
-            if ("CAUGHT".equals(msg.getOutcome()) || "CAUGHT_IN_JAIL".equals(msg.getOutcome()) || "RELEASED".equals(msg.getOutcome())) {
-                session.setTerminal(true);
-            }
-        }
-
-        if (session.isJoined()
-                && session.getAttackerX() != null
-                && session.getRobotX() != null
-                && !"CARRIED".equals(session.getStatus())) {
-            double dist = Math.hypot(
-                    session.getAttackerX() - session.getRobotX(),
-                    session.getAttackerY() - session.getRobotY()
-            );
-            if (dist <= StealthConstants.ROBOT_CATCH_DISTANCE) {
-                return finalizeCaught(session);
-            }
         }
 
         LiveRaidStateMessage state = toState(session, null);
@@ -400,14 +406,27 @@ public class LiveRaidService {
         return lastUpdate != null && ChronoUnit.SECONDS.between(lastUpdate, now) > 60;
     }
 
-    private LiveRaidStateMessage finalizeCaught(LiveRaidSession session) {
+    /** Attacker finished the run (escaped, extracted, or quit) — close the live session quietly. */
+    private LiveRaidStateMessage finalizeEnded(LiveRaidSession session) {
         session.setTerminal(true);
-        session.setOutcome("CAUGHT");
-        LiveRaidStateMessage state = toState(session, "CAUGHT");
-        state.setTerminal(true);
-        state.setOutcome("CAUGHT");
+        session.setOutcome("RAID_ENDED");
+        LiveRaidStateMessage state = toState(session, "RAID_ENDED");
         broadcast(session.getRaidId(), state);
+        try {
+            sessionRepository.findById(session.getRaidId()).ifPresent(entity -> {
+                entity.setStatus("ENDED");
+                entity.setEndedAt(LocalDateTime.now());
+                sessionRepository.save(entity);
+            });
+        } catch (Exception e) {
+            log.error("Failed to update LiveRaidSessionEntity to ENDED for {}", session.getRaidId(), e);
+        }
+        registry.remove(session.getRaidId());
+        return state;
+    }
 
+    /** Persist a caught raid: entity status, RaidLog + cooldown, and the jail stay for ransom. */
+    private void recordCaught(LiveRaidSession session) {
         try {
             sessionRepository.findById(session.getRaidId()).ifPresent(entity -> {
                 entity.setStatus("CAUGHT");
@@ -439,8 +458,6 @@ public class LiveRaidService {
                 log.error("Retry completeLiveCaught also failed for raidId {}", session.getRaidId(), retryEx);
             }
         }
-        registry.remove(session.getRaidId());
-        return state;
     }
 
     private void broadcast(String raidId, LiveRaidStateMessage state) {
@@ -460,6 +477,8 @@ public class LiveRaidService {
                 .attackerCamo(session.getAttackerCamo())
                 .robotX(session.getRobotX())
                 .robotY(session.getRobotY())
+                .defenderModel(session.getDefenderModel())
+                .defenderCamo(session.getDefenderCamo())
                 .message(message)
                 .build();
     }

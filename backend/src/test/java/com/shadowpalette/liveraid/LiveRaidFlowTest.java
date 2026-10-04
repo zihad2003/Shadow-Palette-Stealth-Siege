@@ -53,24 +53,22 @@ class LiveRaidFlowTest {
     }
 
     @Test
-    @DisplayName("Offline defender → no invite, async raid continues")
-    void offlineNoInvite() {
-        when(presenceService.isOnline(34L)).thenReturn(false);
+    @DisplayName("Human defender gets a silent live session even if presence missed a heartbeat")
+    void humanGetsSilentSessionWithoutPresence() {
+        when(userRepository.findById(34L)).thenReturn(java.util.Optional.empty());
         LiveRaidStartResponse res = liveRaidService.startRaid(LiveRaidStartRequest.builder()
                 .defenderId(34L)
                 .raidId("r1")
                 .attackerName("Attacker")
                 .build());
 
-        assertFalse(res.isLiveInviteSent());
-        verify(messaging, never()).convertAndSend(anyString(), any(Object.class));
+        assertTrue(res.isLiveInviteSent());
+        verify(messaging).convertAndSend(eq("/topic/raid-invite/34"), any(Object.class));
     }
 
     @Test
-    @DisplayName("Online defender receives invite; join + catch awards CAUGHT via RaidService")
+    @DisplayName("Online defender receives invite; hold-F catch + jail drop awards CAUGHT via RaidService")
     void inviteJoinCatch() {
-        when(presenceService.isOnline(34L)).thenReturn(true);
-
         // Attacker (userId=1) starts the raid (HTTP, uses SecurityContextHolder)
         setUserId(1L);
         LiveRaidStartResponse start = liveRaidService.startRaid(LiveRaidStartRequest.builder()
@@ -98,18 +96,59 @@ class LiveRaidFlowTest {
                 1L
         );
 
-        // Defender moves to same tile → CAUGHT
-        LiveRaidStateMessage caught = liveRaidService.updatePosition(
+        // CATCH from outside catch range is rejected (first defender pose, 4 tiles away)
+        LiveRaidStateMessage tooFar = liveRaidService.updatePosition(
                 "raid-live-1",
-                LiveRaidPositionMessage.builder().role("DEFENDER").x(10.2).y(10.1).build(),
+                LiveRaidPositionMessage.builder().role("DEFENDER").x(14.0).y(10.0).status("CATCH").build(),
                 "ws-def",
                 34L
         );
-        assertEquals("CAUGHT", caught.getOutcome());
+        assertEquals("CATCH_TOO_FAR", tooFar.getMessage());
+
+        // Standing next to the raider no longer auto-catches — the owner must hold F.
+        LiveRaidStateMessage near = liveRaidService.updatePosition(
+                "raid-live-1",
+                LiveRaidPositionMessage.builder().role("DEFENDER").x(11.6).y(10.0).build(),
+                "ws-def",
+                34L
+        );
+        assertNull(near.getOutcome());
+        assertFalse(near.isTerminal());
+
+        // Hold-F catch in range immediately jails the raider
+        LiveRaidStateMessage jailed = liveRaidService.updatePosition(
+                "raid-live-1",
+                LiveRaidPositionMessage.builder().role("DEFENDER").x(10.4).y(10.0)
+                        .status("CATCH").outcome("CAUGHT_IN_JAIL").build(),
+                "ws-def",
+                34L
+        );
+        assertTrue(jailed.isTerminal());
+        assertEquals("CAUGHT_IN_JAIL", jailed.getOutcome());
 
         // completeLiveCaught called with attacker=1, defender=34, duration, raidId
         verify(raidService).completeLiveCaught(eq(1L), eq(34L), anyInt(), eq("raid-live-1"));
         verify(messaging, atLeastOnce()).convertAndSend(eq("/topic/live-raid/raid-live-1/state"), any(Object.class));
+    }
+
+    @Test
+    @DisplayName("Attacker RAID_ENDED closes the session so the defender's screen clears")
+    void attackerEndsRun() {
+        setUserId(1L);
+        liveRaidService.startRaid(LiveRaidStartRequest.builder()
+                .defenderId(34L).raidId("raid-end").attackerName("A").build());
+        liveRaidService.join("raid-end", LiveRaidJoinRequest.builder().role("DEFENDER").build(), "ws-def", 34L);
+
+        LiveRaidStateMessage ended = liveRaidService.updatePosition(
+                "raid-end",
+                LiveRaidPositionMessage.builder().role("ATTACKER").x(24).y(39).outcome("RAID_ENDED").build(),
+                "ws-atk",
+                1L
+        );
+        assertTrue(ended.isTerminal());
+        assertEquals("RAID_ENDED", ended.getOutcome());
+        assertTrue(registry.get("raid-end").isEmpty());
+        verify(raidService, never()).completeLiveCaught(anyLong(), anyLong(), anyInt(), anyString());
     }
 
     @Test
@@ -123,8 +162,6 @@ class LiveRaidFlowTest {
     @Test
     @DisplayName("Defender disconnect mid-raid flips joined=false (AI fallback)")
     void defenderDisconnectFallback() {
-        when(presenceService.isOnline(34L)).thenReturn(true);
-
         // Attacker starts (HTTP, SecurityContextHolder)
         setUserId(1L);
         liveRaidService.startRaid(LiveRaidStartRequest.builder()
@@ -147,7 +184,6 @@ class LiveRaidFlowTest {
     @Test
     @DisplayName("Null callerUserId in join returns NOT_DEFENDER")
     void nullCallerRejectJoin() {
-        when(presenceService.isOnline(34L)).thenReturn(true);
         setUserId(1L);
         liveRaidService.startRaid(LiveRaidStartRequest.builder()
                 .defenderId(34L).raidId("raid-null").attackerName("A").build());
@@ -164,7 +200,6 @@ class LiveRaidFlowTest {
     @Test
     @DisplayName("Null callerUserId in updatePosition returns BAD_PAYLOAD")
     void nullCallerRejectPosition() {
-        when(presenceService.isOnline(34L)).thenReturn(true);
         setUserId(1L);
         liveRaidService.startRaid(LiveRaidStartRequest.builder()
                 .defenderId(34L).raidId("raid-null-pos").attackerName("A").build());
@@ -184,4 +219,4 @@ class LiveRaidFlowTest {
                 new UserPrincipal(userId, "user" + userId), null, Collections.emptyList())
         );
     }
-}
+}

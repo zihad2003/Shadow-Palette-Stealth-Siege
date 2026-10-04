@@ -20,6 +20,8 @@ public class LiveRaidStateMessage {
     private String attackerCamo;
     private Double robotX;
     private Double robotY;
+    private Integer defenderModel;
+    private String defenderCamo;
     private String message;
     private String status;
 }

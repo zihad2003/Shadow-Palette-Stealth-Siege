@@ -27,6 +27,9 @@ public class LiveRaidSession {
     private Double robotX;
     private Double robotY;
     private Instant robotUpdatedAt;
+    /** Owner's character look so the attacker renders a player, not a robot. */
+    private Integer defenderModel;
+    private String defenderCamo;
 
     private boolean joined;
     private Instant joinDeadline;

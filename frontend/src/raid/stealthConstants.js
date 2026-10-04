@@ -19,6 +19,9 @@ export const STEALTH_CONSTANTS = {
 };
 
 export const RAID_DURATION_SECONDS = 150;
+/** Live owner can join and see the raider for the whole raid. */
+export const LIVE_RAID_JOIN_SECONDS = RAID_DURATION_SECONDS;
+export const LIVE_CATCH_HOLD_SECONDS = 3;
 
 /** South-gate extraction zone (matches GATE_SPAWN_TILE on the 48×40 board). */
 export const GATE_X = Math.floor(MAP_COLS / 2);

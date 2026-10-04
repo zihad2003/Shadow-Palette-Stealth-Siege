@@ -726,20 +726,28 @@ export default function StealthRaidView() {
           if (state.message === 'DEFENDER_LEFT' || state.outcome === 'DEFENDER_LEFT') {
             liveDefenderRef.current = false;
             sceneApi.current?.clearLivePatrol?.();
+            if (!duoPartyId) sceneApi.current?.clearPartnerPose?.();
             showToastRef.current('Defender left — patrol AI resumed', 'info');
           }
-          if (liveDefenderRef.current && state.robotX != null && state.robotY != null && state.status !== 'CARRIED') {
-            sceneApi.current?.setLivePatrolPosition?.(state.robotX, state.robotY);
-          }
-          if (state.status === 'CARRIED') {
-            imprisonedRef.current = true;
-            if (state.robotX != null && state.robotY != null) {
-              setAttacker({ column: state.robotX, row: state.robotY });
-              attackerRef.current = { column: state.robotX, row: state.robotY };
+          if (liveDefenderRef.current && state.robotX != null && state.robotY != null) {
+            // The base owner chases in person: show their character (partner mesh is
+            // reserved for the duo partner, so duo raids keep the robot stand-in).
+            if (duoPartyId) {
+              if (state.status !== 'CARRIED') {
+                sceneApi.current?.setLivePatrolPosition?.(state.robotX, state.robotY);
+              }
+            } else {
+              sceneApi.current?.setPartnerPose?.(state.robotX, state.robotY, {
+                camoColor: state.defenderCamo || 'BLUE',
+                characterModel: state.defenderModel || 1,
+              });
             }
-            showToastRef.current?.('Caught by Base Owner! You have been picked up — being carried to the Base Jail...', 'warning');
           }
-          if ((state.status === 'JAIL_LOCKED' || state.outcome === 'CAUGHT_IN_JAIL' || (state.terminal && state.outcome === 'CAUGHT')) && !imprisonedRef.current) {
+          const jailedNow =
+            state.status === 'JAIL_LOCKED'
+            || state.outcome === 'CAUGHT_IN_JAIL'
+            || (state.terminal && state.outcome === 'CAUGHT');
+          if (jailedNow && !liveCaughtRef.current) {
             liveCaughtRef.current = true;
             imprisonedRef.current = true;
             setImprisoned(true);
@@ -750,8 +758,17 @@ export default function StealthRaidView() {
               : { column: 10, row: 10 };
             setAttacker((prev) => ({ ...prev, ...jailPos }));
             attackerRef.current = { ...attackerRef.current, ...jailPos };
-            showToastRef.current?.('Dropped into Base Jail cell! Voice Intercom & Ransom Active.', 'warning');
+            showToastRef.current?.('Caught by the base owner and locked in jail. Ransom is open.', 'warning');
             soundEngine.playGateSlamSound?.();
+          } else if (state.status === 'CARRIED' && !liveCaughtRef.current) {
+            if (!imprisonedRef.current) {
+              showToastRef.current?.('Caught by Base Owner! You have been picked up — being carried to the Base Jail...', 'warning');
+            }
+            imprisonedRef.current = true;
+            if (state.robotX != null && state.robotY != null) {
+              setAttacker({ column: state.robotX, row: state.robotY });
+              attackerRef.current = { column: state.robotX, row: state.robotY };
+            }
           }
           if (state.outcome === 'RELEASED') {
             setShowRansomModal(false);
@@ -785,8 +802,9 @@ export default function StealthRaidView() {
       stompUnsubscribe(`/topic/live-raid/${raidId}/state`);
       liveDefenderRef.current = false;
       sceneApi.current?.clearLivePatrol?.();
+      if (!duoPartyId) sceneApi.current?.clearPartnerPose?.();
     };
-  }, [raidSession?.raidId, userId]);
+  }, [raidSession?.raidId, userId, duoPartyId]);
 
   // Duo co-op: publish pose; partner mesh + shared alarm come from duoParty (context STOMP).
   useEffect(() => {
@@ -1118,6 +1136,18 @@ export default function StealthRaidView() {
     if (hudRef.current.outcome || settled.current) return;
     if (document.pointerLockElement) document.exitPointerLock?.();
     const outcome = forcedOutcome || 'INCOMPLETE';
+    // Tell the live session the run is over so the base owner's screen clears the raider.
+    const liveRaidId = raidSession?.raidId;
+    if (liveRaidId && !imprisonedRef.current && !liveCaughtRef.current) {
+      const pos = attackerRef.current;
+      stompPublish(`/app/live-raid/${liveRaidId}/position`, {
+        userId,
+        role: 'ATTACKER',
+        x: pos.column,
+        y: pos.row,
+        outcome: 'RAID_ENDED',
+      }).catch(() => { });
+    }
     const elapsed = (Date.now() - raidStartedRef.current) / 1000;
     const poolCoins = Number(raidLoot?.coins ?? targetMeta?.coins ?? 200);
     const poolInk = Number(raidLoot?.ink ?? targetMeta?.ink ?? 40);
