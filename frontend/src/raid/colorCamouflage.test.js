@@ -43,7 +43,7 @@ function playerOnBeam(dist = 2) {
   return { x: 5.5, y: 4.5 + dist };
 }
 
-// Test 1 — any beam contact spots immediately (camo no longer hides under the cone)
+// Test 1 — matching tile color hides you even under the beam
 {
   const tick = evaluateDetectionTick({
     light,
@@ -53,9 +53,10 @@ function playerOnBeam(dist = 2) {
     dt: 0.25,
   });
   assert.equal(tick.beam.canSee, true);
-  assert.equal(tick.exposed, true);
-  assert.equal(tick.justAlarmed, true);
-  assert.equal(tick.alarmLatched, true);
+  assert.equal(tick.colorMatch, true);
+  assert.equal(tick.exposed, false);
+  assert.equal(tick.justAlarmed, false);
+  assert.equal(tick.alarmLatched, false);
 }
 
 // Test 1b — outside beam stays quiet

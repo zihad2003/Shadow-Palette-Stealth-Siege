@@ -29,6 +29,8 @@ export const GATE_Y = MAP_ROWS - 1;
 export const EXTRACTION_RADIUS = 1.75;
 /** Seconds the attacker must hold still in the gate zone to extract. */
 export const CHANNEL_DURATION_SECONDS = 4;
+/** Raid escape tile — stand still this long to extract. */
+export const ESCAPE_HOLD_SECONDS = 10;
 /** Max tile movement between samples while channeling (≈ stationary). */
 export const CHANNEL_MOVE_EPSILON = 0.22;
 /** Robot within this distance interrupts the channel. */

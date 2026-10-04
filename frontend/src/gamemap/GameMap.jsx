@@ -5,7 +5,7 @@ import { createTileGrid } from './TileGrid.js';
 import { createFortressBorder, lockFortressGate, tickFortressBorder } from './FortressBorder.js';
 import { createOuterTerrain, applyMapAtmosphere } from './OuterTerrain.js';
 import { createAuroraSky } from './AuroraSky.js';
-import { createInteriorDecor, tickDecorMotion } from './MapDecor.js';
+import { createInteriorDecor, tickDecorMotion, listDecorOccupiedTiles } from './MapDecor.js';
 import { paintTile, clearTile, setTileHover, pulseTile, tickTile, revealTileColor } from './Tile.js';
 import { applyGrayscaleWorld, desaturateObject } from './applyGrayscale.js';
 import { createSearchlight } from './Searchlight.js';
@@ -15,7 +15,7 @@ import { createPaintSplash } from './PaintSplash.js';
 import { createHouseReadyCue } from './HouseReadyCue.js';
 import { buildGameHouse, buildRuinedHouse, placeHouseOnTile, createGamePatrolRobot, craftHouseHome, tickBuildingMotion, buildHouseBlueprint, tintBlueprint, createGuideMarker, alignGuideMarker, tintGuideMarker, tickGuideMarker, createRebuildFX, tickRebuildFX } from './buildStructure.js';
 import { createAttacker, tickCharacter, CHAR_MESH_REV } from '../character/buildCharacter.js';
-import { canEnterTile } from './occupancy.js';
+import { canEnterTile, collectSolidTiles } from './occupancy.js';
 import {
   buildPaletteBuggy,
   buildPartPickup,
@@ -298,6 +298,16 @@ export default function GameMap({
     const buildingsGroup = new THREE.Group();
     scene.add(buildingsGroup);
     let patrol = null;
+    const robotSolidsRef = { current: new Set() };
+    const refreshRobotSolids = () => {
+      robotSolidsRef.current = collectSolidTiles({
+        buildings: buildingsRef.current || [],
+        decorTiles: listDecorOccupiedTiles(grayscale ? 41 : 7, buildingsRef.current || []),
+        includeMakeupHouse: !grayscale,
+        blockGarage: !grayscale,
+        gateLocked: false,
+      });
+    };
 
     const selectRing = new THREE.Mesh(
       new THREE.TorusGeometry(TILE_SIZE * 0.95, 0.05, 10, 36),
@@ -440,6 +450,7 @@ export default function GameMap({
         scene.add(interiorDecor);
       }
       patrol?.setHome?.(craftHouseHome(buildingsRef.current));
+      refreshRobotSolids();
     };
     syncBuildings();
 
@@ -513,7 +524,8 @@ export default function GameMap({
     const chaseLookCurrent = new THREE.Vector3();
     let chaseLookPrimed = false;
     const patrolCmd = { chasing: false, column: SEARCHLIGHT_TILE.column, row: SEARCHLIGHT_TILE.row };
-    let lastPatrolHit = { caught: false, hitting: false };
+    let lastPatrolHit = { caught: false, hitting: false, tagged: false, catchProgress: 0 };
+    refreshRobotSolids();
     let garagePad = null;
     let buggyMesh = null;
     const carTile = garageCenterTile();
@@ -1393,16 +1405,24 @@ export default function GameMap({
         },
         stunPatrolRobot: (seconds = 8) => {
           patrol?.stun?.(seconds);
+          lastPatrolHit = { caught: false, tagged: false, hitting: false, catchProgress: 0 };
         },
-        getPatrolState: () => ({
-          ...lastPatrolHit,
-          chasing: (patrolCmd.chasing || !!patrol?.chasing) && !patrol?.isStunned && !patrol?.parked,
-          live: !!patrol?.liveDriven,
-          position: patrol?.position || null,
-          stunned: !!patrol?.isStunned,
-          stunRemaining: patrol?.stunRemaining || 0,
-          parked: !!patrol?.parked,
-        }),
+        getPatrolState: () => {
+          const asleep = !!patrol?.isStunned;
+          return {
+            ...lastPatrolHit,
+            caught: asleep ? false : !!lastPatrolHit.caught,
+            tagged: asleep ? false : !!lastPatrolHit.tagged,
+            hitting: asleep ? false : !!lastPatrolHit.hitting,
+            catchProgress: asleep ? 0 : Number(lastPatrolHit.catchProgress) || 0,
+            chasing: (patrolCmd.chasing || !!patrol?.chasing) && !asleep && !patrol?.parked,
+            live: !!patrol?.liveDriven,
+            position: patrol?.position || null,
+            stunned: asleep,
+            stunRemaining: patrol?.stunRemaining || 0,
+            parked: !!patrol?.parked,
+          };
+        },
         /** Apply a live-defender robot pose (disables AI until clearLivePatrol). */
         setLivePatrolPosition: (column, row, snap = false) => {
           patrolCmd.chasing = true;
@@ -1762,11 +1782,11 @@ export default function GameMap({
             patrol.setMode('chase', { column: patrolCmd.column, row: patrolCmd.row });
           }
         }
-        lastPatrolHit = patrol.update(elapsed, dt) || lastPatrolHit;
-        if (!patrolHuntsRaiders()) {
-          lastPatrolHit = { caught: false, hitting: false, tagged: false };
+        lastPatrolHit = patrol.update(elapsed, dt, robotSolidsRef.current) || lastPatrolHit;
+        if (patrol.isStunned || !patrolHuntsRaiders()) {
+          lastPatrolHit = { caught: false, hitting: false, tagged: false, catchProgress: 0 };
         } else if (!grayscale) {
-          lastPatrolHit = { ...lastPatrolHit, caught: false, tagged: false };
+          lastPatrolHit = { ...lastPatrolHit, caught: false, tagged: false, catchProgress: 0 };
         }
       }
       selectRing.rotation.z = elapsed * 0.6;

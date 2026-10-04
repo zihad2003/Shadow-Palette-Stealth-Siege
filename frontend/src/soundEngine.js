@@ -357,58 +357,10 @@ class SoundEngine {
     }, fade * 1000 + 40);
   }
 
-  playAmbient(type) {
+  playAmbient(_type) {
     this.ensureContext();
     if (!this.ctx) return;
-    if (this._ambientBed?.type === type) return;
-    this._stopAmbient(this._ambientBed ? 0.8 : 0.01);
-    if (this.muted || type === 'none') return;
-
-    const now = this.ctx.currentTime;
-    const gain = this.ctx.createGain();
-    gain.gain.setValueAtTime(0.0001, now);
-    const filter = this.ctx.createBiquadFilter();
-    filter.type = 'lowpass';
-    filter.Q.value = 0.6;
-    const nodes = [];
-
-    const startOsc = (kind, freq, level) => {
-      const osc = this.ctx.createOscillator();
-      const g = this.ctx.createGain();
-      osc.type = kind;
-      osc.frequency.setValueAtTime(freq, now);
-      g.gain.value = level;
-      osc.connect(g);
-      g.connect(filter);
-      osc.start(now);
-      nodes.push(osc);
-    };
-
-    if (type === 'menu') {
-      filter.frequency.setValueAtTime(720, now);
-      startOsc('sine', 110, 0.45);
-      startOsc('sine', 164.81, 0.22);
-      startOsc('triangle', 220, 0.08);
-      gain.gain.linearRampToValueAtTime(0.055, now + 1.6);
-    } else if (type === 'base') {
-      filter.frequency.setValueAtTime(900, now);
-      startOsc('sine', 130.81, 0.4);
-      startOsc('sine', 196, 0.2);
-      startOsc('triangle', 261.63, 0.07);
-      gain.gain.linearRampToValueAtTime(0.05, now + 1.8);
-    } else if (type === 'raid') {
-      filter.frequency.setValueAtTime(280, now);
-      filter.frequency.linearRampToValueAtTime(420, now + 6);
-      startOsc('sine', 55, 0.55);
-      startOsc('triangle', 82.4, 0.16);
-      gain.gain.linearRampToValueAtTime(0.045, now + 1.4);
-    } else {
-      return;
-    }
-
-    filter.connect(gain);
-    gain.connect(this.masterGain);
-    this._ambientBed = { type, nodes, gain };
+    this._stopAmbient(this._ambientBed ? 0.25 : 0.01);
   }
 }
 

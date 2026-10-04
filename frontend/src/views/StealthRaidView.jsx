@@ -26,9 +26,10 @@ import {
   ROBOT_HIT_RANGE,
   ROBOT_STUN_SECONDS,
   ROBOT_CATCH_HOLD_SECONDS,
+  ESCAPE_HOLD_SECONDS,
 } from '../raid/stealthConstants.js';
 import { resolveRaidOutcome, estimateLootPercent } from '../raid/RaidSession.js';
-import { tickExtractionChannel, estimateLootAmounts, inExtractionZone } from '../raid/extraction.js';
+import { tickExtractionChannel, estimateLootAmounts, inExtractionZone, pickEscapeTile, inEscapeTile } from '../raid/extraction.js';
 import { GATE_SPAWN_TILE, SEARCHLIGHT_TILE, WALK_TILE_SECONDS } from '../gamemap/mapConfig.js';
 import { collectSolidTiles, isWallBreakSpot } from '../gamemap/occupancy.js';
 import { stepDirection, attemptStep, nudgeOffSolid, TURN_RATE } from '../character/gridMover.js';
@@ -179,6 +180,7 @@ export default function StealthRaidView() {
   const actionRef = useRef(null);
   const hitRobotRef = useRef(null);
   const robotStunnedUntilRef = useRef(0);
+  const catchImmuneUntilRef = useRef(0);
   const [robotStunCountdown, setRobotStunCountdown] = useState(0);
   const [nearRobotDist, setNearRobotDist] = useState(Infinity);
   const sprintMeter = useRef(createSprintMeter());
@@ -275,6 +277,13 @@ export default function StealthRaidView() {
   solidsPairRef.current = { open: openSolids, locked: lockedSolids };
   solidRef.current = hud.gateLocked || gateLockedRef.current ? lockedSolids : openSolids;
 
+  const escapeTile = useMemo(
+    () => pickEscapeTile(openSolids, raidTargetId || duoPartyId || 34),
+    [openSolids, raidTargetId, duoPartyId]
+  );
+  const escapeTileRef = useRef(escapeTile);
+  escapeTileRef.current = escapeTile;
+
   const alarmSystem = useRef(null);
   if (!alarmSystem.current) {
     alarmSystem.current = createAlarmSystem({
@@ -313,7 +322,12 @@ export default function StealthRaidView() {
     detection.current.reset();
     lastDetectState.current = DETECTION_STATES.NORMAL;
     prevPosRef.current = { ...attackerRef.current };
-    sceneApi.current?.setExtractionMarker?.({ column: GATE_X, row: GATE_Y, active: true, intensity: 0.35 });
+    sceneApi.current?.setExtractionMarker?.({
+      column: escapeTileRef.current.column,
+      row: escapeTileRef.current.row,
+      active: true,
+      intensity: 0.45,
+    });
     let raf = 0;
     let last = performance.now();
     let tickN = 0;
@@ -408,7 +422,11 @@ export default function StealthRaidView() {
       }
 
       const liveDrivesRobot = liveDefenderRef.current && !!duoPartyId;
-      if (patrolArmedRef.current && chaseLatchedRef.current && !liveDrivesRobot) {
+      const earlyStun =
+        robotContext.current.state === ROBOT_STATES.DISABLED ||
+        Date.now() < (robotStunnedUntilRef.current || 0) ||
+        Date.now() < (catchImmuneUntilRef.current || 0);
+      if (patrolArmedRef.current && chaseLatchedRef.current && !liveDrivesRobot && !earlyStun) {
         robotContext.current.setState(ROBOT_STATES.CHASING);
         robotContext.current.lastSeenPlayerX = pos.column;
         robotContext.current.lastSeenPlayerY = pos.row;
@@ -433,7 +451,7 @@ export default function StealthRaidView() {
         sceneApi.current?.setAlarm?.(true);
         sceneApi.current?.lockGate?.();
         sceneApi.current?.flashSearchlightDetect?.(1.2);
-        showToastRef.current('Siren · break wall or hold gate', 'error');
+        showToastRef.current('Siren · find the escape tile or break a wall', 'error');
       } else if (lightSpotted) {
         sceneApi.current?.flashSearchlightDetect?.(0.55);
       }
@@ -452,7 +470,8 @@ export default function StealthRaidView() {
       const isRobotStunned =
         !!patrolState.stunned ||
         robotContext.current.state === ROBOT_STATES.DISABLED ||
-        Date.now() < (robotStunnedUntilRef.current || 0);
+        Date.now() < (robotStunnedUntilRef.current || 0) ||
+        Date.now() < (catchImmuneUntilRef.current || 0);
 
       // Robot proximity detection: fixes on the intruder within a 4-block circular radius
       const inRobotProximity = patrolArmedRef.current && robotDist <= ROBOT_CHASE_PROXIMITY && !isRobotStunned;
@@ -516,14 +535,17 @@ export default function StealthRaidView() {
         !isRobotStunned &&
         !liveDefenderRef.current &&
         !!patrolState.hitting &&
-        robotDist <= ROBOT_CATCH_DISTANCE + 0.2;
+        robotDist <= ROBOT_CATCH_DISTANCE;
+      const heldLongEnough = Number(patrolState.catchProgress) >= ROBOT_CATCH_HOLD_SECONDS - 0.05;
       const robotCaught =
         patrolArmedRef.current &&
         !isRobotStunned &&
         !hudRef.current.outcome &&
         (liveCaughtRef.current ||
           (!liveDefenderRef.current &&
-            (!!patrolState.caught || (!!patrolState.tagged && robotDist <= ROBOT_CATCH_DISTANCE + 0.2))));
+            robotDist <= ROBOT_CATCH_DISTANCE &&
+            heldLongEnough &&
+            (!!patrolState.caught || !!patrolState.tagged || !!patrolState.hitting)));
       const robotChasing =
         patrolArmedRef.current &&
         !isRobotStunned &&
@@ -538,6 +560,7 @@ export default function StealthRaidView() {
         extractionArmedRef.current = true;
       }
 
+      const escape = escapeTileRef.current;
       const channel = extractionArmedRef.current
         ? tickExtractionChannel({
           channelProgress: channelProgressRef.current,
@@ -546,30 +569,34 @@ export default function StealthRaidView() {
           prevX: prevPosRef.current.column,
           prevY: prevPosRef.current.row,
           dt,
-          robotX: robotPos?.column,
-          robotY: robotPos?.row,
+          robotX: isRobotStunned ? null : robotPos?.column,
+          robotY: isRobotStunned ? null : robotPos?.row,
           beamHit:
             !chaseLatchedRef.current &&
             !result.alarmLatched &&
             !!(result.exposed && result.beam?.canSee),
-          robotChasing,
+          robotChasing: robotChasing && !isRobotStunned,
+          zoneX: escape.column,
+          zoneY: escape.row,
+          zoneRadius: 0.62,
+          holdSeconds: ESCAPE_HOLD_SECONDS,
         })
         : {
           channelProgress: 0,
           channeling: false,
           complete: false,
           interrupted: false,
-          inZone: inExtractionZone(pos.column, pos.row),
+          inZone: inEscapeTile(pos.column, pos.row, escape),
           percent: 0,
         };
       channelProgressRef.current = channel.channelProgress;
       prevPosRef.current = { column: pos.column, row: pos.row };
 
       sceneApi.current?.setExtractionMarker?.({
-        column: GATE_X,
-        row: GATE_Y,
+        column: escape.column,
+        row: escape.row,
         active: !hudRef.current.outcome,
-        intensity: channel.channeling ? 0.55 + channel.percent / 200 : inExtractionZone(pos.column, pos.row) ? 0.45 : 0.3,
+        intensity: channel.channeling ? 0.7 + channel.percent / 200 : inEscapeTile(pos.column, pos.row, escape) ? 0.55 : 0.4,
         channeling: channel.channeling,
         interrupted: channel.interrupted,
       });
@@ -948,6 +975,7 @@ export default function StealthRaidView() {
         sceneApi.current?.stunPatrolRobot?.(secs);
         robotContext.current?.stun?.(secs);
         robotStunnedUntilRef.current = Date.now() + secs * 1000;
+        catchImmuneUntilRef.current = Date.now() + secs * 1000;
         setRobotStunCountdown(secs);
         showToastRef.current?.(`Teammate disabled the robot for ${secs}s`, 'success');
       }
@@ -1239,15 +1267,11 @@ export default function StealthRaidView() {
 
   const climbGate = () => {
     if (hudRef.current.outcome) return;
-    if (!inExtractionZone(attackerRef.current.column, attackerRef.current.row)) {
-      showToast('Reach the south gate', 'info');
+    if (!inEscapeTile(attackerRef.current.column, attackerRef.current.row, escapeTileRef.current)) {
+      showToast('Find the glowing escape tile', 'info');
       return;
     }
-    if (hudRef.current.gateLocked || hudRef.current.alarm) {
-      showToast('Gate locked — break a wall', 'error');
-      return;
-    }
-    showToast('Hold still to extract', 'info');
+    showToast(`Hold still ${ESCAPE_HOLD_SECONDS}s to escape`, 'info');
   };
 
   const hitWall = () => {
@@ -1340,6 +1364,7 @@ export default function StealthRaidView() {
     sceneApi.current?.stunPatrolRobot?.(ROBOT_STUN_SECONDS);
     robotContext.current?.stun?.(ROBOT_STUN_SECONDS);
     robotStunnedUntilRef.current = Date.now() + ROBOT_STUN_SECONDS * 1000;
+    catchImmuneUntilRef.current = Date.now() + ROBOT_STUN_SECONDS * 1000;
     setRobotStunCountdown(ROBOT_STUN_SECONDS);
     showToast(`Kick landed — robot asleep ${ROBOT_STUN_SECONDS}s`, 'success');
 
@@ -1382,7 +1407,7 @@ export default function StealthRaidView() {
       startLootChannel(house);
       return;
     }
-    if (isAtGate(column, row) && !hudRef.current.gateLocked && !hudRef.current.alarm) {
+    if (inEscapeTile(column, row, escapeTileRef.current)) {
       climbGate();
       return;
     }
@@ -1390,11 +1415,7 @@ export default function StealthRaidView() {
       hitWall();
       return;
     }
-    if (inExtractionZone(column, row)) {
-      showToast(hudRef.current.alarm ? 'Break wall to escape' : 'Hold still to extract', 'info');
-      return;
-    }
-    showToast('E · steal · hold gate to extract', 'info');
+    showToast('E · steal · find the glowing escape tile', 'info');
   };
   actionRef.current = tryAction;
   stealRef.current = () => {
@@ -1407,9 +1428,9 @@ export default function StealthRaidView() {
     }
   };
 
-  const atGate = inExtractionZone(attacker.column, attacker.row);
+  const atEscape = inEscapeTile(attacker.column, attacker.row, escapeTile);
   const atWall = isWallBreakSpot(attacker.column, attacker.row);
-  const canClimb = atGate && !hud.gateLocked && !hud.alarm && !hud.outcome;
+  const canClimb = atEscape && !hud.outcome;
   const canBreak = atWall && (hud.alarm || hud.gateLocked) && !hud.outcome;
   const nearLootHouse = !hud.outcome
     ? findRepairedNear(raidBuildings, attacker.column, attacker.row)
@@ -1700,7 +1721,7 @@ export default function StealthRaidView() {
             onClick={climbGate}
             className="h-8 px-3 rounded-lg text-[11px] flex items-center gap-1"
           >
-            <DoorOpen size={12} /> {hud.channeling ? `Extract ${hud.channelPercent}%` : 'Hold gate'}
+            <DoorOpen size={12} /> {hud.channeling ? `Escape ${hud.channelPercent}%` : `Hold ${ESCAPE_HOLD_SECONDS}s`}
           </ClayButton>
           <ClayButton
             variant={canBreak ? 'danger' : 'ghost'}
@@ -1861,6 +1882,7 @@ export default function StealthRaidView() {
           lines={[
             patrolArmed && nearRobotDist <= ROBOT_HIT_RANGE && robotStunCountdown <= 0 ? `F / Space · KICK ROBOT (${ROBOT_STUN_SECONDS}s sleep)` : null,
             robotStunCountdown > 0 ? `⚡ Robot Offline: ${robotStunCountdown.toFixed(1)}s (Safe to loot)` : null,
+            atEscape ? `Hold still ${ESCAPE_HOLD_SECONDS}s to escape` : 'Find the glowing escape tile',
             nearCoin && coinLeft > 0 ? 'E · steal coins' : null,
             nearInk && inkLeft > 0 ? 'E · steal ink' : null,
             nearCoin && coinLeft <= 0 ? 'Vault empty' : null,

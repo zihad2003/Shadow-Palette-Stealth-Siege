@@ -51,10 +51,20 @@ export function isGarageTile(column, row) {
   );
 }
 
-export function isNearGarage(column, row, radius = 2) {
-  const cx = GARAGE_ORIGIN.column + (GARAGE_SIZE - 1) / 2;
-  const cy = GARAGE_ORIGIN.row + (GARAGE_SIZE - 1) / 2;
-  return isGarageTile(column, row) || Math.hypot(column - cx, row - cy) <= radius;
+/** Any tile on the garage pad or in the 1-tile ring around it. */
+export function isBesideGarage(column, row) {
+  const c = Math.round(Number(column));
+  const r = Math.round(Number(row));
+  return (
+    c >= GARAGE_ORIGIN.column - 1 &&
+    c <= GARAGE_ORIGIN.column + GARAGE_SIZE &&
+    r >= GARAGE_ORIGIN.row - 1 &&
+    r <= GARAGE_ORIGIN.row + GARAGE_SIZE
+  );
+}
+
+export function isNearGarage(column, row) {
+  return isBesideGarage(column, row);
 }
 
 export function garageCenterWorld() {

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { GAME_COLORS } from '../colors.js';
 import { TILE_HEIGHT, TILE_PITCH, tileWorldPos, MAP_COLS, MAP_ROWS } from './mapConfig.js';
+import { canEnterTile } from './occupancy.js';
 import {
   ROBOT_CHASE_SPEED,
   ROBOT_HIT_SPEED,
@@ -501,6 +502,7 @@ export function createGamePatrolRobot({ home = null, parked: startParked = false
       stunTimer = Math.max(stunTimer, Number(seconds) || ROBOT_STUN_SECONDS);
       hitReact = 0.55;
       mode = 'disabled';
+      catchProgress = 0;
       applyTint('hit');
       impact.material.opacity = 0.95;
       impact.scale.set(1, 1, 1);
@@ -579,8 +581,43 @@ export function createGamePatrolRobot({ home = null, parked: startParked = false
       }
       applyTint(mode);
     },
-    update(elapsed, dt = 0.016) {
+    update(elapsed, dt = 0.016, solids = null) {
       tickBuildingMotion(bot, elapsed);
+      const tileBlocked = (c, r, allowHome) => {
+        if (!solids) return false;
+        const tc = Math.round(c);
+        const tr = Math.round(r);
+        if (allowHome && Math.hypot(tc - homeCol, tr - homeRow) <= 1.35) return false;
+        return !canEnterTile(tc, tr, solids);
+      };
+      const stepToward = (destC, destR, speed, allowHome) => {
+        const dx = destC - col;
+        const dy = destR - row;
+        const dist = Math.hypot(dx, dy);
+        if (dist < 0.04) return dist;
+        const step = Math.min(dist, speed * dt);
+        const hereBlocked = tileBlocked(col, row, allowHome);
+        const tryPos = (nc, nr) => {
+          if (tileBlocked(nc, nr, allowHome) && !hereBlocked) return false;
+          col = nc;
+          row = nr;
+          return true;
+        };
+        if (tryPos(col + (dx / dist) * step, row + (dy / dist) * step)) {
+          return Math.hypot(destC - col, destR - row);
+        }
+        const horizFirst = Math.abs(dx) >= Math.abs(dy);
+        const a = horizFirst
+          ? [col + Math.sign(dx) * step, row]
+          : [col, row + Math.sign(dy) * step];
+        const b = horizFirst
+          ? [col, row + Math.sign(dy) * step]
+          : [col + Math.sign(dx) * step, row];
+        if (tryPos(a[0], a[1]) || tryPos(b[0], b[1])) {
+          return Math.hypot(destC - col, destR - row);
+        }
+        return dist;
+      };
 
       // Hit pop, then 8s sleep: no walk, no catch.
       if (stunTimer > 0) {
@@ -651,10 +688,7 @@ export function createGamePatrolRobot({ home = null, parked: startParked = false
         const dy = targetRow - row;
         let dist = Math.hypot(dx, dy);
         if (dist > 0.02) {
-          const step = Math.min(dist, ROBOT_HIT_SPEED * dt * 1.35);
-          col += (dx / dist) * step;
-          row += (dy / dist) * step;
-          dist = Math.hypot(targetCol - col, targetRow - row);
+          dist = stepToward(targetCol, targetRow, ROBOT_HIT_SPEED * 1.35, false);
         }
         const p = tileWorldPos(col, row);
         const follow = 1 - Math.exp(-14 * dt);
@@ -688,9 +722,7 @@ export function createGamePatrolRobot({ home = null, parked: startParked = false
           catchProgress = 0;
           return { caught: false, hitting: false, state: 'park', chasing: false, parked: true };
         }
-        const step = 1.55 * dt;
-        col += (dx / dist) * Math.min(step, dist);
-        row += (dy / dist) * Math.min(step, dist);
+        stepToward(homeCol, homeRow, 1.55, true);
         const p = tileWorldPos(col, row);
         if (!primed) {
           worldX = p.x;
@@ -711,16 +743,20 @@ export function createGamePatrolRobot({ home = null, parked: startParked = false
       // Idle orbits only — never while chasing.
       if (mode === 'patrol' || mode === 'searching' || mode === 'suspicious') {
         const speed = mode === 'searching' ? 1.6 : mode === 'suspicious' ? 1.1 : 0.85;
-        const dest = waypoints[wpIndex];
+        let dest = waypoints[wpIndex];
+        let skips = 0;
+        while (dest && tileBlocked(dest.column, dest.row, false) && skips < waypoints.length) {
+          wpIndex = (wpIndex + 1) % waypoints.length;
+          dest = waypoints[wpIndex];
+          skips += 1;
+        }
         const dx = dest.column - col;
         const dy = dest.row - row;
         const dist = Math.hypot(dx, dy);
         if (dist < 0.08) {
           wpIndex = (wpIndex + 1) % waypoints.length;
         } else {
-          const step = speed * dt;
-          col += (dx / dist) * Math.min(step, dist);
-          row += (dy / dist) * Math.min(step, dist);
+          stepToward(dest.column, dest.row, speed, false);
         }
         const p = tileWorldPos(col, row);
         if (!primed) {
@@ -757,9 +793,7 @@ export function createGamePatrolRobot({ home = null, parked: startParked = false
       const dy = targetRow - row;
       let dist = Math.hypot(dx, dy);
       if (dist > 0.04) {
-        const step = speed * dt;
-        col += (dx / dist) * Math.min(step, dist);
-        row += (dy / dist) * Math.min(step, dist);
+        dist = stepToward(targetCol, targetRow, speed, false);
         col = Math.max(0.5, Math.min(MAP_COLS - 1.5, col));
         row = Math.max(0.5, Math.min(MAP_ROWS - 1.5, row));
         dist = Math.hypot(targetCol - col, targetRow - row);
