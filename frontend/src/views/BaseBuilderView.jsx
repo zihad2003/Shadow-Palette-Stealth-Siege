@@ -1213,7 +1213,7 @@ export default function BaseBuilderView() {
         onDismissMoveTip={dismissMoveTip}
       />
 
-      <div className="absolute left-3 top-16 z-50 flex w-[220px] max-w-[46vw] max-h-[calc(100%-7.5rem)] flex-col gap-2 overflow-y-auto pointer-events-none">
+      <div className="absolute left-3 top-16 z-50 flex w-[220px] max-w-[46vw] flex-col gap-2 pointer-events-none">
         <DailyTasksPanel hidden={guideStep !== GUIDE_STEPS.DONE || isVisitGuest} />
         <HouseStation
           building={peekHouse}
