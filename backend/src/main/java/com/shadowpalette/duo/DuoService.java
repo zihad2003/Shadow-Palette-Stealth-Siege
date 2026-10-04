@@ -201,7 +201,7 @@ public class DuoService {
     public void relayVoice(String room, DuoVoiceMessage voice) {
         if (room == null || room.isBlank() || voice == null || voice.getFromUserId() == null) return;
         String pcm = voice.getPcm();
-        if (pcm == null || pcm.isBlank() || pcm.length() > 48000) return;
+        if (pcm == null || pcm.isBlank() || pcm.length() > 96000) return;
         if (!maySpeak(room, voice.getFromUserId())) return;
         messaging.convertAndSend("/topic/voice/" + room, voice);
     }

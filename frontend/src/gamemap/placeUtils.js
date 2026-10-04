@@ -14,10 +14,23 @@ export function getGameFootprint(type) {
   return GAME_FOOTPRINTS[type] || { w: 3, h: 3 };
 }
 
+/** Keep the corner Ink House; drop the old mid-yard extra. */
+export function stripExtraInkHouses(list) {
+  if (!Array.isArray(list)) return [];
+  const ink = list.filter((b) => b?.buildingType === 'INK_HOUSE');
+  if (ink.length <= 1) return list;
+  const keep = [...ink].sort((a, b) => {
+    const da = Math.hypot((a.xPos || 0) - (MAP_COLS - 5), (a.yPos || 0) - 3);
+    const db = Math.hypot((b.xPos || 0) - (MAP_COLS - 5), (b.yPos || 0) - 3);
+    return da - db;
+  })[0];
+  return list.filter((b) => b?.buildingType !== 'INK_HOUSE' || b.id === keep.id);
+}
+
 /** Grow saved 2×2 houses to 3×3 and keep them on the board. */
 export function migrateHouseFootprints(list) {
   if (!Array.isArray(list)) return [];
-  return list.map((b) => {
+  return stripExtraInkHouses(list).map((b) => {
     if (!b || !HOUSE_TYPES.has(b.buildingType)) return b;
     const fp = getGameFootprint(b.buildingType);
     const w = Number(b.footprintWidth) || 2;

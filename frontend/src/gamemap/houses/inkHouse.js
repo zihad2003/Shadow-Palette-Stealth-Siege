@@ -44,10 +44,10 @@ function buildInk({ hexColor, level = 1, footprintW = 3, footprintH = 3, smashed
   });
 
   const well = cyl(smashed ? 0.12 : 0.16, smashed ? 0.12 : 0.2, smashed ? 0.16 : 0.22, KIT.purple, 14);
-  well.position.set(0, smashed ? 1.12 : 1.42, 0);
+  well.position.set(-bodyW * 0.48, smashed ? 0.14 : 0.22, -0.18);
   if (smashed) well.rotation.z = 0.28;
   add(group, well);
-  addDrop(group, 0, smashed ? 1.28 : 1.62, 0, KIT.purple, 1.1);
+  addDrop(group, -bodyW * 0.48, smashed ? 0.3 : 0.42, -0.18, KIT.purple, 1.1);
 
   ['YELLOW', 'PURPLE', 'RED'].forEach((key, i) => {
     const hex = GAME_COLORS[key];

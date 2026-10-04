@@ -10,7 +10,7 @@
 
 **Shadow Palette: Stealth & Siege** is a browser 3D stealth game. You build a clay fortress, paint it, and raid other bases in grayscale by matching your camouflage to the floor. There is no Unity or Unreal project. The world is drawn with Three.js.
 
-Two players on different networks can party up from **Co-op / Duo**, talk through the game server, and drop into the **same base at the same time**. Raids can also stay solo. If the base owner is online, they can join for a short window and drive the patrol robot.
+Two players on different networks can party up from **Co-op / Duo**, talk through the game server, and drop into the **same base at the same time**. Raids can also stay solo. If the base owner is online they see the raider in person and can **Hold F 3s** to jail them. The patrol robot appears only after it is armed from the Craft House.
 
 ---
 
@@ -23,7 +23,7 @@ Two players on different networks can party up from **Co-op / Duo**, talk throug
    - [Base Building & Color Quotas](#2-base-building--color-quotas)
    - [Co-op / Duo drop](#3-co-op--duo-drop)
    - [Voice](#4-voice)
-   - [Stealth Raids & 12-Second Robot Stun](#5-stealth-raids--12-second-robot-stun)
+   - [Stealth Raids & Patrol Robot](#5-stealth-raids--patrol-robot)
    - [Live Defense Takeover](#6-live-defense-takeover)
    - [Admin Telemetry Dashboard](#7-admin-telemetry-dashboard)
 4. [Database](#database)
@@ -104,27 +104,24 @@ The codebase strictly demonstrates core **Advanced Object-Oriented Programming (
 
 ### 4. Voice
 - After the friend accepts, a bar appears at the top left. Each player clicks **Click to talk** once and allows the microphone.
-- Mic audio is cut into short PCM chunks and published to `/app/voice/{partyId}`. The server relays them on `/topic/voice/{partyId}`.
-- The play clock stays short on purpose, so speech does not drift half a second behind. Leaving the party, the base, or the menus stops the microphone.
+- Mic audio is 32 kHz mono PCM (about 20 ms per chunk) on `/app/voice/{partyId}` → `/topic/voice/{partyId}`. The browser turns on echo cancel, noise suppression, and auto gain, then a high-pass + speech EQ + compressor runs on both send and play.
+- A short jitter buffer (about 80–220 ms) keeps words from breaking up without a half-second delay. Leaving the party, the base, or the menus stops the microphone.
 
-### 5. Stealth Raids & 12-Second Robot Stun
+### 5. Stealth Raids & Patrol Robot
 - **Grayscale Reconnaissance**: Enemy fortresses appear in grayscale; only the raider and searchlight cone display color.
 - **Edge-Zone Camouflage**: Matching your camo color to the tile below avoids detection in outer searchlight zones.
-- **12-Second Patrol Robot Stun Mechanism**:
-  - Raiders in melee range (≤ 2.5 tiles) can strike the patrol robot using **`[F]`**, **`[SPACE]`**, or the on-screen **HIT ROBOT** button.
-  - When hit, the robot enters the **`DISABLED`** state for **12 seconds**:
-    - Motor freezes (speed = 0), sensor cone shuts down, and the robot tilts into a disabled pose with electric spark VFX.
-    - Robot cannot chase, tag, or catch raiders during this 12-second window.
-    - Raiders can safely loot Coin Vaults, siphon Ink Houses, channel extraction at the South Gate, or break perimeter walls.
-    - An animated HUD badge (`⚡ ROBOT OFFLINE: 12.0s`) counts down the remaining safety window.
-    - In Duo Raids, hitting the robot synchronizes over STOMP so both players benefit from the 12-second stun window.
-    - After 12 seconds, the robot reboots, reactivates its search sensors, and resumes hunting raiders.
+- **Patrol robot**:
+  - Buy the robot once from a **repaired Craft House** (500c). After that the house shows an **on/off toggle**. On costs **1 coin every 30s**; off parks the mesh inside Craft House. Raiders **kick** a live robot (F / Space) to put it to sleep for **8s**, then it resumes its last job.
+  - All five default faction maps (Crimson, Emerald, Cobalt, Amber, Amethyst) seed with an active patrol.
+  - Chase starts if the lighthouse / searchlight sees the raider, or if the raider is within **2 tiles**. Overlap for **3 seconds** locks `CAUGHT`.
+  - A raider in **2 tiles** can **[F] / [SPACE]** hit the robot. A hit-recoil plays, then the robot sleeps **8 seconds**. Duo hits share the sleep window.
+  - The robot never jails anyone. Only a real base owner on the yard can **Hold F 3s** and send a raider to the Base Jail.
 - **Gate Lockdown & Wall Escape**: Searchlight exposure trips the siren, slamming the South Gate. Raiders must either channel silent extraction or perform 4 melee wall hits on emergency escape spots to break out.
 - The result card stays until **Return to base**. The server records the outcome the raid ended with (`SILENT`, `ESCAPED`, or `CAUGHT`) and adds that greed loot to the saved wallet. A caught player keeps only what they already stole from houses.
 
 ### 6. Live Defense Takeover
 - A raid on another player never pops a notification — the owner gets no toast or join prompt. If the owner is on their base, the two players simply see each other: the raider's character appears walking through the base, and the raider sees the owner's character (not a robot) moving in person.
-- The owner chases with their own character. Within 2.5 tiles a prompt appears: **Hold F 3s to catch and send to jail**. Holding F for 3 seconds locks the raider in the Base Jail; the server validates the catch distance (`LIVE_CATCH_DISTANCE`).
+- The patrol robot keeps hunting (lighthouse + proximity) while the owner is home. The owner is an extra catcher: within 2.5 tiles **Hold F 3s to catch and send to jail**. Only that owner action opens jail; the server validates the catch distance (`LIVE_CATCH_DISTANCE`).
 - That records the raid as `CAUGHT` (loot forfeited, cooldown applied) and opens the jail ransom sequence — intercom voice plus coin offers — on both screens.
 - When the raider escapes or extracts instead, the live session closes and the raider vanishes from the owner's base.
 
@@ -227,7 +224,7 @@ npm run build
 | **W, A, S, D / Arrows** | Walk | Walk |
 | **Shift (Hold)** | Sprint | Sprint |
 | **[E]** | House action (coins, ink, sleep, craft, makeup) | Steal from a house |
-| **[F]** | Enter or leave the buggy when you are near it | Hit the patrol robot / gate / wall |
+| **[F]** | Enter or leave the buggy when you are near it | Hit the patrol robot (8s sleep) / gate / wall |
 | **Left Click** | Paint or select | Interact |
 | **Scroll / +/-** | Zoom | Zoom |
 

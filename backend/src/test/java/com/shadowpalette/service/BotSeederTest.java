@@ -79,11 +79,11 @@ class BotSeederTest {
         assertTrue(lighthouseRepository.findByPlotId(p102.getId()).isEmpty());
         assertTrue(patrolRobotRepository.findByPlotId(p102.getId()).isPresent());
 
-        // Verify Bot 104 (Amber Refinery - no patrol)
+        // Verify Bot 104 (Amber Refinery - patrol on like the other four maps)
         Plot p104 = plotRepository.findByOwnerId(104L).get(0);
         assertEquals(5, buildingRepository.findByPlotId(p104.getId()).size());
         assertTrue(lighthouseRepository.findByPlotId(p104.getId()).isPresent());
-        assertTrue(patrolRobotRepository.findByPlotId(p104.getId()).isEmpty());
+        assertTrue(patrolRobotRepository.findByPlotId(p104.getId()).isPresent());
 
         // Verify Bot 105 (Amethyst Sanctum - has JAIL)
         Plot p105 = plotRepository.findByOwnerId(105L).get(0);

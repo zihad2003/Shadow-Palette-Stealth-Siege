@@ -28,7 +28,7 @@ Two browsers party up, talk through the game server, ready on one target, and dr
 ## Voice
 
 - Room: `/app/voice/{partyId}` up, `/topic/voice/{partyId}` down.
-- Audio is 16 kHz PCM, about 20 ms per message. The receiver does not build a long delay buffer.
+- Audio is 32 kHz PCM, about 20 ms per message, with browser noise suppression and a short jitter buffer.
 - The mic stops when the party ends or the player leaves the raid screens.
 - Jail intercom uses a different room, `jail_{smallerId}_{largerId}`.
 

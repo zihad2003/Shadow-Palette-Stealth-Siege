@@ -2,7 +2,7 @@ import { MAP_COLS, MAP_ROWS, GATE_SPAWN_TILE } from './mapConfig.js';
 
 /** Pre-placed broken houses on a fresh 48×40 fortress — walk up and repair. */
 export const REPAIR_BUILDING_COST = { coins: 80, ink: 12 };
-export const STARTER_HOUSE_COUNT = 6;
+export const STARTER_HOUSE_COUNT = 5;
 export const REBUILD_SECONDS = 2;
 
 export function houseLabel(type) {
@@ -17,7 +17,6 @@ export function createStarterRuins() {
     { buildingType: 'CRAFT_HOUSE', xPos: 3, yPos: MAP_ROWS - 5 },
     { buildingType: 'COIN_GENERATOR', xPos: MAP_COLS - 5, yPos: MAP_ROWS - 5 },
     { buildingType: 'JAIL', xPos: Math.floor(MAP_COLS * 0.35), yPos: Math.floor(MAP_ROWS * 0.4) },
-    { buildingType: 'INK_HOUSE', xPos: Math.floor(MAP_COLS * 0.55), yPos: Math.floor(MAP_ROWS * 0.55) },
   ];
 
   return slots.map((s, i) => ({
@@ -163,8 +162,8 @@ export function createMaxedHome() {
     paintedTiles,
     defenses: [
       { id: 101, type: 'PATROL_ROBOT', defenseType: 'PATROL_ROBOT', xPos: 20, yPos: 18 },
-      { id: 102, type: 'PATROL_ROBOT', defenseType: 'PATROL_ROBOT', xPos: 27, yPos: 21 },
     ],
+    patrolOn: true,
     camoColor: 'BLUE',
     characterModel: 1,
     searchlightLevel: 3,

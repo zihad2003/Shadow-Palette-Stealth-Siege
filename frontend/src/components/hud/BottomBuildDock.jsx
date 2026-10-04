@@ -1,12 +1,10 @@
 import React from 'react';
 import { Paintbrush, Bot, Grid3x3, Eraser, Move } from 'lucide-react';
 import { GAME_COLOR_KEYS, GAME_COLORS, COLOR_NAMES } from '../../colors.js';
-import { UPGRADE_COSTS } from '../../data/raidTargets.js';
 import {
   useGameState,
   REPAIR_BUILDING_COST,
   STARTER_HOUSE_COUNT,
-  ROBOT_MAX,
 } from '../../state/GameStateContext.jsx';
 import { soundEngine } from '../../soundEngine.js';
 import ClayPanel from '../ui/ClayPanel.jsx';
@@ -22,21 +20,19 @@ export default function BottomBuildDock() {
     repairedCount,
     beginMoveBuilding,
     cancelMoveBuilding,
-    handleUpgradeSelected,
     quotaFor,
-    unlockPatrolRobot,
-    coins,
+    setSelectedTool,
     brush,
     toggleBrush,
     cycleBrushSize,
     toggleEraser,
-    patrolCount,
+    patrolUnlocked,
+    patrolOn,
     nextRobotCost,
   } = useGameState();
 
   const selected = buildings.find((b) => b.id === selectedBuildingId);
-  const nextCost = selected && selected.level < 3 ? UPGRADE_COSTS[selected.level] : null;
-  const atRobotCap = patrolCount >= ROBOT_MAX;
+  const atRobotCap = patrolUnlocked && patrolOn;
   const usagePct = Math.round(quotaFor(selectedColor) * 100);
   const quotaTone = usagePct >= 35 ? 'bg-clay-danger' : usagePct >= 30 ? 'bg-clay-accent' : 'bg-clay-success';
 
@@ -113,18 +109,9 @@ export default function BottomBuildDock() {
 
       <ClayPanel depth="deep" className="h-11 px-2.5 rounded-2xl flex items-center gap-2">
         <Bot size={14} className={atRobotCap ? 'text-clay-success' : 'text-clay-accent'} />
-        <ClayButton
-          variant={atRobotCap ? 'ghost' : 'primary'}
-          disabled={atRobotCap || coins < nextRobotCost}
-          onClick={() => {
-            soundEngine.playClickSound();
-            unlockPatrolRobot();
-          }}
-          className="h-8 px-2 rounded-lg text-[10px] font-bold"
-        >
-          {atRobotCap ? 'Max' : `${nextRobotCost}c`}
-        </ClayButton>
-        <span className="text-[10px] text-clay-muted">{patrolCount}/{ROBOT_MAX}</span>
+        <span className="text-[10px] text-clay-muted whitespace-nowrap">
+          {patrolUnlocked ? (patrolOn ? 'Patrol on' : 'Patrol off') : `Craft House · ${nextRobotCost}c`}
+        </span>
       </ClayPanel>
 
       <ClayPanel depth="deep" className="h-11 px-2.5 rounded-2xl flex items-center gap-1.5">
@@ -139,14 +126,6 @@ export default function BottomBuildDock() {
           className="h-8 px-2 rounded-lg text-[10px] flex items-center gap-1"
         >
           <Move size={11} /> {movingBuildingId ? 'Drop' : 'Move'}
-        </ClayButton>
-        <ClayButton
-          variant="primary"
-          disabled={!nextCost || !!movingBuildingId}
-          onClick={handleUpgradeSelected}
-          className="h-8 px-2.5 rounded-lg text-[10px] font-bold"
-        >
-          {nextCost ? `${nextCost.coins}c` : 'Max'}
         </ClayButton>
       </ClayPanel>
     </div>

@@ -11,15 +11,15 @@ export const HOUSE_INFO = {
   INK_HOUSE: {
     name: 'Ink House',
     need: 'Hold F on the ruin to rebuild.',
-    use: 'Pick one of the five paint colors.',
-    after: 'Ink still refills while you play.',
+    use: 'Collect stored ink, then pick a paint color.',
+    after: 'Makeup House still changes camo.',
     roof: 'PURPLE',
   },
   CRAFT_HOUSE: {
     name: 'Craft House',
     need: 'Hold F on the ruin to rebuild.',
-    use: 'Upgrade a house from the workshop.',
-    after: 'Also makes Hold F rebuilds faster.',
+    use: 'Buy the patrol robot, then toggle it on or off.',
+    after: 'On costs 1c / 30s. Off parks it inside this house.',
     roof: 'GREEN',
   },
   COIN_GENERATOR: {
@@ -28,6 +28,13 @@ export const HOUSE_INFO = {
     use: 'Coins pile up here. Collect them.',
     after: 'Higher level mints more.',
     roof: 'YELLOW',
+  },
+  JAIL: {
+    name: 'Base Jail',
+    need: 'Hold F on the ruin to rebuild.',
+    use: 'Holding cell. Only you can lock a live raider here.',
+    after: 'Hold F 3s on a raider, then drop them at this cell.',
+    roof: 'RED',
   },
   MAKEUP_HOUSE: {
     name: 'Makeup House',
@@ -39,6 +46,7 @@ export const HOUSE_INFO = {
 };
 
 export function houseInfo(type) {
+  if (type === 'BASE_JAIL') return HOUSE_INFO.JAIL;
   return HOUSE_INFO[type] || {
     name: 'House',
     need: 'Hold F to rebuild.',

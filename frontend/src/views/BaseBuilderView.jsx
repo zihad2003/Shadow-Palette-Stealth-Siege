@@ -11,9 +11,10 @@ import HudBanner from '../components/ui/HudBanner.jsx';
 import HudHeader from '../components/ui/HudHeader.jsx';
 import ClayButton from '../components/ui/ClayButton.jsx';
 import GameMap from '../gamemap/GameMap.jsx';
-import { useGameState, GUIDE_STEPS } from '../state/GameStateContext.jsx';
+import { useGameState, GUIDE_STEPS, STARTER_HOUSE_COUNT } from '../state/GameStateContext.jsx';
 import { GATE_SPAWN_TILE, MAP_ROWS, WALK_TILE_SECONDS } from '../gamemap/mapConfig.js';
-import { LIVE_CATCH_HOLD_SECONDS } from '../raid/stealthConstants.js';
+import { isTileInBeam } from '../raid/SearchlightSensor.js';
+import { LIVE_CATCH_HOLD_SECONDS, ROBOT_CHASE_PROXIMITY } from '../raid/stealthConstants.js';
 import { collectSolidTiles } from '../gamemap/occupancy.js';
 import { isNearGarage, findPartNear, cartPartById, garageCenterTile } from '../gamemap/paletteBuggy.js';
 import { stepDirection, attemptStep, nudgeOffSolid, TURN_RATE } from '../character/gridMover.js';
@@ -111,11 +112,17 @@ export default function BaseBuilderView() {
     mountProgress,
     gameDay,
     coinBanks,
+    inkBanks,
     collectHouseCoins,
+    collectHouseInk,
     sleepAtHouse,
     pickPaintColor,
     cyclePaintColor,
-    upgradeHouse,
+    activatePatrolRobot,
+    togglePatrolRobot,
+    patrolUnlocked,
+    patrolOn,
+    nextRobotCost,
     liveRaidInvite,
     setLiveRaidInvite,
     userId,
@@ -135,6 +142,7 @@ export default function BaseBuilderView() {
   const intruderRef = useRef(null);
   intruderRef.current = intruder;
   const catchHoldRef = useRef(0);
+  const homePatrolChaseRef = useRef(false);
   const [walker, setWalker] = useState({
     column: GATE_SPAWN_TILE.column,
     row: GATE_SPAWN_TILE.row,
@@ -217,6 +225,8 @@ export default function BaseBuilderView() {
     setIntruder(null);
     setCarriedIntruder(null);
     jailedIntruderRef.current = locked;
+    homePatrolChaseRef.current = false;
+    sceneApi.current?.setPatrolChase?.(false);
     sceneApi.current?.clearPartnerPose?.();
     sceneApi.current?.setPrisonerPose?.(locked.column, locked.row, {
       camoColor: locked.camoColor,
@@ -301,9 +311,13 @@ export default function BaseBuilderView() {
     isVisitGuest,
     visitRole,
     collectHouseCoins,
+    collectHouseInk,
     sleepAtHouse,
     cyclePaintColor,
-    upgradeHouse,
+    activatePatrolRobot,
+    togglePatrolRobot,
+    patrolUnlocked,
+    patrolOn,
     showToast,
     carriedIntruder,
     canCatchIntruder,
@@ -551,6 +565,8 @@ export default function BaseBuilderView() {
         await stompSubscribe(`/topic/live-raid/${raidId}/state`, (state) => {
           if (!state || cancelled) return;
           if (jailedIntruderRef.current) {
+            homePatrolChaseRef.current = false;
+            sceneApi.current?.setPatrolChase?.(false);
             const locked = jailedIntruderRef.current;
             sceneApi.current?.clearPartnerPose?.();
             sceneApi.current?.setPrisonerPose?.(locked.column, locked.row, {
@@ -787,6 +803,29 @@ export default function BaseBuilderView() {
         setCatchProgress(catchPct);
       }
 
+      const raidIntruder = carriedIntruderRef.current ? null : intruderRef.current;
+      if (rk.patrolOn && raidIntruder && !jailedIntruderRef.current) {
+        const light = sceneApi.current?.getSearchlightState?.();
+        const lighthouseHit = !!(light && isTileInBeam(light, raidIntruder.column, raidIntruder.row));
+        const patrolState = sceneApi.current?.getPatrolState?.() || {};
+        const robotPos = patrolState.position;
+        const robotDist =
+          robotPos != null
+            ? Math.hypot(raidIntruder.column - robotPos.column, raidIntruder.row - robotPos.row)
+            : Infinity;
+        const nearRobot = robotDist <= ROBOT_CHASE_PROXIMITY && !patrolState.stunned;
+        if (lighthouseHit || nearRobot) homePatrolChaseRef.current = true;
+        if (homePatrolChaseRef.current) {
+          sceneApi.current?.setPatrolChase?.(true, {
+            column: raidIntruder.column,
+            row: raidIntruder.row,
+          });
+        }
+      } else if (homePatrolChaseRef.current) {
+        homePatrolChaseRef.current = false;
+        sceneApi.current?.setPatrolChase?.(false);
+      }
+
       const canMount =
         !catchActive &&
         holdingF &&
@@ -923,14 +962,16 @@ export default function BaseBuilderView() {
             return;
           }
           if (house.buildingType === 'INK_HOUSE') {
+            if (rk.collectHouseInk?.(house.id)) return;
             rk.cyclePaintColor();
             return;
           }
           if (house.buildingType === 'CRAFT_HOUSE') {
-            const ups = (rk.buildings || []).filter((b) => !b.ruined && (b.level || 1) < 3);
-            const target = ups.find((b) => b.id === house.id) || ups[0];
-            if (target) rk.upgradeHouse(target.id);
-            else rk.showToast('Workshop max', 'info');
+            if (!rk.patrolUnlocked) {
+              rk.activatePatrolRobot();
+              return;
+            }
+            rk.togglePatrolRobot();
             return;
           }
           if (house.buildingType === 'JAIL' || house.buildingType === 'BASE_JAIL') {
@@ -1085,8 +1126,14 @@ export default function BaseBuilderView() {
           nearRuin && guideActive && !nearActive ? 'Follow the marker' : null,
           nearSleep && !nearRuin ? 'E sleep · save' : null,
           nearCoin && !nearRuin ? 'E collect coins' : null,
-          nearInk && !nearRuin ? 'E next color' : null,
-          nearCraft && !nearRuin ? 'E upgrade' : null,
+          nearInk && !nearRuin ? 'E collect ink · tap a color' : null,
+          nearCraft && !nearRuin
+            ? !patrolUnlocked
+              ? 'E buy patrol'
+              : patrolOn
+                ? 'E turn patrol off'
+                : 'E turn patrol on'
+            : null,
           nearJail && !nearRuin ? 'E Base Jail (Holding Cell)' : null,
           makeupStation ? 'E change camo' : null,
           nearRepaired && !nearSleep && !nearCoin && !nearInk && !nearCraft && !movingBuilding ? 'M move house' : null,
@@ -1102,6 +1149,7 @@ export default function BaseBuilderView() {
         paintedTiles={paintedTiles}
         buildings={buildings}
         defenses={defenses}
+        patrolPowered={patrolOn}
         selectedBuildingId={selectedBuildingId}
         movingBuildingId={movingBuildingId}
         activeRuinId={guideStep === GUIDE_STEPS.REBUILD ? activeRuinId : null}
@@ -1135,7 +1183,7 @@ export default function BaseBuilderView() {
                   movingBuilding
                     ? 'Drop on a tile'
                     : guideActive
-                      ? `${repairedCount}/6`
+                      ? `${repairedCount}/${STARTER_HOUSE_COUNT}`
                       : brush.on
                         ? `Brush ${brush.size}×${brush.size}`
                         : isPov
@@ -1172,10 +1220,13 @@ export default function BaseBuilderView() {
           ruined={!!peekHouse?.ruined}
           gameDay={gameDay}
           storedCoins={Math.floor(Number(coinBanks[peekHouse?.id]) || 0)}
+          storedInk={Math.floor(Number(inkBanks[peekHouse?.id]) || 0)}
           selectedColor={selectedColor}
-          buildings={buildings}
           onCollect={() => {
             if (!isVisitGuest) collectHouseCoins(peekHouse?.id);
+          }}
+          onCollectInk={() => {
+            if (!isVisitGuest) collectHouseInk(peekHouse?.id);
           }}
           onPickColor={(key) => {
             if (!isVisitGuest) pickPaintColor(key);
@@ -1183,11 +1234,18 @@ export default function BaseBuilderView() {
           onSleep={() => {
             if (!isVisitGuest) sleepAtHouse();
           }}
-          onUpgrade={(id) => {
-            if (!isVisitGuest) upgradeHouse(id);
-          }}
           onOpenMakeup={() => {
             if (!isVisitGuest) setMakeupOpen(true);
+          }}
+          patrolOwned={patrolUnlocked}
+          patrolOn={patrolOn}
+          patrolCost={nextRobotCost}
+          canAffordPatrol={coins >= nextRobotCost}
+          onActivatePatrol={() => {
+            if (!isVisitGuest) activatePatrolRobot();
+          }}
+          onTogglePatrol={() => {
+            if (!isVisitGuest) togglePatrolRobot();
           }}
         />
       </div>

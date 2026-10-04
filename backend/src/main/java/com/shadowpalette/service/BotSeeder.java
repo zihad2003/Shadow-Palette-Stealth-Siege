@@ -71,7 +71,7 @@ public class BotSeeder implements ApplicationRunner {
                     )
             ),
             new BotConfig(
-                    104L, "Amber Refinery", "YELLOW", 2, 520, 80, 310, true, false,
+                    104L, "Amber Refinery", "YELLOW", 2, 520, 80, 310, true, true,
                     List.of(
                             new BotBuildingConfig("COIN_GENERATOR", 16, 16, 2, "#D69E2E"),
                             new BotBuildingConfig("COIN_GENERATOR", 26, 16, 3, "#ECC94B"),

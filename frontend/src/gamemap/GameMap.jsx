@@ -61,6 +61,7 @@ export default function GameMap({
   paintedTiles = {},
   buildings = [],
   defenses = [],
+  patrolPowered = true,
   selectedBuildingId = null,
   showSearchlight = true,
   showMakeupHouse = false,
@@ -95,6 +96,8 @@ export default function GameMap({
   buildingsRef.current = buildings;
   const defensesRef = useRef(defenses);
   defensesRef.current = defenses;
+  const patrolPoweredRef = useRef(patrolPowered);
+  patrolPoweredRef.current = patrolPowered;
   const coinBanksRef = useRef(coinBanks);
   coinBanksRef.current = coinBanks;
   const dayNightRef = useRef(dayNight);
@@ -439,8 +442,18 @@ export default function GameMap({
     };
     syncBuildings();
 
+    const patrolArmed = () =>
+      patrolPoweredRef.current !== false &&
+      (defensesRef.current || []).some((d) => (d.type || d.defenseType) === 'PATROL_ROBOT');
+
+    const patrolHuntsRaiders = () => {
+      if (!patrolArmed()) return false;
+      if (grayscale) return true;
+      return !!patrolCmd.chasing;
+    };
+
     const syncPatrol = () => {
-      const has = (defensesRef.current || []).some((d) => (d.type || d.defenseType) === 'PATROL_ROBOT');
+      const has = patrolArmed();
       if (has && !patrol) {
         patrol = createGamePatrolRobot();
         if (grayscale) desaturateObject(patrol.object);
@@ -1233,6 +1246,9 @@ export default function GameMap({
         playBump: () => {
           bumpShake = Math.max(bumpShake, 0.28);
         },
+        playKick: () => {
+          if (attackerMesh) attackerMesh.userData.kickT = 0.42;
+        },
         playWallBreak: (column, row, opts = {}) => {
           wallBreakFX.play(column, row, opts);
         },
@@ -1364,7 +1380,7 @@ export default function GameMap({
             patrol.setMode(key, { column: patrolCmd.column, row: patrolCmd.row });
           }
         },
-        stunPatrolRobot: (seconds = 12) => {
+        stunPatrolRobot: (seconds = 8) => {
           patrol?.stun?.(seconds);
         },
         getPatrolState: () => ({
@@ -1723,14 +1739,23 @@ export default function GameMap({
         }
       }
       if (patrol) {
-        if (patrolCmd.chasing) {
-          // Keep destination fresh; do not flip back to patrol while hunting.
+        if (!patrolHuntsRaiders()) {
+          if (patrolCmd.chasing) {
+            patrolCmd.chasing = false;
+            patrol.setMode('patrol');
+          }
+        } else if (patrolCmd.chasing) {
           patrol.setChaseTarget?.(patrolCmd.column, patrolCmd.row);
           if (!patrol.chasing) {
             patrol.setMode('chase', { column: patrolCmd.column, row: patrolCmd.row });
           }
         }
         lastPatrolHit = patrol.update(elapsed, dt) || lastPatrolHit;
+        if (!patrolHuntsRaiders()) {
+          lastPatrolHit = { caught: false, hitting: false, tagged: false };
+        } else if (!grayscale) {
+          lastPatrolHit = { ...lastPatrolHit, caught: false, tagged: false };
+        }
       }
       selectRing.rotation.z = elapsed * 0.6;
       syncVehicle(dt, elapsed);
@@ -1956,8 +1981,9 @@ export default function GameMap({
 
   useEffect(() => {
     defensesRef.current = defenses;
+    patrolPoweredRef.current = patrolPowered;
     if (worldRef.current) worldRef.current.syncPatrol();
-  }, [defenses]);
+  }, [defenses, patrolPowered]);
 
   useEffect(() => {
     selectedBuildingRef.current = selectedBuildingId;

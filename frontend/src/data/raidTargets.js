@@ -68,8 +68,8 @@ export const RAID_TARGETS = [
     primaryColor: '#D69E2E',
     buildings: 5,
     lighthouse: true,
-    patrol: false,
-    description: 'Heavy industrial solar refinery with high coin yields and exposed generators.',
+    patrol: true,
+    description: 'Heavy industrial solar refinery with high coin yields, a searchlight, and an active patrol bot.',
   },
   {
     id: 105,

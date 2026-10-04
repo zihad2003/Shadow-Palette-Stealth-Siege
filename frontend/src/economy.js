@@ -9,6 +9,9 @@ export const TASK_REWARDS = {
 export const ROBOT_BASE_COST = 500;
 export const ROBOT_COST_GROWTH = 1.5;
 export const ROBOT_MAX = 8;
+/** While the bought robot is toggled on, drain this many coins this often. */
+export const PATROL_UPKEEP_COINS = 1;
+export const PATROL_UPKEEP_MS = 30000;
 
 export function robotCost(ownedCount) {
   const n = Math.max(0, Math.floor(Number(ownedCount) || 0));

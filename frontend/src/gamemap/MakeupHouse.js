@@ -47,7 +47,7 @@ export function createMakeupHouse() {
 
   GAME_COLOR_KEYS.forEach((key, i) => {
     const blob = new THREE.Mesh(new THREE.SphereGeometry(0.09, 10, 10), clay(GAME_COLORS[key]));
-    blob.position.set(-0.36 + i * 0.18, 0.9, 0.42);
+    blob.position.set(-0.36 + i * 0.18, 0.12, 0.72);
     blob.userData.isMakeupHouse = true;
     house.add(blob);
   });

@@ -15,7 +15,18 @@ import { DetectionSystem } from '../raid/DetectionSystem.js';
 import { createAlarmSystem } from '../raid/AlarmSystem.js';
 import { PatrolRobotContext, ROBOT_STATES } from '../patrolRobotState.js';
 import { generateDefenderBase, tileColorAt } from '../raid/defenderLayouts.js';
-import { RAID_DURATION_SECONDS, DETECTION_STATES, RAID_LOOT_FRACTION, GATE_X, GATE_Y, ROBOT_CATCH_DISTANCE } from '../raid/stealthConstants.js';
+import {
+  RAID_DURATION_SECONDS,
+  DETECTION_STATES,
+  RAID_LOOT_FRACTION,
+  GATE_X,
+  GATE_Y,
+  ROBOT_CATCH_DISTANCE,
+  ROBOT_CHASE_PROXIMITY,
+  ROBOT_HIT_RANGE,
+  ROBOT_STUN_SECONDS,
+  ROBOT_CATCH_HOLD_SECONDS,
+} from '../raid/stealthConstants.js';
 import { resolveRaidOutcome, estimateLootPercent } from '../raid/RaidSession.js';
 import { tickExtractionChannel, estimateLootAmounts, inExtractionZone } from '../raid/extraction.js';
 import { GATE_SPAWN_TILE, SEARCHLIGHT_TILE, WALK_TILE_SECONDS } from '../gamemap/mapConfig.js';
@@ -120,13 +131,19 @@ export default function StealthRaidView() {
     () =>
       generateDefenderBase(raidTargetId || 34, {
         buildingCount: Math.max(4, targetMeta?.buildings || 4),
-        patrol: !!targetMeta?.patrol,
+        patrol: !!(targetMeta?.patrol || targetMeta?.hasPatrol),
       }),
     [raidTargetId, targetMeta]
   );
   const paintedTiles = defenderBase.tiles;
   const raidBuildings = defenderBase.buildings;
   const raidDefenses = defenderBase.defenses;
+  const patrolArmed =
+    (raidDefenses || []).some((d) => (d.type || d.defenseType) === 'PATROL_ROBOT')
+    || !!targetMeta?.patrol
+    || !!targetMeta?.hasPatrol;
+  const patrolArmedRef = useRef(patrolArmed);
+  patrolArmedRef.current = patrolArmed;
 
   const [stash, setStash] = useState(() => initRaidStash(raidBuildings, raidLoot || targetMeta));
   const stashRef = useRef(stash);
@@ -264,10 +281,12 @@ export default function StealthRaidView() {
       onAlarmTriggered() {
         gateLockedRef.current = true;
         sceneApi.current?.lockGate?.();
-        sceneApi.current?.setPatrolChase?.(true, {
-          column: attackerRef.current.column,
-          row: attackerRef.current.row,
-        });
+        if (patrolArmedRef.current) {
+          sceneApi.current?.setPatrolChase?.(true, {
+            column: attackerRef.current.column,
+            row: attackerRef.current.row,
+          });
+        }
       },
     });
   }
@@ -388,7 +407,8 @@ export default function StealthRaidView() {
         chaseLatchedRef.current = true;
       }
 
-      if (chaseLatchedRef.current && !liveDefenderRef.current) {
+      const liveDrivesRobot = liveDefenderRef.current && !!duoPartyId;
+      if (patrolArmedRef.current && chaseLatchedRef.current && !liveDrivesRobot) {
         robotContext.current.setState(ROBOT_STATES.CHASING);
         robotContext.current.lastSeenPlayerX = pos.column;
         robotContext.current.lastSeenPlayerY = pos.row;
@@ -435,8 +455,8 @@ export default function StealthRaidView() {
         Date.now() < (robotStunnedUntilRef.current || 0);
 
       // Robot proximity detection: fixes on the intruder within a 4-block circular radius
-      const inRobotProximity = robotDist <= 4.0 && !isRobotStunned;
-      if (inRobotProximity && !liveDefenderRef.current && !chaseLatchedRef.current) {
+      const inRobotProximity = patrolArmedRef.current && robotDist <= ROBOT_CHASE_PROXIMITY && !isRobotStunned;
+      if (inRobotProximity && !liveDrivesRobot && !chaseLatchedRef.current) {
         robotContext.current.setState(ROBOT_STATES.CHASING);
         robotContext.current.lastSeenPlayerX = pos.column;
         robotContext.current.lastSeenPlayerY = pos.row;
@@ -462,13 +482,15 @@ export default function StealthRaidView() {
       }
 
       const robotState = isRobotStunned ? ROBOT_STATES.DISABLED : robotContext.current.state;
-      const robotHudState = isRobotStunned
+      const robotHudState = !patrolArmedRef.current
+        ? (chaseLatchedRef.current || result.alarmLatched ? DETECTION_STATES.ALARM : DETECTION_STATES.NORMAL)
+        : isRobotStunned
         ? DETECTION_STATES.NORMAL
         : chaseLatchedRef.current
         ? DETECTION_STATES.ALARM
         : hudStateFromRobot(robotState);
 
-      if (!isRobotStunned && !chaseLatchedRef.current && !liveDefenderRef.current && raidDefenses.length > 0) {
+      if (patrolArmedRef.current && !isRobotStunned && !chaseLatchedRef.current && !liveDrivesRobot && raidDefenses.length > 0) {
         const lastSeen = {
           column: robotContext.current.lastSeenPlayerX ?? pos.column,
           row: robotContext.current.lastSeenPlayerY ?? pos.row,
@@ -486,21 +508,24 @@ export default function StealthRaidView() {
       const robotStateChanged = robotState !== lastRobotStateRef.current;
       if (robotStateChanged) lastRobotStateRef.current = robotState;
 
-      // Stunned robot CANNOT hit, tag, or catch raiders for the 12s duration.
+      // Stunned robot cannot catch while it sleeps.
       // Must be on top of the player (catch radius) — distant chase never auto-CAUGHT.
       // Live takeover: server is source of truth for CAUGHT (liveCaughtRef).
       const robotTagged =
+        patrolArmedRef.current &&
         !isRobotStunned &&
         !liveDefenderRef.current &&
         !!patrolState.hitting &&
         robotDist <= ROBOT_CATCH_DISTANCE + 0.2;
       const robotCaught =
+        patrolArmedRef.current &&
         !isRobotStunned &&
         !hudRef.current.outcome &&
         (liveCaughtRef.current ||
           (!liveDefenderRef.current &&
             (!!patrolState.caught || (!!patrolState.tagged && robotDist <= ROBOT_CATCH_DISTANCE + 0.2))));
       const robotChasing =
+        patrolArmedRef.current &&
         !isRobotStunned &&
         (chaseLatchedRef.current ||
           liveDefenderRef.current ||
@@ -673,7 +698,7 @@ export default function StealthRaidView() {
           colorMatch: result.colorMatch,
           inBeam: result.beam.canSee,
           remaining,
-          alarm: chaseLatchedRef.current || result.alarmLatched || robotState === ROBOT_STATES.CHASING,
+          alarm: chaseLatchedRef.current || result.alarmLatched || (patrolArmedRef.current && robotState === ROBOT_STATES.CHASING),
           shimmer: result.beam.canSee && result.colorMatch,
           exposed: result.exposed,
           outcome: null,
@@ -682,6 +707,7 @@ export default function StealthRaidView() {
           breaking: prev.breaking,
           robotEngaged: robotChasing,
           robotHitting: robotTagged || !!patrolState.hitting,
+          robotCatchProgress: Number(patrolState.catchProgress) || 0,
           breakFlash: prev.breakFlash,
           statePulse: stateChanged ? prev.statePulse + 1 : prev.statePulse,
           channelProgress: channel.channelProgress,
@@ -917,7 +943,7 @@ export default function StealthRaidView() {
     const onSignal = (msg) => {
       if (!msg || Number(msg.fromUserId) === Number(userId)) return;
       if (msg.type === 'ROBOT_HIT') {
-        const secs = Number(msg.payload?.stunSeconds) || 12;
+        const secs = Number(msg.payload?.stunSeconds) || ROBOT_STUN_SECONDS;
         soundEngine.playWallHitSound();
         sceneApi.current?.stunPatrolRobot?.(secs);
         robotContext.current?.stun?.(secs);
@@ -959,7 +985,7 @@ export default function StealthRaidView() {
     };
   }, [duoPartyId, userId]);
 
-  // Smooth countdown ticker for the 12s robot stun badge
+  // Smooth countdown ticker for the robot stun badge
   useEffect(() => {
     if (robotStunCountdown <= 0) return undefined;
     const interval = window.setInterval(() => {
@@ -986,7 +1012,7 @@ export default function StealthRaidView() {
           !!patrolState.stunned ||
           robotContext.current.state === ROBOT_STATES.DISABLED ||
           Date.now() < (robotStunnedUntilRef.current || 0);
-        if (robotDist <= 2.5 && !isRobotStunned) {
+        if (patrolArmedRef.current && robotDist <= ROBOT_HIT_RANGE && !isRobotStunned) {
           e.preventDefault();
           hitRobotRef.current?.();
           return;
@@ -1289,15 +1315,15 @@ export default function StealthRaidView() {
   };
 
   const hitRobot = () => {
-    if (hudRef.current.outcome) return;
+    if (hudRef.current.outcome || !patrolArmedRef.current) return;
     const patrolState = sceneApi.current?.getPatrolState?.() || {};
     const robotPos = patrolState.position || null;
     const robotDist =
       robotPos != null
         ? Math.hypot(attackerRef.current.column - robotPos.column, attackerRef.current.row - robotPos.row)
         : Infinity;
-    if (robotDist > 2.8) {
-      showToast('Too far to hit robot', 'info');
+    if (robotDist > ROBOT_HIT_RANGE + 0.25) {
+      showToast('Too far to kick', 'info');
       return;
     }
     const isRobotStunned =
@@ -1310,17 +1336,18 @@ export default function StealthRaidView() {
     }
 
     soundEngine.playWallHitSound();
-    sceneApi.current?.stunPatrolRobot?.(12);
-    robotContext.current?.stun?.(12);
-    robotStunnedUntilRef.current = Date.now() + 12000;
-    setRobotStunCountdown(12);
-    showToast('⚡ Robot STUNNED for 12s! Safe to perform tasks!', 'success');
+    sceneApi.current?.playKick?.();
+    sceneApi.current?.stunPatrolRobot?.(ROBOT_STUN_SECONDS);
+    robotContext.current?.stun?.(ROBOT_STUN_SECONDS);
+    robotStunnedUntilRef.current = Date.now() + ROBOT_STUN_SECONDS * 1000;
+    setRobotStunCountdown(ROBOT_STUN_SECONDS);
+    showToast(`Kick landed — robot asleep ${ROBOT_STUN_SECONDS}s`, 'success');
 
     if (duoPartyId) {
       stompPublish(`/app/duo/${duoPartyId}/signal`, {
         fromUserId: userId,
         type: 'ROBOT_HIT',
-        payload: { stunSeconds: 12 },
+        payload: { stunSeconds: ROBOT_STUN_SECONDS },
       }).catch(() => {});
     }
   };
@@ -1342,7 +1369,7 @@ export default function StealthRaidView() {
       robotContext.current.state === ROBOT_STATES.DISABLED ||
       Date.now() < (robotStunnedUntilRef.current || 0);
 
-    if (robotDist <= 2.5 && !isRobotStunned) {
+    if (patrolArmedRef.current && robotDist <= ROBOT_HIT_RANGE && !isRobotStunned) {
       hitRobot();
       return;
     }
@@ -1440,7 +1467,7 @@ export default function StealthRaidView() {
 
       <div className="absolute top-[4.75rem] left-1/2 -translate-x-1/2 z-30 pointer-events-none">
         <ClayPanel className={`h-11 px-3.5 rounded-2xl flex items-center gap-2.5 ${stateTone}`}>
-          {raidDefenses.length > 0 && (
+          {patrolArmed && (
             <Bot size={13} className={hud.robotEngaged ? 'text-clay-danger' : 'text-clay-muted'} />
           )}
           <span className="text-[11px] font-semibold whitespace-nowrap">
@@ -1448,7 +1475,9 @@ export default function StealthRaidView() {
               ? 'Chase'
               : hud.alarm
                 ? 'Break wall'
-                : hud.robotState || hud.state}{' '}
+                : patrolArmed
+                  ? (hud.robotState || hud.state)
+                  : (hud.state || 'Quiet')}{' '}
             · {Math.ceil(hud.remaining)}s
           </span>
           <div className="w-16 h-1.5 rounded-full clay-inset overflow-hidden">
@@ -1776,25 +1805,38 @@ export default function StealthRaidView() {
         </div>
       )}
 
-      {/* 12s Robot Stun Action Button & Countdown Badge */}
       {!hud.outcome && (
         <div className="fixed top-20 right-16 z-[160] flex flex-col items-end gap-2 pointer-events-none">
-          {nearRobotDist <= 2.8 && robotStunCountdown <= 0 && (
+          {patrolArmed && hud.robotHitting && hud.robotCatchProgress > 0 && robotStunCountdown <= 0 && (
+            <div className="pointer-events-none px-4 py-2 rounded-2xl bg-red-950/90 border border-red-400/60 min-w-[210px]">
+              <p className="text-[10px] font-bold text-red-200">Robot catching… hold still or hit it</p>
+              <div className="mt-1 w-full h-1.5 bg-black/60 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-red-400 rounded-full"
+                  style={{ width: `${Math.min(100, (hud.robotCatchProgress / ROBOT_CATCH_HOLD_SECONDS) * 100)}%` }}
+                />
+              </div>
+              <p className="text-[10px] text-red-100/80 tabular-nums mt-1">
+                {Math.min(ROBOT_CATCH_HOLD_SECONDS, hud.robotCatchProgress).toFixed(1)} / {ROBOT_CATCH_HOLD_SECONDS}s
+              </p>
+            </div>
+          )}
+          {patrolArmed && nearRobotDist <= ROBOT_HIT_RANGE + 0.25 && robotStunCountdown <= 0 && (
             <button
               onClick={hitRobot}
               className="pointer-events-auto px-4 py-2 rounded-2xl bg-gradient-to-r from-amber-500 to-yellow-400 text-black font-extrabold text-xs shadow-[0_0_20px_rgba(245,158,11,0.6)] hover:brightness-110 flex items-center gap-2 animate-bounce transition-all active:scale-95"
             >
               <Zap size={15} className="fill-black" />
-              <span>[F / SPACE] HIT ROBOT (12s STUN)</span>
+              <span>[F / SPACE] KICK ROBOT ({ROBOT_STUN_SECONDS}s sleep)</span>
             </button>
           )}
 
           {robotStunCountdown > 0 && (
-            <div className="pointer-events-auto px-4 py-2 rounded-2xl bg-cyan-950/90 border border-cyan-400/60 shadow-[0_0_25px_rgba(6,182,212,0.4)] backdrop-blur-md flex flex-col gap-1.5 animate-pulse min-w-[210px]">
+            <div className="pointer-events-auto px-4 py-2 rounded-2xl bg-cyan-950/90 border border-cyan-400/60 shadow-[0_0_25px_rgba(6,182,212,0.4)] backdrop-blur-md flex flex-col gap-1.5 min-w-[210px]">
               <div className="flex items-center justify-between gap-3 text-cyan-300 text-xs font-mono font-bold">
                 <div className="flex items-center gap-1.5">
                   <ZapOff size={14} className="text-cyan-400" />
-                  <span>ROBOT OFFLINE</span>
+                  <span>ROBOT ASLEEP</span>
                 </div>
                 <span className="text-white text-sm tabular-nums">
                   {robotStunCountdown.toFixed(1)}s
@@ -1803,11 +1845,11 @@ export default function StealthRaidView() {
               <div className="w-full h-1.5 bg-black/60 rounded-full overflow-hidden border border-cyan-500/30">
                 <div
                   className="h-full bg-gradient-to-r from-cyan-400 to-blue-400 transition-all duration-100 ease-linear rounded-full"
-                  style={{ width: `${Math.min(100, (robotStunCountdown / 12) * 100)}%` }}
+                  style={{ width: `${Math.min(100, (robotStunCountdown / ROBOT_STUN_SECONDS) * 100)}%` }}
                 />
               </div>
               <p className="text-[10px] text-cyan-200/70 font-sans">
-                Safe to loot vaults & perform tasks
+                Safe to loot for {ROBOT_STUN_SECONDS}s
               </p>
             </div>
           )}
@@ -1817,7 +1859,7 @@ export default function StealthRaidView() {
       {!hud.outcome && (
         <ActionPrompt
           lines={[
-            nearRobotDist <= 2.5 && robotStunCountdown <= 0 ? 'F / Space · HIT ROBOT (12s Stun)' : null,
+            patrolArmed && nearRobotDist <= ROBOT_HIT_RANGE && robotStunCountdown <= 0 ? `F / Space · KICK ROBOT (${ROBOT_STUN_SECONDS}s sleep)` : null,
             robotStunCountdown > 0 ? `⚡ Robot Offline: ${robotStunCountdown.toFixed(1)}s (Safe to loot)` : null,
             nearCoin && coinLeft > 0 ? 'E · steal coins' : null,
             nearInk && inkLeft > 0 ? 'E · steal ink' : null,

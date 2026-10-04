@@ -32,7 +32,13 @@ export const CHANNEL_DURATION_SECONDS = 4;
 /** Max tile movement between samples while channeling (≈ stationary). */
 export const CHANNEL_MOVE_EPSILON = 0.22;
 /** Robot within this distance interrupts the channel. */
-export const CHASE_INTERRUPT_DISTANCE = 2.5;
+export const CHASE_INTERRUPT_DISTANCE = 2;
+/** Lighthouse hit, or raider this close, starts chase. */
+export const ROBOT_CHASE_PROXIMITY = 2;
+/** Raider melee range to stun the robot. */
+export const ROBOT_HIT_RANGE = 2;
+/** Sleep / stun after a raider hit. */
+export const ROBOT_STUN_SECONDS = 8;
 
 /**
  * Time pressure: every interval spent inside without extracting raises meter rise.
@@ -62,7 +68,7 @@ export const PLAYER_WALK_SPEED = 3.68;
 /** Robot must be this close (tiles) to catch / interrupt extract. */
 export const ROBOT_CATCH_DISTANCE = 0.65;
 /** Hold this long while overlapping to lock CAUGHT. */
-export const ROBOT_CATCH_HOLD_SECONDS = 0.28;
+export const ROBOT_CATCH_HOLD_SECONDS = 3;
 
 /** Greed loot lock-in — only awarded after extract / surviving the full timer. */
 export const LOOT_INTERVAL_SECONDS = 10;

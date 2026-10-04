@@ -1,11 +1,8 @@
 import * as THREE from 'three';
-import { GAME_COLORS } from '../../colors.js';
 import {
-  KIT,
   add,
   addRubble,
   box,
-  clothColor,
   houseSpan,
 } from '../houseKit.js';
 
@@ -143,7 +140,7 @@ function buildJail({ hexColor, level = 1, footprintW = 3, footprintH = 3, smashe
   lock.position.set(0.18, barHeight * 0.48 + 0.14, bodyD * 0.48);
   group.add(lock);
 
-  // 5. Heavy fortress stone roof parapet with battlements
+  // 5. Clean fortress slab roof
   const roofY = barHeight + 0.24;
   const roof = box(bodyW + 0.24, 0.18, bodyD + 0.24, '#1E232B', 0.02);
   roof.position.y = roofY;
@@ -153,35 +150,7 @@ function buildJail({ hexColor, level = 1, footprintW = 3, footprintH = 3, smashe
   }
   add(group, roof);
 
-  // Parapet battlements around the roof edge
-  for (let i = -1; i <= 1; i++) {
-    const battlementF = box(0.28, 0.16, 0.1, '#2B313A', 0.02);
-    battlementF.position.set(i * (bodyW * 0.38), roofY + 0.14, bodyD * 0.5 + 0.06);
-    add(group, battlementF);
-
-    const battlementB = box(0.28, 0.16, 0.1, '#2B313A', 0.02);
-    battlementB.position.set(i * (bodyW * 0.38), roofY + 0.14, -bodyD * 0.5 - 0.06);
-    add(group, battlementB);
-  }
-
-  // 6. Rotating Emergency Warning Beacon / Security Spotlight on roof
-  const beaconTower = box(0.3, 0.22, 0.3, '#181C22', 0.02);
-  beaconTower.position.set(0, roofY + 0.18, 0);
-  add(group, beaconTower);
-
-  const beaconMat = new THREE.MeshStandardMaterial({
-    color: smashed ? '#444444' : '#E53E3E',
-    emissive: smashed ? '#000000' : '#E53E3E',
-    emissiveIntensity: smashed ? 0 : 1.2,
-    roughness: 0.2,
-  });
-  const beaconDome = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 0.18, 16), beaconMat);
-  beaconDome.position.set(0, roofY + 0.35, 0);
-  beaconDome.userData.motion = 'spin';
-  beaconDome.userData.motionAmp = 2.5;
-  group.add(beaconDome);
-
-  // 7. Security searchlight attached to front pillar
+  // 6. Security searchlight attached to front pillar
   const spotMat = new THREE.MeshStandardMaterial({
     color: smashed ? '#222222' : '#F6E05E',
     emissive: smashed ? '#000000' : '#ECC94B',

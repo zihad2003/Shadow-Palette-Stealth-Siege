@@ -7,6 +7,7 @@ import {
   ROBOT_HIT_SPEED,
   ROBOT_CATCH_DISTANCE,
   ROBOT_CATCH_HOLD_SECONDS,
+  ROBOT_STUN_SECONDS,
 } from '../raid/stealthConstants.js';
 import * as sleepHouse from './houses/sleepHouse.js';
 import * as craftHouse from './houses/craftHouse.js';
@@ -372,7 +373,15 @@ export function createGamePatrolRobot() {
   /** When true, pose comes from live defender updates — skip waypoint/chase AI. */
   let liveDriven = false;
   let stunTimer = 0;
+  let hitReact = 0;
   let preStunMode = 'patrol';
+  const impact = new THREE.Mesh(
+    new THREE.RingGeometry(0.12, 0.28, 16),
+    new THREE.MeshBasicMaterial({ color: GAME_COLORS.YELLOW, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide })
+  );
+  impact.rotation.x = -Math.PI / 2;
+  impact.position.y = 0.2;
+  bot.add(impact);
 
   const applyTint = (key) => {
     const tint = STATE_TINT[key] || STATE_TINT.patrol;
@@ -414,13 +423,16 @@ export function createGamePatrolRobot() {
     get stunRemaining() {
       return Math.max(0, stunTimer);
     },
-    stun(seconds = 12) {
+    stun(seconds = ROBOT_STUN_SECONDS) {
       if (mode !== 'disabled') {
         preStunMode = mode;
       }
-      stunTimer = Math.max(stunTimer, Number(seconds) || 12);
+      stunTimer = Math.max(stunTimer, Number(seconds) || ROBOT_STUN_SECONDS);
+      hitReact = 0.55;
       mode = 'disabled';
-      applyTint('disabled');
+      applyTint('hit');
+      impact.material.opacity = 0.95;
+      impact.scale.set(1, 1, 1);
     },
     /** Absolute pose from a live defender (lerp in update). */
     setLivePosition(column, rowNum, snap = false) {
@@ -473,31 +485,56 @@ export function createGamePatrolRobot() {
     update(elapsed, dt = 0.016) {
       tickBuildingMotion(bot, elapsed);
 
-      // 12-second stun/offline state: zero movement, disabled vision, sparking electric short
+      // Hit pop, then 8s sleep: no walk, no catch.
       if (stunTimer > 0) {
         stunTimer -= dt;
-        if (eye.material) {
-          const spark = Math.sin(elapsed * 28) > 0.35;
-          eye.material.emissiveIntensity = spark ? 0.9 : 0.05;
-          eye.material.color.set(spark ? '#38BDF8' : '#1E293B');
-          eye.material.emissive.set(spark ? '#38BDF8' : '#000000');
-        }
-        body.rotation.z = Math.sin(elapsed * 25) * 0.035;
-        body.rotation.x = -0.22;
-        chest.rotation.x = -0.15;
+        hitReact = Math.max(0, hitReact - dt);
         if (primed) {
-          bot.position.set(worldX, TILE_HEIGHT, worldZ);
+          const punch = hitReact > 0 ? Math.sin((1 - hitReact / 0.55) * Math.PI) : 0;
+          bot.position.set(worldX, TILE_HEIGHT + punch * 0.28, worldZ);
+        }
+        if (hitReact > 0) {
+          applyTint('hit');
+          const t = 1 - hitReact / 0.55;
+          body.rotation.x = 0.42 * Math.sin(t * Math.PI);
+          body.rotation.z = 0.55 * Math.sin(t * Math.PI * 2);
+          chest.rotation.x = body.rotation.x * 0.7;
+          impact.material.opacity = 0.9 * (1 - t);
+          impact.scale.setScalar(1 + t * 2.4);
+          if (eye.material) {
+            eye.material.emissiveIntensity = 1.6;
+            eye.material.color.set(GAME_COLORS.RED);
+            eye.material.emissive.set(GAME_COLORS.RED);
+          }
+        } else {
+          applyTint('disabled');
+          const slump = 0.72 + Math.sin(elapsed * 2.2) * 0.04;
+          body.rotation.x = -0.18;
+          body.rotation.z = slump;
+          chest.rotation.x = -0.12;
+          impact.material.opacity = 0;
+          if (eye.material) {
+            const zzz = 0.08 + Math.max(0, Math.sin(elapsed * 1.6)) * 0.12;
+            eye.material.emissiveIntensity = zzz;
+            eye.material.color.set('#64748B');
+            eye.material.emissive.set('#38BDF8');
+          }
         }
         if (stunTimer <= 0) {
           stunTimer = 0;
-          mode = preStunMode || 'patrol';
+          hitReact = 0;
+          body.rotation.z = 0;
+          impact.material.opacity = 0;
+          mode = preStunMode === 'disabled' ? 'patrol' : (preStunMode || 'patrol');
+          if (mode === 'disabled') mode = 'patrol';
           applyTint(mode);
         }
         return {
           caught: false,
           tagged: false,
           hitting: false,
-          state: 'disabled',
+          catchProgress: 0,
+          state: hitReact > 0 ? 'hit' : 'disabled',
           chasing: false,
           stunned: true,
           stunRemaining: Math.max(0, stunTimer),
@@ -619,6 +656,7 @@ export function createGamePatrolRobot() {
           caught: locked,
           tagged: locked,
           hitting: true,
+          catchProgress,
           state: 'hit',
           chasing: true,
         };
@@ -628,7 +666,7 @@ export function createGamePatrolRobot() {
         applyTint('chase');
       }
       catchProgress = Math.max(0, catchProgress - dt * 0.8);
-      return { caught: false, tagged: false, hitting: false, state: 'chase', chasing: true };
+      return { caught: false, tagged: false, hitting: false, catchProgress, state: 'chase', chasing: true };
     },
   };
 }

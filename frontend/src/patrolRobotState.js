@@ -26,7 +26,7 @@ export class PatrolRobotContext {
     this.state = newState;
   }
 
-  stun(durationSeconds = 12) {
+  stun(durationSeconds = 8) {
     if (this.state !== ROBOT_STATES.DISABLED) {
       this.previousState = this.state;
     }

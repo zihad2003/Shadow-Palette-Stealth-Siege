@@ -67,6 +67,8 @@ import {
   WORLD_SAVE_KEY,
   MOUNT_SECONDS,
   PICKUP_SECONDS,
+  PATROL_UPKEEP_COINS,
+  PATROL_UPKEEP_MS,
 } from '../economy.js';
 
 const GameStateContext = createContext(null);
@@ -294,6 +296,13 @@ export function GameStateProvider({ children }) {
   const [patrolUnlocked, setPatrolUnlocked] = useState(() =>
     Array.isArray(savedWorld?.defenses) ? savedWorld.defenses.some((d) => (d.type || d.defenseType) === 'PATROL_ROBOT') : false
   );
+  const [patrolOn, setPatrolOn] = useState(() => {
+    const owned = Array.isArray(savedWorld?.defenses)
+      ? savedWorld.defenses.some((d) => (d.type || d.defenseType) === 'PATROL_ROBOT')
+      : false;
+    if (!owned) return false;
+    return savedWorld?.patrolOn !== false;
+  });
   const [raidCooldownUntil, setRaidCooldownUntil] = useState(0);
   const [lastDailyClaim, setLastDailyClaim] = useState(() => {
     try {
@@ -315,6 +324,16 @@ export function GameStateProvider({ children }) {
   });
   const [coinBanks, setCoinBanks] = useState(() => {
     const raw = savedWorld?.coinBanks;
+    if (!raw || typeof raw !== 'object') return {};
+    const next = {};
+    Object.entries(raw).forEach(([id, amount]) => {
+      const n = Math.floor(Number(amount) || 0);
+      if (n > 0) next[String(id)] = n;
+    });
+    return next;
+  });
+  const [inkBanks, setInkBanks] = useState(() => {
+    const raw = savedWorld?.inkBanks;
     if (!raw || typeof raw !== 'object') return {};
     const next = {};
     Object.entries(raw).forEach(([id, amount]) => {
@@ -445,6 +464,7 @@ export function GameStateProvider({ children }) {
     buildings,
     paintedTiles,
     defenses,
+    patrolOn,
     camoColor,
     characterModel,
     searchlightLevel,
@@ -453,6 +473,7 @@ export function GameStateProvider({ children }) {
     selectedColor,
     gameDay,
     coinBanks,
+    inkBanks,
   };
 
   const showToast = (message, type = 'info') => {
@@ -547,7 +568,12 @@ export function GameStateProvider({ children }) {
       setChips(Number.isFinite(data.chips) ? data.chips : (Number.isFinite(res.chips) ? res.chips : 200));
       if (Array.isArray(data.buildings)) setBuildings(migrateHouseFootprints(data.buildings));
       if (data.paintedTiles) setPaintedTiles(data.paintedTiles);
-      if (Array.isArray(data.defenses)) setDefenses(data.defenses);
+      if (Array.isArray(data.defenses)) {
+        setDefenses(data.defenses);
+        const owned = data.defenses.some((d) => (d.type || d.defenseType) === 'PATROL_ROBOT');
+        setPatrolUnlocked(owned);
+        setPatrolOn(owned && data.patrolOn !== false);
+      }
       if (data.characterModel) setCharacterModel(data.characterModel);
       if (data.camoColor) setCamoColor(data.camoColor);
       if (data.prestigeLevel != null) setPrestigeLevel(data.prestigeLevel);
@@ -556,6 +582,7 @@ export function GameStateProvider({ children }) {
       if (data.selectedColor) setSelectedColor(data.selectedColor);
       if (Number.isFinite(Number(data.gameDay))) setGameDay(Math.max(1, Math.floor(Number(data.gameDay))));
       if (data.coinBanks && typeof data.coinBanks === 'object') setCoinBanks(data.coinBanks);
+      if (data.inkBanks && typeof data.inkBanks === 'object') setInkBanks(data.inkBanks);
       const list = Array.isArray(data.buildings) ? data.buildings : [];
       const defs = Array.isArray(data.defenses) ? data.defenses : [];
       setNextEntityId(Math.max(0, ...list.map((b) => Number(b.id) || 0), ...defs.map((d) => Number(d.id) || 0)) + 1);
@@ -569,6 +596,7 @@ export function GameStateProvider({ children }) {
         buildings: ruins,
         paintedTiles: tiles,
         defenses: [],
+        patrolOn: false,
         camoColor: res.camoColor || 'BLUE',
         characterModel: res.characterModel || 1,
         searchlightLevel: DEFAULT_SEARCHLIGHT_LEVEL,
@@ -577,6 +605,7 @@ export function GameStateProvider({ children }) {
         selectedColor: 'GREEN',
         gameDay: 1,
         coinBanks: {},
+        inkBanks: {},
       };
       storeWorldJson(JSON.stringify(fresh), res.userId);
       setCoins(fresh.coins);
@@ -585,6 +614,8 @@ export function GameStateProvider({ children }) {
       setBuildings(ruins);
       setPaintedTiles(tiles);
       setDefenses([]);
+      setPatrolUnlocked(false);
+      setPatrolOn(false);
       setCharacterModel(fresh.characterModel);
       setCamoColor(fresh.camoColor);
       setPrestigeLevel(0);
@@ -593,6 +624,7 @@ export function GameStateProvider({ children }) {
       setSelectedColor('GREEN');
       setGameDay(1);
       setCoinBanks({});
+      setInkBanks({});
       setNextEntityId(ruins.length + 1);
       setSelectedBuildingId(null);
     }
@@ -727,6 +759,24 @@ export function GameStateProvider({ children }) {
     bumpDailyProgress('collect', 1);
     soundEngine.playSuccessSound();
     showToast(`Collected ${n} coins`, 'success');
+    return true;
+  };
+
+  const collectHouseInk = (buildingId) => {
+    const id = String(buildingId);
+    const banks = { ...(worldRef.current.inkBanks || {}) };
+    const n = Math.floor(Number(banks[id]) || 0);
+    if (n <= 0) {
+      showToast('No ink stored yet', 'info');
+      return false;
+    }
+    banks[id] = 0;
+    const nextInk = Math.min(INK_CAP, (Number(worldRef.current.inkEnergy) || 0) + n);
+    worldRef.current = { ...worldRef.current, inkBanks: banks, inkEnergy: nextInk };
+    setInkBanks(banks);
+    setInkEnergy(nextInk);
+    soundEngine.playSuccessSound();
+    showToast(`Collected ${n} ink`, 'success');
     return true;
   };
 
@@ -1309,7 +1359,8 @@ export function GameStateProvider({ children }) {
 
   const repairedCount = buildings.filter(
     (b) =>
-      !b.ruined && ['SLEEP_HOUSE', 'INK_HOUSE', 'CRAFT_HOUSE', 'COIN_GENERATOR'].includes(b.buildingType)
+      !b.ruined
+      && ['SLEEP_HOUSE', 'INK_HOUSE', 'CRAFT_HOUSE', 'COIN_GENERATOR', 'JAIL', 'BASE_JAIL'].includes(b.buildingType)
   ).length;
   const ruinedCount = buildings.filter((b) => b.ruined && b.buildingType !== 'MAKEUP_HOUSE').length;
   const guideActive = guideStep !== GUIDE_STEPS.DONE;
@@ -1541,34 +1592,9 @@ export function GameStateProvider({ children }) {
     }
 
     if (selectedTool === 'PATROL_ROBOT') {
-      const owned = defenses.filter((d) => (d.type || d.defenseType) === 'PATROL_ROBOT').length;
-      if (owned >= ROBOT_MAX) {
-        showToast('Robot cap', 'info');
-        return false;
-      }
-      const cost = robotCost(owned);
-      if (coins < cost) {
-        showToast(`Need ${cost}c`, 'error');
-        return false;
-      }
-      if (!canPlaceOnGameMap(buildings, x, y, 1, 1)) {
-        showToast('Cannot place patrol', 'error');
-        return false;
-      }
-      soundEngine.playBuildSound();
-      const id = nextEntityId;
-      setNextEntityId((n) => n + 1);
-      setCoins((v) => v - cost);
-      try {
-        await placeDefense(userId, activePlotId, 'PATROL_ROBOT', 1);
-      } catch (e) {
-        /* offline ok */
-      }
-      setDefenses((prev) => [...prev, { id, type: 'PATROL_ROBOT', defenseType: 'PATROL_ROBOT', xPos: x, yPos: y }]);
-      setPatrolUnlocked(true);
+      showToast('Activate patrol from the Craft House', 'info');
       setSelectedTool('PAINT');
-      showToast(`Robot ${owned + 1}`, 'success');
-      return true;
+      return false;
     }
 
     if (PLACEABLE_BUILDINGS.includes(selectedTool)) {
@@ -1648,19 +1674,61 @@ export function GameStateProvider({ children }) {
     return true;
   };
 
-  const unlockPatrolRobot = () => {
-    const owned = defenses.filter((d) => (d.type || d.defenseType) === 'PATROL_ROBOT').length;
-    if (owned >= ROBOT_MAX) {
-      showToast('Robot cap', 'info');
+  const activatePatrolRobot = async () => {
+    if (isVisitGuest) {
+      showToast('Visit — no build', 'info');
       return false;
     }
-    const cost = robotCost(owned);
+    const craftReady = buildingsRef.current.some((b) => !b.ruined && b.buildingType === 'CRAFT_HOUSE');
+    if (!craftReady) {
+      showToast('Rebuild the Craft House first', 'info');
+      return false;
+    }
+    const owned = defenses.filter((d) => (d.type || d.defenseType) === 'PATROL_ROBOT').length;
+    if (owned > 0 || patrolUnlocked) {
+      if (!patrolOn) return togglePatrolRobot(true);
+      showToast('Patrol is on', 'info');
+      return false;
+    }
+    const cost = robotCost(0);
     if (coins < cost) {
       showToast(`Need ${cost}c`, 'error');
       return false;
     }
-    setSelectedTool('PATROL_ROBOT');
-    showToast(`Click tile · ${cost}c`, 'info');
+    soundEngine.playBuildSound();
+    const id = nextEntityId;
+    setNextEntityId((n) => n + 1);
+    setCoins((v) => v - cost);
+    try {
+      await placeDefense(userId, activePlotId, 'PATROL_ROBOT', 1);
+    } catch {
+      /* offline ok */
+    }
+    setDefenses((prev) => [...prev, { id, type: 'PATROL_ROBOT', defenseType: 'PATROL_ROBOT', xPos: 20, yPos: 18 }]);
+    setPatrolUnlocked(true);
+    setPatrolOn(true);
+    setSelectedTool('PAINT');
+    showToast('Patrol bought. 1c / 30s while on.', 'success');
+    return true;
+  };
+  const unlockPatrolRobot = activatePatrolRobot;
+
+  const togglePatrolRobot = (forceOn) => {
+    if (isVisitGuest) {
+      showToast('Visit — no build', 'info');
+      return false;
+    }
+    if (!patrolUnlocked) {
+      showToast('Buy the patrol robot first', 'info');
+      return false;
+    }
+    const next = typeof forceOn === 'boolean' ? forceOn : !patrolOn;
+    if (next && coins < PATROL_UPKEEP_COINS) {
+      showToast(`Need ${PATROL_UPKEEP_COINS}c to run patrol`, 'error');
+      return false;
+    }
+    setPatrolOn(next);
+    showToast(next ? 'Patrol on · 1c / 30s' : 'Patrol parked in Craft House', next ? 'success' : 'info');
     return true;
   };
 
@@ -1727,6 +1795,8 @@ export function GameStateProvider({ children }) {
     const next = prestigeLevel + 1;
     setPrestigeLevel(next);
     setDefenses([]);
+    setPatrolUnlocked(false);
+    setPatrolOn(false);
     setPaintedTiles({});
     setSelectedBuildingId(null);
     const ruins = createStarterRuins();
@@ -2072,7 +2142,9 @@ export function GameStateProvider({ children }) {
   };
 
   const patrolCount = defenses.filter((d) => (d.type || d.defenseType) === 'PATROL_ROBOT').length;
-  const nextRobotCost = robotCost(patrolCount);
+  const nextRobotCost = robotCost(Math.max(0, patrolCount));
+  const patrolOnRef = useRef(patrolOn);
+  patrolOnRef.current = patrolOn;
 
   useEffect(() => {
     const id = window.setInterval(() => {
@@ -2084,9 +2156,14 @@ export function GameStateProvider({ children }) {
         .filter((b) => !b.ruined && b.buildingType === 'COIN_GENERATOR')
         .reduce((s, b) => s + (b.level || 1), 0);
       if (inkN) {
-        setInkEnergy((v) => {
-          const next = Math.min(INK_CAP, v + inkN);
-          worldRef.current = { ...worldRef.current, inkEnergy: next };
+        setInkBanks((prev) => {
+          const next = { ...prev };
+          list.forEach((b) => {
+            if (b.ruined || b.buildingType !== 'INK_HOUSE') return;
+            const key = String(b.id);
+            next[key] = (Number(next[key]) || 0) + (b.level || 1);
+          });
+          worldRef.current = { ...worldRef.current, inkBanks: next };
           return next;
         });
       }
@@ -2105,6 +2182,24 @@ export function GameStateProvider({ children }) {
     }, 10000);
     return () => window.clearInterval(id);
   }, []);
+
+  useEffect(() => {
+    if (!patrolOn) return undefined;
+    const id = window.setInterval(() => {
+      if (!patrolOnRef.current) return;
+      setCoins((v) => {
+        if (v < PATROL_UPKEEP_COINS) {
+          queueMicrotask(() => {
+            setPatrolOn(false);
+            showToast('Patrol parked — not enough coins', 'info');
+          });
+          return v;
+        }
+        return v - PATROL_UPKEEP_COINS;
+      });
+    }, PATROL_UPKEEP_MS);
+    return () => window.clearInterval(id);
+  }, [patrolOn]);
 
   useEffect(() => {
     if (!forceFullHome) return;
@@ -2197,6 +2292,7 @@ export function GameStateProvider({ children }) {
     setPrestigeLevel,
     successfulRaids,
     patrolUnlocked,
+    patrolOn,
     raidCooldownUntil,
     lastDailyClaim,
     isMetaOpen,
@@ -2225,6 +2321,8 @@ export function GameStateProvider({ children }) {
     searchlightLevel,
     setSearchlightLevel,
     upgradeSearchlight,
+    activatePatrolRobot,
+    togglePatrolRobot,
     unlockPatrolRobot,
     patrolCount,
     nextRobotCost,
@@ -2297,6 +2395,8 @@ export function GameStateProvider({ children }) {
     gameDay,
     coinBanks,
     collectHouseCoins,
+    collectHouseInk,
+    inkBanks,
     sleepAtHouse,
     pickPaintColor,
     cyclePaintColor,

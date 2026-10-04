@@ -17,6 +17,7 @@ export default function MetaEconomyPanel() {
     prestigeLevel,
     successfulRaids,
     patrolUnlocked,
+    patrolOn,
     raidCooldownUntil,
     lastDailyClaim,
     claimDailyLogin,
@@ -136,7 +137,7 @@ export default function MetaEconomyPanel() {
               </p>
               <p>
                 Successful raids: <strong className="text-clay-text">{successfulRaids}</strong>
-                {patrolUnlocked ? ' · Patrol in field' : ''}
+                {patrolUnlocked ? (patrolOn ? ' · Patrol on' : ' · Patrol parked') : ''}
               </p>
               <p>
                 Raid cooldown:{' '}

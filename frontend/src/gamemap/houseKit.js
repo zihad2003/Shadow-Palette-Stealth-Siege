@@ -4,7 +4,7 @@ import { GAME_COLORS } from '../colors.js';
 import { TILE_PITCH } from './mapConfig.js';
 
 /** Bump when house geometry changes so GameMap drops cached meshes. */
-export const HOUSE_MESH_REV = 13;
+export const HOUSE_MESH_REV = 14;
 
 /** Visual height vs the 3×3 pad — concept cottages read as tall clay buildings. */
 export const HOUSE_HEIGHT_SCALE = 3;
@@ -121,7 +121,6 @@ export function addCottageFrame(group, { bw, bd, smashed = false, wall = KIT.cre
   addDoor(group, 0, smashed ? 0.32 : 0.42, bodyD * 0.51, { smashed });
   addGlowWindow(group, -bodyW * 0.22, smashed ? 0.54 : 0.74, bodyD * 0.51, { smashed, planter: true });
   addGlowWindow(group, bodyW * 0.22, smashed ? 0.54 : 0.74, bodyD * 0.51, { smashed, planter: false });
-  addChimney(group, bodyW * 0.28, smashed ? 0.8 : 1.2, -bodyD * 0.1, { h: 0.48, broken: smashed, fire: !smashed });
   return { bodyW, bodyD, bodyH };
 }
 
@@ -255,84 +254,30 @@ export function addBanner(group, x, y, z, { hex, torn = false, emblem = 'crown' 
   }
 }
 
-/** Layered clay shingles on a gable, plus timber bargeboards. */
+/** Two clean clay planes that meet at a ridge. */
 export function addGableRoof(group, { w, d, y, color, dark, broken = false, cloth = false }) {
   const mat = clay(color);
   const dk = clay(dark || color);
-  const mid = clay(color);
   const slope = broken ? 0.62 : 0.4;
-  const deckL = box(w * 0.58, 0.07, d * 1.06, mat, 0.03);
+  const deckL = box(w * 0.58, 0.08, d * 1.06, mat, 0.03);
   deckL.rotation.z = broken ? 0.78 : slope;
   deckL.position.set(-w * 0.16, y + (broken ? 0.02 : 0.1), broken ? 0.06 : 0);
   if (cloth) markCloth(deckL);
   add(group, deckL);
-  const deckR = box(w * 0.58, 0.07, d * 1.06, dk, 0.03);
+  const deckR = box(w * 0.58, 0.08, d * 1.06, dk, 0.03);
   deckR.rotation.z = broken ? -0.12 : -slope;
   deckR.position.set(w * (broken ? 0.26 : 0.16), y + (broken ? -0.04 : 0.1), broken ? -0.08 : 0);
   if (cloth) markCloth(deckR);
   add(group, deckR);
-
-  const rows = broken ? 3 : 5;
-  const cols = broken ? 4 : 6;
-  for (const side of [-1, 1]) {
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        if (broken && (r + c + (side > 0 ? 1 : 0)) % 3 === 0) continue;
-        const tile = box(w * 0.15, 0.038, d * 0.18, (r + c) % 2 ? mat : (c % 2 ? dk : mid), 0.012);
-        const nx = side * (0.1 + r * 0.105) * w;
-        const nz = -d * 0.4 + c * (d * 0.82 / Math.max(1, cols - 1));
-        const ny = y + 0.08 + (rows - r) * 0.055;
-        tile.position.set(nx, ny - (broken ? r * 0.05 : 0), nz + (broken ? (r % 2) * 0.06 : 0));
-        tile.rotation.z = side * (broken && r > 1 ? 0.95 : slope);
-        if (broken) tile.rotation.x = (c % 2) * 0.25;
-        if (cloth) markCloth(tile);
-        add(group, tile);
-      }
-    }
-  }
-
-  const bargeL = box(0.07, 0.08, d * 1.12, KIT.wood, 0.02);
-  bargeL.rotation.z = broken ? 0.7 : slope;
-  bargeL.position.set(-w * 0.28, y + (broken ? 0.02 : 0.16), 0);
-  add(group, bargeL);
-  const bargeR = box(0.07, 0.08, d * 1.12, KIT.woodDark, 0.02);
-  bargeR.rotation.z = broken ? -0.15 : -slope;
-  bargeR.position.set(w * 0.28, y + (broken ? 0 : 0.16), 0);
-  add(group, bargeR);
-  if (!broken) {
-    const ridge = box(0.1, 0.09, d * 1.14, KIT.woodDark, 0.02);
-    ridge.position.set(0, y + 0.34, 0);
-    add(group, ridge);
-  } else {
-    const beam = box(0.09, 0.09, w * 0.7, KIT.woodDark, 0.02);
-    beam.position.set(0.08, y + 0.08, 0.04);
-    beam.rotation.set(0.45, 0.25, 0.2);
-    add(group, beam);
-  }
 }
 
 /** One-sided lean-to (craft workshop bay). */
 export function addShedRoof(group, { w, d, y, color, dark, broken = false, tilt = -0.22 }) {
   const mat = clay(color);
-  const dk = clay(dark || color);
-  const deck = box(w, 0.07, d, mat, 0.03);
+  const deck = box(w, 0.08, d, mat, 0.03);
   deck.rotation.z = broken ? tilt - 0.25 : tilt;
   deck.position.set(0, y, 0);
   add(group, deck);
-  const rows = broken ? 2 : 4;
-  const cols = broken ? 3 : 5;
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      if (broken && (r + c) % 2 === 0) continue;
-      const tile = box(w * 0.28, 0.035, d * 0.2, (r + c) % 2 ? mat : dk, 0.012);
-      tile.position.set(-w * 0.22 + r * (w * 0.28), y + 0.04 - r * 0.04, -d * 0.35 + c * (d * 0.18));
-      tile.rotation.z = broken ? 0.5 : tilt;
-      add(group, tile);
-    }
-  }
-  const beam = box(0.07, 0.07, d * 1.02, KIT.wood, 0.02);
-  beam.position.set(-w * 0.42, y + 0.02, 0);
-  add(group, beam);
 }
 
 export function addTimberGable(group, x, y, z, { w = 0.9, h = 0.55, smashed = false } = {}) {

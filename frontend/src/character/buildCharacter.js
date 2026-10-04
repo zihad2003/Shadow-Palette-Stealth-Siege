@@ -556,8 +556,13 @@ export function tickCharacter(figure, elapsed, motion = null) {
   const picking = !!motion?.picking && !seated;
   const looting = !!motion?.looting && !seated && !picking;
   const carrying = !!motion?.carrying && !seated && !picking && !looting;
+  const kickT = Math.max(0, Number(figure.userData.kickT) || 0);
+  if (kickT > 0) figure.userData.kickT = Math.max(0, kickT - dt);
+  const kickU = kickT > 0 ? 1 - kickT / 0.42 : 0;
+  const kickAmt = kickU > 0 && kickU < 1 ? Math.sin(kickU * Math.PI) : 0;
+  const kicking = !seated && kickAmt > 0.02;
 
-  if (!seated && !picking && !looting) {
+  if (!seated && !picking && !looting && !kicking) {
     const legSwing = (0.52 + gait.run * 0.28) * stride;
     rig.leftLeg.rotation.x = s * legSwing;
     rig.rightLeg.rotation.x = -s * legSwing;
@@ -606,6 +611,18 @@ export function tickCharacter(figure, elapsed, motion = null) {
     if (rig.leftHand) rig.leftHand.rotation.set(0.18, 0, -0.06);
     if (rig.rightHand) rig.rightHand.rotation.set(0.22, 0, 0.08);
     rig.root.position.y = -0.12 + gait.bob;
+  } else if (kicking) {
+    rig.leftLeg.rotation.x = 0.32 * kickAmt;
+    rig.rightLeg.rotation.x = -1.35 * kickAmt;
+    if (rig.leftShin) rig.leftShin.rotation.x = 0.22 * kickAmt;
+    if (rig.rightShin) rig.rightShin.rotation.x = 0.1 * kickAmt;
+    rig.leftArm.rotation.set(-0.35 * kickAmt, 0.12, -0.22);
+    rig.rightArm.rotation.set(0.45 * kickAmt, -0.08, 0.28);
+    if (rig.leftFore) rig.leftFore.rotation.x = 0.2;
+    if (rig.rightFore) rig.rightFore.rotation.x = 0.15;
+    if (rig.leftHand) rig.leftHand.rotation.set(0.1, 0, -0.04);
+    if (rig.rightHand) rig.rightHand.rotation.set(0.1, 0, 0.04);
+    rig.root.position.y = gait.bob + 0.04 * kickAmt;
   } else if (carrying) {
     rig.leftArm.rotation.set(-1.05 + s * 0.05 * gait.amp, 0, -0.28);
     rig.rightArm.rotation.set(-1.18 - s * 0.04 * gait.amp, 0, 0.32);
@@ -626,11 +643,11 @@ export function tickCharacter(figure, elapsed, motion = null) {
     rig.root.position.y = gait.bob + breathe * 0.012 * idle;
   }
 
-  const targetLean = seated ? 0.04 : picking || looting ? 0.16 : speed > 0.04 ? (0.04 + gait.run * 0.14) * body.lean : 0;
+  const targetLean = seated ? 0.04 : kicking ? 0.1 * kickAmt : picking || looting ? 0.16 : speed > 0.04 ? (0.04 + gait.run * 0.14) * body.lean : 0;
   gait.lean += (targetLean - gait.lean) * (1 - Math.exp(-4.2 * dt));
   rig.root.rotation.x = gait.lean;
   rig.root.rotation.y = looting ? ((rig.root.rotation.y || 0) + dt * 14) : 0;
-  rig.root.rotation.z = seated || picking || looting ? 0 : -s * 0.028 * stride + breathe * 0.01 * idle;
+  rig.root.rotation.z = seated || picking || looting || kicking ? 0 : -s * 0.028 * stride + breathe * 0.01 * idle;
   rig.root.position.x = 0;
   if (rig.pants) {
     rig.pants.rotation.y = seated || picking ? 0 : s * 0.05 * stride;

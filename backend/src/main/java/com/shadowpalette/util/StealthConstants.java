@@ -62,7 +62,10 @@ public final class StealthConstants {
     /** Reference walk ≈ 1 / WALK_TILE_SECONDS on the frontend. */
     public static final double PLAYER_WALK_SPEED = 3.68;
     public static final double ROBOT_CATCH_DISTANCE = 0.65;
-    public static final double ROBOT_CATCH_HOLD_SECONDS = 0.28;
+    public static final double ROBOT_CATCH_HOLD_SECONDS = 3;
+    public static final double ROBOT_CHASE_PROXIMITY = 2;
+    public static final double ROBOT_HIT_RANGE = 2;
+    public static final double ROBOT_STUN_SECONDS = 8;
     /** Hold-F catch range for a live base owner (client prompts at 2.5; slack for latency). */
     public static final double LIVE_CATCH_DISTANCE = 3.2;
 
