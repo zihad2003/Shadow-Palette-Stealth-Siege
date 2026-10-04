@@ -17,6 +17,7 @@ export default function HouseStation({
   onCollectInk,
   onPickColor,
   onSleep,
+  sleepWarning = '',
   onOpenMakeup,
   patrolOwned = false,
   patrolOn = false,
@@ -92,7 +93,15 @@ export default function HouseStation({
         {type === 'SLEEP_HOUSE' ? (
           <>
             <p className="text-[11px] font-semibold text-clay-text">Day {gameDay}</p>
-            <ClayButton variant="success" onClick={onSleep} className="h-8 rounded-xl text-[11px]">
+            {sleepWarning ? (
+              <p className="text-[10px] text-clay-danger leading-snug">{sleepWarning}</p>
+            ) : null}
+            <ClayButton
+              variant="success"
+              disabled={!!sleepWarning}
+              onClick={onSleep}
+              className="h-8 rounded-xl text-[11px]"
+            >
               Sleep · save
             </ClayButton>
             {info.after ? <p className="text-[10px] text-clay-accent leading-snug">{info.after}</p> : null}

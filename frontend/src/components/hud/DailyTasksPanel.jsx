@@ -3,7 +3,8 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { Check, ClipboardList, Gift } from 'lucide-react';
 import ClayPanel from '../ui/ClayPanel.jsx';
 import ClayButton from '../ui/ClayButton.jsx';
-import { DAILY_TASKS, DAILY_TASK_REWARD, allTasksComplete } from '../../daily/dailyTasks.js';
+import { DAILY_TASKS, DAILY_TASK_REWARD, allTasksComplete, paintDayStatus, DAILY_PAINT_PER_COLOR } from '../../daily/dailyTasks.js';
+import { GAME_COLOR_KEYS, GAME_COLORS, COLOR_NAMES } from '../../colors.js';
 import { useGameState } from '../../state/GameStateContext.jsx';
 
 export default function DailyTasksPanel({ hidden = false }) {
@@ -30,8 +31,10 @@ export default function DailyTasksPanel({ hidden = false }) {
   if (hidden || !dailyTasks) return null;
 
   const complete = allTasksComplete(dailyTasks);
+  const paintGate = paintDayStatus(dailyTasks);
   const claimed = !!dailyTasks.claimed;
   const doneCount = DAILY_TASKS.filter((task) => {
+    if (task.id === 'paint') return paintGate.ok;
     const cur = Number(dailyTasks.progress?.[task.id]) || 0;
     return cur >= task.target;
   }).length;
@@ -77,8 +80,11 @@ export default function DailyTasksPanel({ hidden = false }) {
               <ul className="flex flex-col gap-2">
                 {DAILY_TASKS.map((task) => {
                   const cur = Math.min(task.target, Number(dailyTasks.progress?.[task.id]) || 0);
-                  const pct = Math.round((cur / task.target) * 100);
-                  const done = cur >= task.target;
+                  const paintDone = task.id === 'paint' && paintGate.ok;
+                  const pct = task.id === 'paint'
+                    ? Math.round((GAME_COLOR_KEYS.filter((key) => (Number(paintGate.colors?.[key]) || 0) >= DAILY_PAINT_PER_COLOR).length / GAME_COLOR_KEYS.length) * 100)
+                    : Math.round((cur / task.target) * 100);
+                  const done = task.id === 'paint' ? paintDone : cur >= task.target;
                   return (
                     <li key={task.id} className="flex flex-col gap-0.5">
                       <div className="flex items-center justify-between gap-1">
@@ -86,7 +92,9 @@ export default function DailyTasksPanel({ hidden = false }) {
                           {task.label}
                         </span>
                         <span className="text-[9px] tabular-nums text-clay-muted shrink-0">
-                          {cur}/{task.target}
+                          {task.id === 'paint'
+                            ? `${GAME_COLOR_KEYS.filter((key) => (Number(paintGate.colors?.[key]) || 0) >= DAILY_PAINT_PER_COLOR).length}/5`
+                            : `${cur}/${task.target}`}
                         </span>
                       </div>
                       <div className="h-1.5 rounded-full bg-black/15 overflow-hidden">
@@ -104,6 +112,25 @@ export default function DailyTasksPanel({ hidden = false }) {
                   );
                 })}
               </ul>
+              {!paintGate.ok ? (
+                <div className="flex flex-col gap-1">
+                  <p className="text-[10px] text-clay-danger leading-snug">{paintGate.warning}</p>
+                  <div className="flex items-center gap-1">
+                    {GAME_COLOR_KEYS.map((key) => {
+                      const have = Number(paintGate.colors?.[key]) || 0;
+                      const done = have >= DAILY_PAINT_PER_COLOR;
+                      return (
+                        <span
+                          key={key}
+                          title={`${COLOR_NAMES[key]} ${have}/${DAILY_PAINT_PER_COLOR}`}
+                          className={`w-4 h-4 rounded-full ${done ? 'ring-1 ring-clay-text' : 'opacity-35'}`}
+                          style={{ background: GAME_COLORS[key] }}
+                        />
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
               <ClayButton
                 variant="success"
                 disabled={!complete || claimed}

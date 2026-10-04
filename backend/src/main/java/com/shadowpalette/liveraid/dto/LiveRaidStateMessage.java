@@ -24,4 +24,7 @@ public class LiveRaidStateMessage {
     private String defenderCamo;
     private String message;
     private String status;
+    /** Defender hold-F progress 0..1 — attacker slows while grabbed. */
+    private Double catchProgress;
+    private String catchTarget;
 }

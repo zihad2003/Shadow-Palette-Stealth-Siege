@@ -13,5 +13,9 @@ import lombok.NoArgsConstructor;
 public class CreateRansomOfferRequest {
     @Min(0)
     private int coins;
+    @Min(0)
+    private int ink;
+    @Min(0)
+    private int chips;
     private String message;
 }

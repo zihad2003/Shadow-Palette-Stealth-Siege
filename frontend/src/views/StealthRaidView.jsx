@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Plus, Minus, DoorOpen, Hammer, Bot, Coins, Droplet, Zap, ZapOff } from 'lucide-react';
+import { Plus, Minus, DoorOpen, Bot, Coins, Droplet, Zap, ZapOff } from 'lucide-react';
 import TopResourceBar from '../components/hud/TopResourceBar.jsx';
 import NavigationTabs from '../components/hud/NavigationTabs.jsx';
 import SideRaidPanel from '../components/hud/SideRaidPanel.jsx';
@@ -31,7 +31,7 @@ import {
 import { resolveRaidOutcome, estimateLootPercent } from '../raid/RaidSession.js';
 import { tickExtractionChannel, estimateLootAmounts, inExtractionZone, pickEscapeTile, inEscapeTile } from '../raid/extraction.js';
 import { GATE_SPAWN_TILE, SEARCHLIGHT_TILE, WALK_TILE_SECONDS } from '../gamemap/mapConfig.js';
-import { collectSolidTiles, isWallBreakSpot } from '../gamemap/occupancy.js';
+import { collectSolidTiles } from '../gamemap/occupancy.js';
 import { stepDirection, attemptStep, nudgeOffSolid, TURN_RATE } from '../character/gridMover.js';
 import { noteKeyDown, noteKeyUp, walkAxes, shiftHeld, bindKeyReleaseGuards } from '../character/walkInput.js';
 import { listDecorOccupiedTiles } from '../gamemap/MapDecor.js';
@@ -41,13 +41,12 @@ import { createSprintMeter, SPRINT_SPEED_MULT } from '../character/sprint.js';
 import StaminaBar from '../components/hud/StaminaBar.jsx';
 import ActionPrompt from '../components/hud/ActionPrompt.jsx';
 import { ensureStompConnected, stompPublish, stompSubscribe, stompUnsubscribe } from '../live/stompClient.js';
-import { duoMarkCaught } from '../api.js';
+import { captureJailStay, duoMarkCaught, fetchMyJailStay } from '../api.js';
 import LootFloatFX from '../components/raid/LootFloatFX.jsx';
 import RaidTransitionOverlay, { RAID_CINEMATIC_MS } from '../components/raid/RaidTransitionOverlay.jsx';
 import { findRepairedNear } from '../gamemap/starterRuins.js';
 import RansomModal from '../components/raid/RansomModal.jsx';
 
-const WALL_BREAK_HITS = 4;
 const RAID_DECOR_SEED = 41;
 /** Advance PatrolRobotContext on a fixed cadence (~session-log rate), not every rAF. */
 const ROBOT_TICK_HZ = 8;
@@ -67,10 +66,6 @@ function hudStateFromRobot(robotState) {
     default:
       return DETECTION_STATES.NORMAL;
   }
-}
-
-function isAtGate(column, row) {
-  return column === GATE_SPAWN_TILE.column && row === GATE_SPAWN_TILE.row;
 }
 
 /** Split raid target pools onto the defender's coin / ink houses (20% steal cap). */
@@ -110,8 +105,13 @@ export default function StealthRaidView() {
     raidLoot,
     characterModel,
     showToast,
+    coins,
+    inkEnergy,
+    chips,
     setCoins,
     setInkEnergy,
+    setChips,
+    setIsJailed,
     transitionTo,
     recordRaidResult,
     userId,
@@ -166,6 +166,9 @@ export default function StealthRaidView() {
   /** Live defender is driving the robot — skip local AI chase. */
   const liveDefenderRef = useRef(false);
   const liveCaughtRef = useRef(false);
+  const liveGrabbedRef = useRef(false);
+  const liveCatchProgressRef = useRef(0);
+  const [liveCatchProgress, setLiveCatchProgress] = useState(0);
   const sessionLog = useRef([]);
   const wallHitsRef = useRef(0);
   const gateLockedRef = useRef(false);
@@ -194,6 +197,7 @@ export default function StealthRaidView() {
   const lootTimerRef = useRef(null);
 
   const [showRansomModal, setShowRansomModal] = useState(false);
+  const [jailStayId, setJailStayId] = useState(null);
   const [imprisoned, setImprisoned] = useState(false);
   const imprisonedRef = useRef(false);
   imprisonedRef.current = imprisoned;
@@ -257,7 +261,6 @@ export default function StealthRaidView() {
       collectSolidTiles({
         buildings: raidBuildings,
         decorTiles: listDecorOccupiedTiles(RAID_DECOR_SEED, raidBuildings),
-        includeMakeupHouse: false,
         gateLocked: false,
       }),
     [raidBuildings]
@@ -267,7 +270,6 @@ export default function StealthRaidView() {
       collectSolidTiles({
         buildings: raidBuildings,
         decorTiles: listDecorOccupiedTiles(RAID_DECOR_SEED, raidBuildings),
-        includeMakeupHouse: false,
         gateLocked: true,
       }),
     [raidBuildings]
@@ -342,12 +344,20 @@ export default function StealthRaidView() {
       moveCooldown = Math.max(0, moveCooldown - dt);
       bumpCooldown = Math.max(0, bumpCooldown - dt);
 
-      const canMove = !hudRef.current.outcome && !hudRef.current.breaking && !isLootingRef.current && !imprisonedRef.current;
+      const duoCaughtSelf = duoPartyId && duoParty && (
+        (Number(duoParty.hostId) === Number(userId) && !!duoParty.hostCaught)
+        || (Number(duoParty.guestId) === Number(userId) && !!duoParty.guestCaught)
+      );
+      const grabbed = liveGrabbedRef.current || liveCatchProgressRef.current > 0.05;
+      const canMove = !hudRef.current.outcome && !hudRef.current.breaking && !isLootingRef.current
+        && !imprisonedRef.current && !liveCaughtRef.current && !duoCaughtSelf && !grabbed;
       const { forward, turn } = canMove ? walkAxes(keys.current) : { forward: 0, turn: 0 };
 
       // Shift = limited sprint; meter drains while moving, refills after a short pause
       const sp = sprintMeter.current.tick(dt, shiftHeld(keys.current), forward !== 0);
-      const sprintMul = sp.sprinting ? SPRINT_SPEED_MULT : 1;
+      let sprintMul = sp.sprinting ? SPRINT_SPEED_MULT : 1;
+      if (liveCatchProgressRef.current > 0.5) sprintMul *= 0.35;
+      else if (liveCatchProgressRef.current > 0.05) sprintMul *= 0.65;
       if (sprintMul !== lastSprintMul) {
         lastSprintMul = sprintMul;
         sceneApi.current?.setSprint?.(sprintMul);
@@ -451,7 +461,7 @@ export default function StealthRaidView() {
         sceneApi.current?.setAlarm?.(true);
         sceneApi.current?.lockGate?.();
         sceneApi.current?.flashSearchlightDetect?.(1.2);
-        showToastRef.current('Siren · find the escape tile or break a wall', 'error');
+        showToastRef.current('Siren · find the glowing escape tile and hold still', 'error');
       } else if (lightSpotted) {
         sceneApi.current?.flashSearchlightDetect?.(0.55);
       }
@@ -642,8 +652,30 @@ export default function StealthRaidView() {
             : { column: 10, row: 10 };
           setAttacker((prev) => ({ ...prev, ...jailPos }));
           attackerRef.current = { ...attackerRef.current, ...jailPos };
+          hudRef.current = {
+            ...hudRef.current,
+            outcome: 'JAILED',
+            greedCoins: 0,
+            greedInk: 0,
+            greedPercent: 0,
+            channeling: false,
+          };
+          setHud((prev) => ({
+            ...prev,
+            outcome: 'JAILED',
+            greedCoins: 0,
+            greedInk: 0,
+            greedPercent: 0,
+            channeling: false,
+          }));
+          const captorId = targetMeta?.ownerId || raidTargetId;
+          void captureJailStay({ captorId, raidId: raidSession?.raidId || null })
+            .then((stay) => { if (stay?.id) setJailStayId(stay.id); })
+            .catch(() => {
+              void fetchMyJailStay().then((stay) => { if (stay?.id) setJailStayId(stay.id); });
+            });
           if (duoPartyId) duoMarkCaught(duoPartyId, userId).catch(() => { });
-          showToastRef.current('Captured! Locked in Base Jail — Negotiate ransom or voice intercom', 'warning');
+          showToastRef.current('Captured! Locked in enemy Base Jail — negotiate ransom to leave.', 'warning');
           soundEngine.playWallHitSound?.();
         } else {
           if (duoPartyId) duoMarkCaught(duoPartyId, userId).catch(() => { });
@@ -690,7 +722,7 @@ export default function StealthRaidView() {
           elapsed,
         }));
         showToastRef.current(outcome === 'ESCAPED' ? 'Escaped' : 'Silent extract', 'success');
-      } else if (remaining <= 0 && !hudRef.current.outcome) {
+      } else if (remaining <= 0 && !hudRef.current.outcome && !imprisonedRef.current) {
         // Survived the full 150s — lock greed loot (spotted or not). Patrol never zeros this.
         const outcome =
           chaseLatchedRef.current || result.alarmLatched || gateLockedRef.current ? 'ESCAPED' : 'SILENT';
@@ -782,6 +814,18 @@ export default function StealthRaidView() {
             if (!duoPartyId) sceneApi.current?.clearPartnerPose?.();
             showToastRef.current('Defender left — patrol AI resumed', 'info');
           }
+          const catchPct = Number(state.catchProgress) || 0;
+          if (catchPct > 0 && !liveCaughtRef.current) {
+            liveCatchProgressRef.current = catchPct;
+            setLiveCatchProgress(catchPct);
+            if (catchPct > 0.05) liveGrabbedRef.current = true;
+          } else if (state.status !== 'CATCH' && catchPct <= 0) {
+            liveCatchProgressRef.current = 0;
+            setLiveCatchProgress(0);
+            if (!imprisonedRef.current && state.status !== 'CARRIED') {
+              liveGrabbedRef.current = false;
+            }
+          }
           if (liveDefenderRef.current && state.robotX != null && state.robotY != null) {
             // The base owner chases in person: show their character (partner mesh is
             // reserved for the duo partner, so duo raids keep the robot stand-in).
@@ -805,6 +849,9 @@ export default function StealthRaidView() {
             imprisonedRef.current = true;
             setImprisoned(true);
             setShowRansomModal(true);
+            hudRef.current = { ...hudRef.current, outcome: 'JAILED', greedCoins: 0, greedInk: 0, greedPercent: 0 };
+            setHud((prev) => ({ ...prev, outcome: 'JAILED', greedCoins: 0, greedInk: 0, greedPercent: 0 }));
+            void fetchMyJailStay().then((stay) => { if (stay?.id) setJailStayId(stay.id); });
             const jailBuilding = raidBuildings?.find((b) => b.buildingType === 'JAIL');
             const jailPos = jailBuilding
               ? { column: jailBuilding.xPos ?? jailBuilding.column ?? 10, row: jailBuilding.yPos ?? jailBuilding.row ?? 10 }
@@ -814,13 +861,16 @@ export default function StealthRaidView() {
             showToastRef.current?.('Caught by the base owner and locked in jail. Ransom is open.', 'warning');
             soundEngine.playGateSlamSound?.();
           } else if (state.status === 'CARRIED' && !liveCaughtRef.current) {
+            liveGrabbedRef.current = true;
             if (!imprisonedRef.current) {
+              setImprisoned(true);
               showToastRef.current?.('Caught by Base Owner! You have been picked up — being carried to the Base Jail...', 'warning');
             }
             imprisonedRef.current = true;
             if (state.robotX != null && state.robotY != null) {
-              setAttacker({ column: state.robotX, row: state.robotY });
-              attackerRef.current = { column: state.robotX, row: state.robotY };
+              const snap = { ...attackerRef.current, column: state.robotX, row: state.robotY };
+              setAttacker(snap);
+              attackerRef.current = snap;
             }
           }
           if (state.outcome === 'RELEASED') {
@@ -986,16 +1036,7 @@ export default function StealthRaidView() {
         creditHouseLootRef.current?.(houseId, kind, share, 'partner');
       }
       if (msg.type === 'WALL') {
-        const column = Number(msg.payload?.column);
-        const row = Number(msg.payload?.row);
-        const hits = Number(msg.payload?.hits) || 1;
-        const final = !!msg.payload?.final;
-        if (!Number.isFinite(column) || !Number.isFinite(row)) return;
-        wallHitsRef.current = Math.max(wallHitsRef.current, hits);
-        sceneApi.current?.playWallBreak?.(column, row, { hits, final, gate: isAtGate(column, row) });
-        soundEngine.playWallBreakSound(final);
-        setHud((prev) => ({ ...prev, wallHits: wallHitsRef.current, breakFlash: true }));
-        if (final) showToastRef.current?.('Partner opened a wall', 'success');
+        showToastRef.current?.('Walls stay shut — hold the escape tile', 'info');
       }
     };
     (async () => {
@@ -1161,28 +1202,33 @@ export default function StealthRaidView() {
     }, 40);
   };
 
-  const handleRansomReleased = (paidCoins) => {
+  const handleRansomReleased = (payment = {}) => {
+    const paidCoins = Number(payment.coins) || 0;
+    const paidInk = Number(payment.ink) || 0;
+    const paidChips = Number(payment.chips) || 0;
     ransomPaidRef.current = true;
     imprisonedRef.current = false;
     setImprisoned(false);
     setShowRansomModal(false);
-    if (paidCoins > 0) {
-      setCoins((c) => Math.max(0, c - paidCoins));
-    }
-    showToast(`Ransom settled (${paidCoins} coins). Base owner released you! Returning to your base...`, 'success');
+    setIsJailed(false);
+    setJailStayId(null);
+    if (paidCoins > 0) setCoins((c) => Math.max(0, c - paidCoins));
+    if (paidInk > 0) setInkEnergy((i) => Math.max(0, i - paidInk));
+    if (paidChips > 0) setChips((ch) => Math.max(0, ch - paidChips));
+    showToast(
+      paidCoins + paidInk + paidChips > 0
+        ? `Ransom paid (${paidCoins}c · ${paidInk} ink · ${paidChips} pts). Returning home...`
+        : 'Released from jail. Returning to your base...',
+      'success'
+    );
     window.setTimeout(() => {
       transitionTo('BASE_BUILDER');
     }, 1200);
   };
 
   const handleRansomDeclined = () => {
-    setShowRansomModal(false);
-    imprisonedRef.current = false;
-    setImprisoned(false);
-    showToast('Ransom negotiation ended. Released and expelled back to your home base.', 'info');
-    window.setTimeout(() => {
-      transitionTo('BASE_BUILDER');
-    }, 1200);
+    showToast('You remain in jail. Keep negotiating or wait for the timer.', 'warning');
+    setShowRansomModal(true);
   };
 
   /** End the run and show the results card. */
@@ -1274,70 +1320,6 @@ export default function StealthRaidView() {
     showToast(`Hold still ${ESCAPE_HOLD_SECONDS}s to escape`, 'info');
   };
 
-  const hitWall = () => {
-    if (hudRef.current.outcome) return;
-    if (hudRef.current.breaking) return;
-    if (!isWallBreakSpot(attackerRef.current.column, attackerRef.current.row)) {
-      showToast('At a wall', 'info');
-      return;
-    }
-    if (!hudRef.current.alarm && !hudRef.current.gateLocked) {
-      showToast('F · gate or wall', 'info');
-      return;
-    }
-
-    const { column, row } = attackerRef.current;
-    wallHitsRef.current = Math.min(WALL_BREAK_HITS, wallHitsRef.current + 1);
-    const hits = wallHitsRef.current;
-    const final = hits >= WALL_BREAK_HITS;
-
-    setHud((prev) => ({
-      ...prev,
-      breaking: true,
-      wallHits: hits,
-      breakFlash: true,
-    }));
-
-    sceneApi.current?.playWallBreak?.(column, row, { hits, final, gate: isAtGate(column, row) });
-    soundEngine.playWallBreakSound(final);
-    if (duoPartyId) {
-      stompPublish(`/app/duo/${duoPartyId}/signal`, {
-        fromUserId: userId,
-        type: 'WALL',
-        payload: { column, row, hits, final },
-      }).catch(() => {});
-    }
-    if (final) soundEngine.playSuccessSound();
-
-    window.setTimeout(() => {
-      if (final) {
-        showToast('Open', 'success');
-        const elapsed = (Date.now() - raidStartedRef.current) / 1000;
-        const poolCoins = Number(raidLoot?.coins ?? targetMeta?.coins ?? 200);
-        const poolInk = Number(raidLoot?.ink ?? targetMeta?.ink ?? 40);
-        const greed = estimateLootAmounts(elapsed, { coins: poolCoins, ink: poolInk }, 'ESCAPED');
-        const share = duoPartyId ? DUO_LOOT_SHARE : 1;
-        const greedCoins = Math.round(greed.coins * share);
-        const greedInk = Math.round(greed.ink * share);
-        setStolen((prev) => ({ coins: prev.coins + greedCoins, ink: prev.ink + greedInk }));
-        setHud((prev) => ({
-          ...prev,
-          outcome: 'ESCAPED',
-          remaining: 0,
-          breaking: false,
-          breakFlash: false,
-          greedCoins,
-          greedInk,
-          greedPercent: greed.percent,
-          elapsed,
-        }));
-      } else {
-        showToast(`${hits}/${WALL_BREAK_HITS}`, 'info');
-        setHud((prev) => ({ ...prev, breaking: false, breakFlash: false }));
-      }
-    }, final ? 900 : 420);
-  };
-
   const hitRobot = () => {
     if (hudRef.current.outcome || !patrolArmedRef.current) return;
     const patrolState = sceneApi.current?.getPatrolState?.() || {};
@@ -1411,10 +1393,6 @@ export default function StealthRaidView() {
       climbGate();
       return;
     }
-    if (isWallBreakSpot(column, row) && (hudRef.current.alarm || hudRef.current.gateLocked)) {
-      hitWall();
-      return;
-    }
     showToast('E · steal · find the glowing escape tile', 'info');
   };
   actionRef.current = tryAction;
@@ -1429,9 +1407,7 @@ export default function StealthRaidView() {
   };
 
   const atEscape = inEscapeTile(attacker.column, attacker.row, escapeTile);
-  const atWall = isWallBreakSpot(attacker.column, attacker.row);
   const canClimb = atEscape && !hud.outcome;
-  const canBreak = atWall && (hud.alarm || hud.gateLocked) && !hud.outcome;
   const nearLootHouse = !hud.outcome
     ? findRepairedNear(raidBuildings, attacker.column, attacker.row)
     : null;
@@ -1460,8 +1436,7 @@ export default function StealthRaidView() {
         buildings={raidBuildings}
         defenses={raidDefenses}
         showSearchlight
-        searchlightLevel={targetMeta?.level || 1}
-        showMakeupHouse
+        searchlightLevel={3}
         attacker={attacker}
         looting={isLooting}
       />
@@ -1516,6 +1491,11 @@ export default function StealthRaidView() {
           {hud.inBeam && (
             <span className={`text-[10px] ${hud.colorMatch ? 'text-clay-success' : 'text-clay-danger'}`}>
               {hud.colorMatch ? 'Hidden' : 'Exposed'}
+            </span>
+          )}
+          {liveCatchProgress > 0.05 && !imprisoned && (
+            <span className="text-[10px] text-clay-danger whitespace-nowrap">
+              Being grabbed… {Math.round(liveCatchProgress * 100)}%
             </span>
           )}
         </ClayPanel>
@@ -1662,25 +1642,6 @@ export default function StealthRaidView() {
       </AnimatePresence>
 
       <AnimatePresence>
-        {hud.breakFlash && (
-          <motion.div
-            key={`break-${hud.wallHits}`}
-            initial={{ opacity: 0.32 }}
-            animate={{ opacity: 0 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.28 }}
-            className="absolute inset-0 z-30 pointer-events-none"
-            style={{
-              background:
-                hud.wallHits >= WALL_BREAK_HITS
-                  ? 'radial-gradient(circle at center, rgba(244,162,97,0.28), transparent 55%)'
-                  : 'radial-gradient(circle at center, rgba(255,255,255,0.16), transparent 50%)',
-            }}
-          />
-        )}
-      </AnimatePresence>
-
-      <AnimatePresence>
         {hud.robotHitting && (
           <motion.div
             initial={{ opacity: 0 }}
@@ -1705,16 +1666,6 @@ export default function StealthRaidView() {
           depth="deep"
           className="absolute bottom-4 left-1/2 -translate-x-1/2 z-50 h-11 px-2.5 rounded-2xl flex items-center gap-2 pointer-events-auto"
         >
-          {(hud.alarm || hud.gateLocked) && (
-            <div className="w-16 h-1.5 rounded-full clay-inset overflow-hidden flex gap-0.5 p-px">
-              {Array.from({ length: WALL_BREAK_HITS }).map((_, i) => (
-                <div
-                  key={i}
-                  className={`flex-1 rounded-sm ${i < hud.wallHits ? 'bg-clay-accent' : 'bg-transparent'}`}
-                />
-              ))}
-            </div>
-          )}
           <ClayButton
             variant={canClimb || hud.channeling ? 'success' : 'ghost'}
             disabled={!canClimb && !hud.channeling}
@@ -1723,19 +1674,11 @@ export default function StealthRaidView() {
           >
             <DoorOpen size={12} /> {hud.channeling ? `Escape ${hud.channelPercent}%` : `Hold ${ESCAPE_HOLD_SECONDS}s`}
           </ClayButton>
-          <ClayButton
-            variant={canBreak ? 'danger' : 'ghost'}
-            disabled={!canBreak}
-            onClick={hitWall}
-            className="h-8 px-3 rounded-lg text-[11px] flex items-center gap-1"
-          >
-            <Hammer size={12} /> Wall
-          </ClayButton>
         </ClayPanel>
       )}
 
       <AnimatePresence>
-        {hud.outcome && (
+        {hud.outcome && hud.outcome !== 'JAILED' && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -1902,7 +1845,7 @@ export default function StealthRaidView() {
         isAlarmTriggered={hud.alarm}
         sessionLog={sessionLog}
         paintedTiles={paintedTiles}
-        searchlightLevel={targetMeta?.level || 1}
+        searchlightLevel={3}
         outcome={hud.outcome}
         wallHits={hud.wallHits}
         elapsedSeconds={hud.elapsed}
@@ -1938,11 +1881,14 @@ export default function StealthRaidView() {
       <RansomModal
         isOpen={showRansomModal}
         isPrisoner={true}
+        jailStayId={jailStayId}
         attackerId={userId}
         defenderId={targetMeta?.ownerId || raidTargetId || 105}
         attackerName={`Player ${String(userId).padStart(5, '0')}`}
         defenderName={targetMeta?.name || 'Base Warden'}
-        playerCoins={1000}
+        playerCoins={coins ?? 500}
+        playerInk={inkEnergy ?? 100}
+        playerChips={chips ?? 200}
         onRelease={handleRansomReleased}
         onDecline={handleRansomDeclined}
       />

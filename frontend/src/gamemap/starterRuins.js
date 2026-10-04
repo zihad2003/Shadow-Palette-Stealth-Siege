@@ -2,7 +2,10 @@ import { MAP_COLS, MAP_ROWS, GATE_SPAWN_TILE } from './mapConfig.js';
 
 /** Pre-placed broken houses on a fresh 48×40 fortress — walk up and repair. */
 export const REPAIR_BUILDING_COST = { coins: 80, ink: 12 };
-export const STARTER_HOUSE_COUNT = 5;
+export const STARTER_HOUSE_COUNT = 6;
+
+/** North yard, clear of the corner houses and the lighthouse plaza. */
+export const MAKEUP_RUIN_SLOT = { xPos: 22, yPos: 8 };
 export const REBUILD_SECONDS = 2;
 
 export function houseLabel(type) {
@@ -17,6 +20,7 @@ export function createStarterRuins() {
     { buildingType: 'CRAFT_HOUSE', xPos: 3, yPos: MAP_ROWS - 5 },
     { buildingType: 'COIN_GENERATOR', xPos: MAP_COLS - 5, yPos: MAP_ROWS - 5 },
     { buildingType: 'JAIL', xPos: Math.floor(MAP_COLS * 0.35), yPos: Math.floor(MAP_ROWS * 0.4) },
+    { buildingType: 'MAKEUP_HOUSE', xPos: MAKEUP_RUIN_SLOT.xPos, yPos: MAKEUP_RUIN_SLOT.yPos },
   ];
 
   return slots.map((s, i) => ({
@@ -30,6 +34,25 @@ export function createStarterRuins() {
     level: 1,
     ruined: true,
   }));
+}
+
+/** Old saves predate this house — drop a ruined copy in the north yard. */
+export function ensureMakeupRuin(list) {
+  const buildings = Array.isArray(list) ? [...list] : [];
+  if (buildings.some((b) => b?.buildingType === 'MAKEUP_HOUSE')) return buildings;
+  const id = Math.max(0, ...buildings.map((b) => Number(b?.id) || 0)) + 1;
+  buildings.push({
+    id,
+    buildingType: 'MAKEUP_HOUSE',
+    xPos: MAKEUP_RUIN_SLOT.xPos,
+    yPos: MAKEUP_RUIN_SLOT.yPos,
+    footprintWidth: 3,
+    footprintHeight: 3,
+    hexColor: '#9A958C',
+    level: 1,
+    ruined: true,
+  });
+  return buildings;
 }
 
 const MAX_HOUSE_COLORS = [
@@ -191,13 +214,11 @@ export function findRuinAt(buildings, column, row) {
 
 export function findRepairedAt(buildings, column, row) {
   return (
-    buildings.find(
-      (b) => !b.ruined && b.buildingType !== 'MAKEUP_HOUSE' && buildingCoversTile(b, column, row)
-    ) || null
+    buildings.find((b) => !b.ruined && buildingCoversTile(b, column, row)) || null
   );
 }
 
-/** Stand beside a repaired house to pick it up (footprint is solid). */
+/** Stand beside a repaired house. Closest footprint wins when two houses are adjacent. */
 export function findRepairedNear(buildings, column, row) {
   const neighbors = [
     [1, 0],
@@ -209,11 +230,22 @@ export function findRepairedNear(buildings, column, row) {
     [-1, 1],
     [-1, -1],
   ];
+  let best = null;
+  let bestDist = Infinity;
+  const seen = new Set();
   for (const [dx, dy] of neighbors) {
     const hit = findRepairedAt(buildings, column + dx, row + dy);
-    if (hit) return hit;
+    if (!hit || seen.has(hit.id)) continue;
+    seen.add(hit.id);
+    const cx = hit.xPos + ((hit.footprintWidth || 3) - 1) / 2;
+    const cy = hit.yPos + ((hit.footprintHeight || 3) - 1) / 2;
+    const dist = Math.hypot(column - cx, row - cy);
+    if (dist < bestDist) {
+      best = hit;
+      bestDist = dist;
+    }
   }
-  return null;
+  return best;
 }
 
 /** Stand on the ruin footprint or any adjacent tile to repair. */
@@ -234,16 +266,6 @@ export function findRuinNear(buildings, column, row) {
   return null;
 }
 
-/** Makeup House sits on the south-west wall, off the paintable grid. */
-export function isNearMakeupHouse(column, row) {
-  for (let c = 0; c <= 2; c += 1) {
-    for (let r = MAP_ROWS - 3; r <= MAP_ROWS - 1; r += 1) {
-      if (Math.max(Math.abs(column - c), Math.abs(row - r)) <= 1) return true;
-    }
-  }
-  return false;
-}
-
 export function isHouseBuilding(building) {
   return (
     !!building &&
@@ -254,7 +276,7 @@ export function isHouseBuilding(building) {
 
 /** Nearest unfinished ruin to the gate (then the next nearest as houses complete). */
 export function nextGuideRuin(buildings, fromTile = GATE_SPAWN_TILE) {
-  const ruins = (buildings || []).filter((b) => b.ruined && b.buildingType !== 'MAKEUP_HOUSE');
+  const ruins = (buildings || []).filter((b) => b.ruined);
   if (!ruins.length) return null;
   const fx = fromTile.column ?? fromTile.x ?? GATE_SPAWN_TILE.column;
   const fy = fromTile.row ?? fromTile.y ?? GATE_SPAWN_TILE.row;

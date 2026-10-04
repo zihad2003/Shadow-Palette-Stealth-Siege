@@ -16,6 +16,8 @@ public class RansomOfferDto {
     private Long jailStayId;
     private String offeredBy;
     private int coins;
+    private int ink;
+    private int chips;
     private String message;
     private String status;
     private LocalDateTime createdAt;

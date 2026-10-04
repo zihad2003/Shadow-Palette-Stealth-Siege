@@ -29,6 +29,14 @@ public class RansomOffer {
     @Column(name = "coins", nullable = false)
     private int coins;
 
+    @Column(name = "ink", nullable = false)
+    @Builder.Default
+    private int ink = 0;
+
+    @Column(name = "chips", nullable = false)
+    @Builder.Default
+    private int chips = 0;
+
     @Column(name = "message")
     private String message;
 

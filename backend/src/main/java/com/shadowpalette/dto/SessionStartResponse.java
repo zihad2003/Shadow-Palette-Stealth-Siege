@@ -28,6 +28,8 @@ public class SessionStartResponse {
     private String jwt;
     private String recoveryToken;
     private Boolean isJailed;
+    /** True when this player is holding someone in their jail (blocks outgoing raids). */
+    private Boolean holdingPrisoner;
     private JailStayDto jailStay;
     /** True when this browser has no matching player and must sign in or create one. */
     private Boolean needsLogin;

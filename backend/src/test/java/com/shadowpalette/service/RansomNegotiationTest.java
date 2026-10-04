@@ -72,18 +72,18 @@ class RansomNegotiationTest {
 
         // 1. Outsider cannot make offer
         ApiException outEx = assertThrows(ApiException.class, () -> {
-            jailService.createOffer(stay.getId(), outsider.getId(), 50, "Let me pay");
+            jailService.createOffer(stay.getId(), outsider.getId(), 50, 0, 0, "Let me pay");
         });
         assertEquals("NOT_PARTICIPANT", outEx.getMessage());
 
         // 2. Prisoner cannot offer more coins than they have (300 available, offering 500)
         ApiException overEx = assertThrows(ApiException.class, () -> {
-            jailService.createOffer(stay.getId(), prisoner.getId(), 500, "I can pay 500!");
+            jailService.createOffer(stay.getId(), prisoner.getId(), 500, 0, 0, "I can pay 500!");
         });
         assertEquals("INSUFFICIENT_COINS", overEx.getMessage());
 
         // 3. Captor creates valid offer demanding 150 coins
-        RansomOfferDto offerDto = jailService.createOffer(stay.getId(), captor.getId(), 150, "Pay 150 or stay 3 minutes");
+        RansomOfferDto offerDto = jailService.createOffer(stay.getId(), captor.getId(), 150, 0, 0, "Pay 150 or stay 3 minutes");
         assertNotNull(offerDto);
         assertEquals("CAPTOR", offerDto.getOfferedBy());
         assertEquals(150, offerDto.getCoins());
@@ -130,7 +130,7 @@ class RansomNegotiationTest {
         User captor = userRepository.save(User.builder().id(4012L).username("C").coins(500).build());
         JailStay stay = jailService.createJailStay(prisoner.getId(), captor.getId(), "raid_expired");
 
-        RansomOfferDto offer = jailService.createOffer(stay.getId(), captor.getId(), 50, "Quick offer");
+        RansomOfferDto offer = jailService.createOffer(stay.getId(), captor.getId(), 50, 0, 0, "Quick offer");
 
         // Manually expire the offer
         RansomOffer entity = ransomOfferRepository.findById(offer.getId()).orElseThrow();

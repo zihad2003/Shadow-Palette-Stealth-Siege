@@ -5,6 +5,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.List;
 import java.util.Map;
 
 @Data
@@ -30,6 +31,8 @@ public class VisitSessionDto {
     private Double guestY;
     private int gear;
     private double trackT;
+    private String reaction;
+    private List<String> chat;
     private Map<String, Object> snapshot;
     private String status;
     private String message;

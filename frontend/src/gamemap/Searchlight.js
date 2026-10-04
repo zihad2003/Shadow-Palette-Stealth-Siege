@@ -491,9 +491,9 @@ export function createSearchlight({ level = DEFAULT_SEARCHLIGHT_LEVEL } = {}) {
     flashDetect(strength = 1) {
       detectFlash = Math.max(detectFlash, 0.55 * strength);
     },
-    update(dt, { alarm = false, effectiveBaseRangeTiles } = {}) {
+    update(dt, { alarm = false, effectiveBaseRangeTiles, applyAlarmBonus = true } = {}) {
       const base = Number.isFinite(effectiveBaseRangeTiles) ? effectiveBaseRangeTiles : spec.rangeTiles;
-      const extra = alarm ? spec.alarmRangeBonus : 0;
+      const extra = alarm && applyAlarmBonus ? spec.alarmRangeBonus : 0;
       const tiles = base + extra;
       if (alarm !== lastAlarm || Math.abs(tiles - lastAppliedRange) > 0.005) {
         applyBeamRange(tiles);

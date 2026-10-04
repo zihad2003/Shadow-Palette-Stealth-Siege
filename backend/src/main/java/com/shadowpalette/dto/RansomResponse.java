@@ -15,5 +15,7 @@ public class RansomResponse {
     private Long attackerId;
     private Long defenderId;
     private int coinsTransferred;
+    private int inkTransferred;
+    private int chipsTransferred;
     private String message;
 }

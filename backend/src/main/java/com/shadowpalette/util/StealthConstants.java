@@ -56,6 +56,11 @@ public final class StealthConstants {
     public static final double BEAM_RANGE_GROWTH_PER_SECOND = 0.012;
     public static final double BEAM_RANGE_MAX_RATIO = 1.0;
 
+    /** Raid cone starts at 4 tiles and reaches the base boundary. Home base stays full. */
+    public static final double RAID_BEAM_START_TILES = 4.0;
+    public static final double RAID_BEAM_GROW_SECONDS = 120.0;
+    public static final double SEARCHLIGHT_FULL_RANGE_TILES = Math.max((MAP_COLS - 1) / 2.0, (MAP_ROWS - 1) / 2.0);
+
     /** Patrol chase — a hair above walk; sprint still escapes. Synced with FE. */
     public static final double ROBOT_CHASE_SPEED = 3.95;
     public static final double ROBOT_HIT_SPEED = 4.15;
@@ -122,5 +127,12 @@ public final class StealthConstants {
      */
     public static double effectiveBeamRangeTiles(double configuredRange, double elapsedSeconds, double alarmRangeBonus) {
         return configuredRange * beamRangeRatio(elapsedSeconds) + alarmRangeBonus;
+    }
+
+    /** Raid cone: 4 tiles at t=0, base boundary after RAID_BEAM_GROW_SECONDS. */
+    public static double raidBeamRangeTiles(double elapsedSeconds) {
+        double elapsed = Math.max(0, elapsedSeconds);
+        double t = Math.min(1.0, elapsed / RAID_BEAM_GROW_SECONDS);
+        return RAID_BEAM_START_TILES + (SEARCHLIGHT_FULL_RANGE_TILES - RAID_BEAM_START_TILES) * t;
     }
 }

@@ -1,6 +1,7 @@
 package com.shadowpalette.controller;
 
 import com.shadowpalette.dto.CreateRansomOfferRequest;
+import com.shadowpalette.dto.JailCaptureRequest;
 import com.shadowpalette.dto.JailStayDto;
 import com.shadowpalette.dto.RansomOfferDto;
 import com.shadowpalette.dto.RansomResponse;
@@ -27,11 +28,28 @@ public class JailController {
         if (callerId == null) {
             return ResponseEntity.status(401).build();
         }
-        Optional<JailStay> activeStay = jailService.getActiveJailStay(callerId);
+        Optional<JailStay> activeStay = jailService.getActiveJailStayForParticipant(callerId);
         if (activeStay.isEmpty()) {
             return ResponseEntity.noContent().build();
         }
         return ResponseEntity.ok(jailService.toDto(activeStay.get(), callerId));
+    }
+
+    /** Async raid catch — prisoner reports capture so negotiation can use persisted jail stay. */
+    @PostMapping("/capture")
+    public ResponseEntity<JailStayDto> capture(@RequestBody JailCaptureRequest request) {
+        Long callerId = SecurityUtils.getCurrentUserId();
+        if (callerId == null) {
+            return ResponseEntity.status(401).build();
+        }
+        if (request == null || request.getCaptorId() == null) {
+            return ResponseEntity.badRequest().build();
+        }
+        JailStay stay = jailService.createJailStay(callerId, request.getCaptorId(), request.getRaidId());
+        if (stay == null) {
+            return ResponseEntity.noContent().build();
+        }
+        return ResponseEntity.ok(jailService.toDto(stay, callerId));
     }
 
     @PostMapping("/{stayId}/offers")
@@ -43,7 +61,14 @@ public class JailController {
         if (callerId == null) {
             return ResponseEntity.status(401).build();
         }
-        RansomOfferDto dto = jailService.createOffer(stayId, callerId, request.getCoins(), request.getMessage());
+        RansomOfferDto dto = jailService.createOffer(
+                stayId,
+                callerId,
+                request.getCoins(),
+                request.getInk(),
+                request.getChips(),
+                request.getMessage()
+        );
         return ResponseEntity.ok(dto);
     }
 

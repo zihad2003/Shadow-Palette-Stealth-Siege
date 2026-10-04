@@ -42,6 +42,8 @@ public class LiveRaidSession {
     private boolean terminal;
     private String outcome; // CAUGHT when server detects catch
     private String status; // CARRIED | JAIL_LOCKED | RELEASED
+    /** Defender hold-F progress 0..1 while status is CATCH. */
+    private double catchProgress;
 
     public boolean isJoinExpired(Instant now) {
         return !joined && joinDeadline != null && !now.isBefore(joinDeadline);

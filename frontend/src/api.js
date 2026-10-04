@@ -370,7 +370,21 @@ export async function fetchRaidHistory(page = 0, size = 20) {
 }
 
 export async function fetchMyJailStay() {
-  return request('/api/jail/me');
+  const fullUrl = `${API_BASE_URL}/api/jail/me`;
+  const headers = { 'Content-Type': 'application/json' };
+  if (_jwtToken) headers.Authorization = `Bearer ${_jwtToken}`;
+  const res = await fetch(fullUrl, { headers }).catch(() => null);
+  if (!res || res.status === 204) return null;
+  const data = await res.json().catch(() => null);
+  if (!res.ok || !data) return null;
+  return data;
+}
+
+export async function captureJailStay(payload) {
+  return request('/api/jail/capture', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function createJailOffer(stayId, payload) {

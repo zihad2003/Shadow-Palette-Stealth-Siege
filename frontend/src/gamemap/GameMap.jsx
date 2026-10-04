@@ -46,7 +46,7 @@ import {
   SEARCHLIGHT_TILE,
   GATE_SPAWN_TILE,
 } from './mapConfig.js';
-import { DEFAULT_SEARCHLIGHT_LEVEL, effectiveBeamRangeTiles, beamRangeRatio } from '../raid/stealthConstants.js';
+import { DEFAULT_SEARCHLIGHT_LEVEL, SEARCHLIGHT_FULL_RANGE_TILES, raidBeamRangeTiles } from '../raid/stealthConstants.js';
 import { isTileInBeam } from '../raid/SearchlightSensor.js';
 import { getGameFootprint } from './placeUtils.js';
 import { HOUSE_MESH_REV } from './houseKit.js';
@@ -239,8 +239,11 @@ export default function GameMap({
 
     if (grayscale) applyGrayscaleWorld(scene);
 
-    const searchlight = showSearchlight ? createSearchlight({ level: searchlightLevel }) : null;
-    if (searchlight) scene.add(searchlight.object);
+    const searchlight = showSearchlight ? createSearchlight({ level: 3 }) : null;
+    if (searchlight) {
+      scene.add(searchlight.object);
+      if (grayscale) desaturateObject(searchlight.object, { force: true });
+    }
 
     const wallBreakFX = createWallBreakFX(scene, fortressBorder);
     const paintSplash = createPaintSplash(scene);
@@ -267,7 +270,7 @@ export default function GameMap({
     extractMarker.visible = false;
     const extractRing = new THREE.Mesh(
       new THREE.TorusGeometry(TILE_SIZE * 1.15, 0.06, 10, 40),
-      new THREE.MeshBasicMaterial({ color: 0x2a9d8f, transparent: true, opacity: 0.75 })
+      new THREE.MeshBasicMaterial({ color: 0xf2f2f2, transparent: true, opacity: 0.9 })
     );
     extractRing.rotation.x = Math.PI / 2;
     extractRing.position.y = TILE_HEIGHT + 0.06;
@@ -275,7 +278,7 @@ export default function GameMap({
     const extractGlow = new THREE.Mesh(
       new THREE.CircleGeometry(TILE_SIZE * 1.05, 32),
       new THREE.MeshBasicMaterial({
-        color: 0x2a9d8f,
+        color: 0xf2f2f2,
         transparent: true,
         opacity: 0.22,
         depthWrite: false,
@@ -291,7 +294,7 @@ export default function GameMap({
 
     const makeupHouse = showMakeupHouse ? createMakeupHouse() : null;
     if (makeupHouse) {
-      if (grayscale) desaturateObject(makeupHouse);
+      if (grayscale) desaturateObject(makeupHouse, { force: true });
       scene.add(makeupHouse);
     }
 
@@ -303,7 +306,6 @@ export default function GameMap({
       robotSolidsRef.current = collectSolidTiles({
         buildings: buildingsRef.current || [],
         decorTiles: listDecorOccupiedTiles(grayscale ? 41 : 7, buildingsRef.current || []),
-        includeMakeupHouse: !grayscale,
         blockGarage: !grayscale,
         gateLocked: false,
       });
@@ -387,13 +389,13 @@ export default function GameMap({
         n.userData.buildingId = b.id;
         n.userData.ruined = !!b.ruined;
       });
-      if (grayscale) desaturateObject(house);
+      if (grayscale) desaturateObject(house, { force: true });
       return house;
     };
 
     let lastDecorSig = '';
     const syncBuildings = () => {
-      const list = (buildingsRef.current || []).filter((b) => b.buildingType !== 'MAKEUP_HOUSE');
+      const list = buildingsRef.current || [];
       const wanted = new Set(list.map((b) => b.id));
       const byId = new Map();
       [...buildingsGroup.children].forEach((child) => {
@@ -446,7 +448,7 @@ export default function GameMap({
           disposeObject(interiorDecor);
         }
         interiorDecor = createInteriorDecor({ seed: grayscale ? 41 : 7, buildings: buildingsRef.current });
-        if (grayscale) desaturateObject(interiorDecor);
+        if (grayscale) desaturateObject(interiorDecor, { force: true });
         scene.add(interiorDecor);
       }
       patrol?.setHome?.(craftHouseHome(buildingsRef.current));
@@ -470,8 +472,8 @@ export default function GameMap({
       const powered = patrolArmed();
       const home = craftHouseHome(buildingsRef.current);
       if (owned && !patrol) {
-        patrol = createGamePatrolRobot({ home, parked: !powered && !grayscale });
-        if (grayscale) desaturateObject(patrol.object);
+        patrol = createGamePatrolRobot({ home, parked: !powered && !grayscale, monochrome: grayscale });
+        if (grayscale) desaturateObject(patrol.object, { force: true });
         scene.add(patrol.object);
       } else if (!owned && patrol) {
         scene.remove(patrol.object);
@@ -490,7 +492,7 @@ export default function GameMap({
     const syncSelection = () => {
       const id = selectedBuildingRef.current;
       const building = (buildingsRef.current || []).find((b) => b.id === id);
-      if (!building || building.buildingType === 'MAKEUP_HOUSE') {
+      if (!building) {
         selectRing.visible = false;
         return;
       }
@@ -513,8 +515,8 @@ export default function GameMap({
     const makeActor = (tag) => ({
       tag,
       mesh: null,
-      pose: { column: null, row: null, camoColor: 'RED', characterModel: 1, visible: false },
-      smooth: { x: 0, z: 0, yaw: Math.PI, primed: false, speed: 0 },
+      pose: { column: null, row: null, camoColor: 'RED', characterModel: 1, visible: false, poseAt: 0 },
+      smooth: { x: 0, z: 0, yaw: Math.PI, primed: false, speed: 0, velCol: 0, velRow: 0 },
     });
     const partner = makeActor('partner');
     const prisoner = makeActor('prisoner');
@@ -848,8 +850,15 @@ export default function GameMap({
         scene.add(actor.mesh);
       }
       actor.mesh.visible = true;
-      const col = THREE.MathUtils.clamp(pose.column, 0, MAP_COLS - 1);
-      const row = THREE.MathUtils.clamp(pose.row, 0, MAP_ROWS - 1);
+      const safeDt = Math.max(dt, 0.001);
+      let col = THREE.MathUtils.clamp(pose.column, 0, MAP_COLS - 1);
+      let row = THREE.MathUtils.clamp(pose.row, 0, MAP_ROWS - 1);
+      const velMag = Math.hypot(smooth.velCol || 0, smooth.velRow || 0);
+      if (velMag > 0.05) {
+        const extrap = Math.min(safeDt, 0.1);
+        col = THREE.MathUtils.clamp(col + (smooth.velCol || 0) * extrap * 0.55, 0, MAP_COLS - 1);
+        row = THREE.MathUtils.clamp(row + (smooth.velRow || 0) * extrap * 0.55, 0, MAP_ROWS - 1);
+      }
       const p = tileWorldPos(col, row);
       if (!smooth.primed) {
         smooth.x = p.x;
@@ -861,7 +870,6 @@ export default function GameMap({
       const dz = p.z - smooth.z;
       const dist = Math.hypot(dx, dz);
       const walkSpeed = TILE_PITCH / WALK_TILE_SECONDS;
-      const safeDt = Math.max(dt, 0.001);
       let moved = 0;
       if (dist > 1e-4) {
         const maxStep = walkSpeed * 1.2 * safeDt;
@@ -1021,6 +1029,7 @@ export default function GameMap({
     let pointerDown = null;
     let alarm = false;
     let raidElapsedSeconds = 0;
+    let liveConeTiles = SEARCHLIGHT_FULL_RANGE_TILES;
 
     const pick = (e) => {
       const rect = canvas.getBoundingClientRect();
@@ -1338,13 +1347,9 @@ export default function GameMap({
                 y: SEARCHLIGHT_TILE.row,
                 beamAngleDeg: searchlight.beamAngleDeg,
                 coneAngleDeg: searchlight.coneAngleDeg,
-                coneRangeTiles: effectiveBeamRangeTiles(
-                  searchlight.rangeTiles,
-                  raidElapsedSeconds,
-                  alarm ? searchlight.spec.alarmRangeBonus : 0
-                ),
-                level: searchlight.level,
-                rangeRatio: beamRangeRatio(raidElapsedSeconds),
+                coneRangeTiles: liveConeTiles,
+                level: 3,
+                rangeRatio: grayscale ? liveConeTiles / SEARCHLIGHT_FULL_RANGE_TILES : 1,
               }
             : null,
         setRaidElapsed: (seconds) => {
@@ -1439,8 +1444,22 @@ export default function GameMap({
             partner.pose.visible = false;
             return;
           }
-          partner.pose.column = Number(column);
-          partner.pose.row = Number(row);
+          const now = performance.now();
+          const nextCol = Number(column);
+          const nextRow = Number(row);
+          const prevCol = partner.pose.column;
+          const prevRow = partner.pose.row;
+          if (prevCol != null && prevRow != null && partner.pose.poseAt > 0) {
+            const dt = Math.max(0.016, (now - partner.pose.poseAt) / 1000);
+            partner.smooth.velCol = (nextCol - prevCol) / dt;
+            partner.smooth.velRow = (nextRow - prevRow) / dt;
+          } else {
+            partner.smooth.velCol = 0;
+            partner.smooth.velRow = 0;
+          }
+          partner.pose.poseAt = now;
+          partner.pose.column = nextCol;
+          partner.pose.row = nextRow;
           if (opts.camoColor) partner.pose.camoColor = opts.camoColor;
           if (opts.characterModel != null) partner.pose.characterModel = opts.characterModel;
           partner.pose.visible = true;
@@ -1743,30 +1762,24 @@ export default function GameMap({
         guideMarker.root.visible = false;
       }
       if (searchlight) {
-        const grownBase = searchlight.rangeTiles * beamRangeRatio(raidElapsedSeconds);
-        searchlight.update(dt, { alarm, effectiveBaseRangeTiles: grownBase });
+        // Home base keeps the full level-3 cone. A raid starts at 4 tiles and grows to the wall.
+        let range = grayscale ? raidBeamRangeTiles(raidElapsedSeconds) : searchlight.rangeTiles;
+        if (grayscale && alarm) range += searchlight.spec.alarmRangeBonus;
+        range = Math.min(SEARCHLIGHT_FULL_RANGE_TILES, range);
+        liveConeTiles = range;
+        searchlight.update(dt, { alarm, effectiveBaseRangeTiles: range, applyAlarmBonus: false });
+        if (grayscale) desaturateObject(searchlight.object, { force: true });
         if (grayscale) {
-          const lightState = {
+          const light = {
             x: SEARCHLIGHT_TILE.column,
             y: SEARCHLIGHT_TILE.row,
             beamAngleDeg: searchlight.beamAngleDeg,
             coneAngleDeg: searchlight.coneAngleDeg,
-            coneRangeTiles: effectiveBeamRangeTiles(
-              searchlight.rangeTiles,
-              raidElapsedSeconds,
-              alarm ? searchlight.spec.alarmRangeBonus : 0
-            ),
+            coneRangeTiles: range,
           };
-          const range = Math.ceil(lightState.coneRangeTiles) + 1;
-          const cx = Math.floor(SEARCHLIGHT_TILE.column);
-          const cy = Math.floor(SEARCHLIGHT_TILE.row);
           grid.tiles.forEach((tile) => {
-            const { column, row } = tile.userData;
-            if (Math.abs(column - cx) > range || Math.abs(row - cy) > range) {
-              if (tile.userData.revealed) revealTileColor(tile, false);
-              return;
-            }
-            revealTileColor(tile, isTileInBeam(lightState, column, row));
+            const hit = isTileInBeam(light, tile.userData.column, tile.userData.row);
+            revealTileColor(tile, hit);
           });
         }
       }
@@ -1944,9 +1957,9 @@ export default function GameMap({
           ? 0.55 + Math.sin(elapsed * 8) * 0.25
           : 0.35 + Math.sin(elapsed * 3) * 0.12;
         const hot = extractInterrupt > 0.02;
-        extractRing.material.color.set(hot ? 0xe63946 : extractChanneling ? 0xf4a261 : 0x2a9d8f);
+        extractRing.material.color.set(hot ? 0xffffff : extractChanneling ? 0xf7f7f7 : 0xd8d8d8);
         extractRing.material.opacity = Math.min(1, (extractIntensity + pulse) * (hot ? 1.2 : 1));
-        extractGlow.material.color.set(hot ? 0xe63946 : 0x2a9d8f);
+        extractGlow.material.color.set(hot ? 0xffffff : 0xe8e8e8);
         extractGlow.material.opacity = hot ? 0.4 : 0.15 + extractIntensity * 0.35;
         extractRing.scale.setScalar(1 + (extractChanneling ? 0.08 * Math.sin(elapsed * 10) : 0));
         if (hot) bumpShake = Math.max(bumpShake, 0.22);

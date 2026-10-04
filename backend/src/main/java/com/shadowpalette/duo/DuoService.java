@@ -226,6 +226,17 @@ public class DuoService {
     public DuoPartyState markCaught(String partyId, Long userId) {
         DuoParty party = requireParty(partyId);
         if (party == null || userId == null) return fail("PARTY_GONE");
+        if (!"IN_RAID".equals(party.getStatus())) return fail("NOT_IN_RAID");
+        Long catcherId = userId.equals(party.getHostId()) ? party.getGuestId() : party.getHostId();
+        if (catcherId != null && party.getHostX() != null && party.getGuestX() != null) {
+            double hx = party.getHostX();
+            double hy = party.getHostY();
+            double gx = party.getGuestX();
+            double gy = party.getGuestY();
+            if (Math.hypot(hx - gx, hy - gy) > com.shadowpalette.util.StealthConstants.LIVE_CATCH_DISTANCE + 0.5) {
+                return fail("CATCH_TOO_FAR");
+            }
+        }
         if (userId.equals(party.getHostId())) party.setHostCaught(true);
         if (userId.equals(party.getGuestId())) party.setGuestCaught(true);
         broadcast(party);

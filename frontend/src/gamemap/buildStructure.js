@@ -15,6 +15,7 @@ import * as craftHouse from './houses/craftHouse.js';
 import * as inkHouse from './houses/inkHouse.js';
 import * as coinGenerator from './houses/coinGenerator.js';
 import * as jailHouse from './houses/jailHouse.js';
+import * as makeupHouse from './houses/makeupHouse.js';
 import { HOUSE_HEIGHT_SCALE } from './houseKit.js';
 
 function clay(color, extras = {}) {
@@ -41,6 +42,7 @@ const HOUSE_BUILDERS = {
   COIN_GENERATOR: coinGenerator,
   JAIL: jailHouse,
   BASE_JAIL: jailHouse,
+  MAKEUP_HOUSE: makeupHouse,
 };
 
 /** Concept-art clay houses. Paint (`hexColor`) tints cloth only. */
@@ -332,7 +334,7 @@ export function defaultPatrolWaypoints() {
 }
 
 /** Detailed patrol robot with chase + patrol modes and state-tinted poses. */
-export function createGamePatrolRobot({ home = null, parked: startParked = false } = {}) {
+export function createGamePatrolRobot({ home = null, parked: startParked = false, monochrome = false } = {}) {
   const bot = new THREE.Group();
   bot.name = 'PatrolRobot';
 
@@ -436,6 +438,20 @@ export function createGamePatrolRobot({ home = null, parked: startParked = false
 
   const applyTint = (key) => {
     const tint = STATE_TINT[key] || STATE_TINT.patrol;
+    if (monochrome) {
+      if (eye.material) {
+        eye.material.color.set('#E8E8E8');
+        if (eye.material.emissive) eye.material.emissive.set('#C8C8C8');
+      }
+      if (body.material) body.material.color.set('#8A8A8A');
+      if (tip.material) {
+        tip.material.color.set('#D0D0D0');
+        if (tip.material.emissive) tip.material.emissive.set('#B0B0B0');
+      }
+      body.rotation.x = tint.lean;
+      chest.rotation.x = tint.lean * 0.6;
+      return;
+    }
     if (eye.material) {
       eye.material.color.set(tint.eye);
       eye.material.emissive.set(tint.eye);

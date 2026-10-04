@@ -8,8 +8,9 @@ import com.shadowpalette.entity.VisitInvite;
 import com.shadowpalette.exception.ApiException;
 import com.shadowpalette.repository.UserRepository;
 import com.shadowpalette.repository.VisitInviteRepository;
-import lombok.RequiredArgsConstructor;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.http.HttpStatus;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,7 +33,6 @@ import java.util.concurrent.ConcurrentHashMap;
  *       database with a lightweight cleanup job for stale entries.
  */
 @Service
-@RequiredArgsConstructor
 public class PresenceService {
 
     public static final int PRESENCE_TTL_SECONDS = 90;
@@ -42,6 +42,17 @@ public class PresenceService {
 
     private final UserRepository userRepository;
     private final VisitInviteRepository visitInviteRepository;
+    private final SimpMessagingTemplate messaging;
+
+    public PresenceService(
+            UserRepository userRepository,
+            VisitInviteRepository visitInviteRepository,
+            @Lazy SimpMessagingTemplate messaging
+    ) {
+        this.userRepository = userRepository;
+        this.visitInviteRepository = visitInviteRepository;
+        this.messaging = messaging;
+    }
 
     private final ConcurrentHashMap<Long, PresenceRecord> presence = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<Long, VisitSession> sessions = new ConcurrentHashMap<>();
@@ -252,11 +263,36 @@ public class PresenceService {
         if (request == null || request.getVisitId() == null || SecurityUtils.getCurrentUserId() == null) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "VISIT_STATE_REQUIRED");
         }
+        return applyVisitState(request, SecurityUtils.getCurrentUserId());
+    }
+
+    /** STOMP position sync — same state as REST updateState, but pushes to both clients. */
+    public VisitSessionDto updatePositionStomp(VisitPositionMessage msg, Long userId) {
+        if (msg == null || msg.getVisitId() == null || userId == null) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "VISIT_STATE_REQUIRED");
+        }
+        VisitStateRequest req = VisitStateRequest.builder()
+                .visitId(msg.getVisitId())
+                .seated(msg.getSeated())
+                .gear(msg.getGear())
+                .trackT(msg.getTrackT())
+                .column(msg.getColumn())
+                .row(msg.getRow())
+                .reaction(msg.getReaction())
+                .chat(msg.getChat())
+                .build();
+        VisitSessionDto dto = applyVisitState(req, userId);
+        if (dto != null && dto.isSuccess() && "ACTIVE".equals(dto.getStatus())) {
+            messaging.convertAndSend("/topic/visit/" + msg.getVisitId() + "/state", dto);
+        }
+        return dto;
+    }
+
+    private VisitSessionDto applyVisitState(VisitStateRequest request, Long userId) {
         VisitSession session = sessions.get(request.getVisitId());
         if (session == null || !"ACTIVE".equals(session.status)) {
             return VisitSessionDto.builder().success(false).status("ENDED").message("Visit ended").build();
         }
-        Long userId = SecurityUtils.getCurrentUserId();
         boolean host = userId.equals(session.hostId);
         boolean guest = userId.equals(session.guestId);
         if (!host && !guest) {
@@ -285,7 +321,28 @@ public class PresenceService {
                 session.guestY = request.getRow();
             }
         }
+        if (request.getReaction() != null && !request.getReaction().isBlank()) {
+            session.reaction = request.getReaction().trim();
+        }
+        if (request.getChat() != null && !request.getChat().isBlank()) {
+            String text = request.getChat().trim().replaceAll("[\\r\\n\\t|]+", " ").replaceAll(" +", " ");
+            if (text.length() > 80) text = text.substring(0, 80);
+            String name = host ? session.hostName : session.guestName;
+            if (name == null || name.isBlank()) name = host ? "Host" : "Guest";
+            name = name.replace('|', ' ').trim();
+            if (session.chat == null) session.chat = new ArrayList<>();
+            session.chat.add(System.currentTimeMillis() + "|" + userId + "|" + name + "|" + text);
+            if (session.chat.size() > 24) session.chat.remove(0);
+        }
         return toSessionDto(session);
+    }
+
+    public boolean isVisitParticipant(Long visitId, Long userId) {
+        if (visitId == null || userId == null) return false;
+        VisitSession session = sessions.get(visitId);
+        return session != null
+                && "ACTIVE".equals(session.status)
+                && (userId.equals(session.hostId) || userId.equals(session.guestId));
     }
 
     public VisitSessionDto endVisit(VisitDecisionRequest request) {
@@ -304,12 +361,14 @@ public class PresenceService {
         }
         session.status = "ENDED";
         sessions.remove(session.visitId);
-        return VisitSessionDto.builder()
+        VisitSessionDto ended = VisitSessionDto.builder()
                 .success(true)
                 .visitId(session.visitId)
                 .status("ENDED")
                 .message("Visit ended")
                 .build();
+        messaging.convertAndSend("/topic/visit/" + session.visitId + "/state", ended);
+        return ended;
     }
 
     private VisitInvite requireInvite(Long id) {
@@ -402,6 +461,8 @@ public class PresenceService {
                 .guestY(session.guestY)
                 .gear(session.gear)
                 .trackT(session.trackT)
+                .reaction(session.reaction)
+                .chat(session.chat == null ? List.of() : List.copyOf(session.chat))
                 .snapshot(session.snapshot)
                 .status(session.status)
                 .build();
@@ -435,6 +496,8 @@ public class PresenceService {
         Double guestY;
         int gear;
         double trackT;
+        String reaction;
+        List<String> chat = new ArrayList<>();
         String status;
     }
 }

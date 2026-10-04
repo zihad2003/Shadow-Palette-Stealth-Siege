@@ -128,3 +128,9 @@ export const GATE_SPAWN_TILE = {
   column: Math.floor(MAP_COLS / 2),
   row: MAP_ROWS - 1,
 };
+
+/** Interior tile for the Makeup House — west of the Craft House, off the wall. */
+export const MAKEUP_HOUSE_TILE = {
+  column: 1,
+  row: MAP_ROWS - 4,
+};

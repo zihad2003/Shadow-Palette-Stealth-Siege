@@ -1,9 +1,22 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Car, Users, LogOut } from 'lucide-react';
 import { useGameState, CART_PARTS, WHEEL_PART_IDS, BODY_PART_IDS } from '../../state/GameStateContext.jsx';
 import ClayPanel from '../ui/ClayPanel.jsx';
 import ClayButton from '../ui/ClayButton.jsx';
 import { GAME_COLORS } from '../../colors.js';
+
+function chatLines(raw) {
+  return (Array.isArray(raw) ? raw : []).map((line, index) => {
+    const parts = String(line).split('|');
+    if (parts.length < 4) return null;
+    return {
+      key: `${parts[0]}-${index}`,
+      userId: parts[1],
+      name: parts[2] || 'Player',
+      text: parts.slice(3).join('|'),
+    };
+  }).filter(Boolean);
+}
 
 export default function VisitHud() {
   const {
@@ -29,8 +42,17 @@ export default function VisitHud() {
     endVisit,
     bumpBuggyGear,
     sendVisitReaction,
+    sendVisitChat,
+    userId,
   } = useGameState();
   const [sentIds, setSentIds] = useState({});
+  const [draft, setDraft] = useState('');
+  const logRef = useRef(null);
+
+  useEffect(() => {
+    const el = logRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [visitSession?.chat]);
 
   if (
     gameState === 'STEALTH_RAID' ||
@@ -54,6 +76,13 @@ export default function VisitHud() {
   const wheels = CART_PARTS.filter((p) => p.kind === 'wheel');
   const bodies = CART_PARTS.filter((p) => p.kind === 'body');
   const players = onlinePlayers || [];
+  const messages = chatLines(visitSession?.chat);
+
+  const submitChat = (event) => {
+    event?.preventDefault?.();
+    if (!sendVisitChat(draft)) return;
+    setDraft('');
+  };
 
   const sendInvite = async (player) => {
     const ok = await invitePlayer(player.userId);
@@ -82,7 +111,7 @@ export default function VisitHud() {
       )}
 
       {showInvite && (
-        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[160] pointer-events-auto w-[17rem]">
+        <div className="fixed right-4 bottom-[5.5rem] z-[160] pointer-events-auto w-60 max-h-[min(18rem,42vh)] overflow-y-auto">
           <ClayPanel depth="deep" className="px-3 py-3 rounded-2xl">
             <div className="flex items-center justify-between gap-2 mb-2">
               <p className="text-[12px] font-semibold text-clay-text">Invite a player</p>
@@ -90,7 +119,7 @@ export default function VisitHud() {
                 Close
               </ClayButton>
             </div>
-            <p className="text-[10px] text-clay-muted mb-2">They join your base when they accept.</p>
+            <p className="text-[10px] text-clay-muted mb-2">Friendly visit. They can look and talk, not change your base.</p>
             {players.length === 0 ? (
               <p className="text-[11px] text-clay-muted py-1">No other players online</p>
             ) : (
@@ -118,7 +147,7 @@ export default function VisitHud() {
           <ClayPanel className="h-11 px-3 rounded-2xl flex items-center gap-2">
             <Users size={13} className="text-clay-accent" />
             <span className="text-[11px] font-semibold">
-              {isVisitGuest ? visitSession.hostName : visitSession.guestName}
+              Friendly · {isVisitGuest ? visitSession.hostName : visitSession.guestName}
             </span>
             <ClayButton
               variant="danger"
@@ -135,6 +164,42 @@ export default function VisitHud() {
                 <ClayButton variant="ghost" className="h-7 px-2 rounded-lg text-[14px]" onClick={() => sendVisitReaction('clap')}>👏</ClayButton>
               </>
             )}
+          </ClayPanel>
+        </div>
+      )}
+
+      {showVisitBanner && (
+        <div className="fixed left-4 bottom-[8.75rem] z-[150] pointer-events-auto w-64">
+          <ClayPanel depth="deep" className="px-2.5 py-2 rounded-2xl">
+            <p className="text-[10px] font-semibold text-clay-muted px-1 pb-1">Talk</p>
+            <div ref={logRef} className="max-h-28 overflow-y-auto flex flex-col gap-1 px-1">
+              {messages.length === 0 ? (
+                <p className="text-[11px] text-clay-muted py-1">Say hello</p>
+              ) : (
+                messages.map((line) => {
+                  const mine = Number(line.userId) === Number(userId);
+                  return (
+                    <p key={line.key} className="text-[11px] leading-snug text-clay-text break-words">
+                      <span className={mine ? 'text-clay-accent font-semibold' : 'font-semibold'}>{line.name}: </span>
+                      {line.text}
+                    </p>
+                  );
+                })
+              )}
+            </div>
+            <form className="mt-1.5 flex gap-1" onSubmit={submitChat}>
+              <input
+                value={draft}
+                maxLength={80}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => e.stopPropagation()}
+                placeholder="Message"
+                className="min-w-0 flex-1 h-8 px-2 rounded-lg bg-black/25 text-[12px] text-clay-text outline-none"
+              />
+              <ClayButton type="submit" variant="primary" className="h-8 px-2.5 rounded-lg text-[10px]">
+                Send
+              </ClayButton>
+            </form>
           </ClayPanel>
         </div>
       )}

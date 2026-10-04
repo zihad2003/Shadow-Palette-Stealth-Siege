@@ -38,7 +38,7 @@ export const HOUSE_INFO = {
   },
   MAKEUP_HOUSE: {
     name: 'Makeup House',
-    need: 'Always open.',
+    need: 'Hold F on the ruin to rebuild.',
     use: 'Change the camo on your clothes.',
     after: 'Camo locks for a raid.',
     roof: 'PURPLE',

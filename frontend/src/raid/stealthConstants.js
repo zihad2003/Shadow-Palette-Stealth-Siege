@@ -50,14 +50,18 @@ export const RISK_ESCALATION_INTERVAL_SECONDS = 30;
 export const RISK_ESCALATION_PER_INTERVAL = 4;
 
 /**
- * Beam range grows continuously while the attacker stays in the base.
+ * Legacy ratio curve. Home base does not use this — a raid cone uses raidBeamRangeTiles.
  * effectiveRange = configuredRange * rangeRatio + (alarm ? alarmRangeBonus : 0)
- * — ratio applies to base only; alarm bonus stays additive.
  */
 export const BEAM_RANGE_START_RATIO = 0.55;
 /** ~0.55 → 1.0 in ~37.5s (faster pressure than the old 0.006). */
 export const BEAM_RANGE_GROWTH_PER_SECOND = 0.012;
 export const BEAM_RANGE_MAX_RATIO = 1.0;
+
+/** Raid cone length at the first second. Grows out to the base boundary. */
+export const RAID_BEAM_START_TILES = 4;
+/** Seconds for a raid searchlight to reach the farthest wall. */
+export const RAID_BEAM_GROW_SECONDS = 120;
 
 /**
  * Patrol chase tiles/sec — a hair above walk so it can close if you keep walking;
@@ -119,7 +123,19 @@ export const SEARCHLIGHT_UPGRADE_COSTS = {
   2: { coins: 420, ink: 40 },
 };
 
-export const DEFAULT_SEARCHLIGHT_LEVEL = 1;
+/** Every base uses the level-3 lighthouse. There is no upgrade track. */
+export const DEFAULT_SEARCHLIGHT_LEVEL = 3;
+
+/**
+ * Raid-only cone length. Starts at 4 tiles and reaches the base boundary.
+ * The owner's base keeps the full level-3 range instead.
+ */
+export function raidBeamRangeTiles(elapsedSeconds = 0) {
+  const full = SEARCHLIGHT_FULL_RANGE_TILES;
+  const elapsed = Math.max(0, Number(elapsedSeconds) || 0);
+  const t = Math.min(1, elapsed / RAID_BEAM_GROW_SECONDS);
+  return RAID_BEAM_START_TILES + (full - RAID_BEAM_START_TILES) * t;
+}
 
 export function clampSearchlightLevel(level) {
   const n = Number(level) || 1;

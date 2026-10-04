@@ -11,6 +11,7 @@ import java.util.Optional;
 @Repository
 public interface JailStayRepository extends JpaRepository<JailStay, Long> {
     Optional<JailStay> findFirstByPrisonerIdAndStatus(Long prisonerId, String status);
+    Optional<JailStay> findFirstByCaptorIdAndStatus(Long captorId, String status);
     List<JailStay> findByStatusAndReleaseAtLessThanEqual(String status, LocalDateTime now);
     Optional<JailStay> findByRaidId(String raidId);
 }

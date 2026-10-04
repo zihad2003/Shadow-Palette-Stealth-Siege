@@ -28,6 +28,10 @@ import {
   effectiveMeterRisePerSec,
   beamRangeRatio,
   effectiveBeamRangeTiles,
+  raidBeamRangeTiles,
+  RAID_BEAM_START_TILES,
+  RAID_BEAM_GROW_SECONDS,
+  SEARCHLIGHT_FULL_RANGE_TILES,
 } from './stealthConstants.js';
 import { PatrolRobotContext, ROBOT_STATES } from '../patrolRobotState.js';
 
@@ -214,6 +218,11 @@ function playerOnBeam(dist = 2) {
   assert.equal(effectiveBeamRangeTiles(configured, 10), at10 * configured);
   assert.equal(beamRangeRatio(999), BEAM_RANGE_MAX_RATIO);
   assert.equal(effectiveBeamRangeTiles(configured, 999), BEAM_RANGE_MAX_RATIO * configured);
+  assert.equal(raidBeamRangeTiles(0), RAID_BEAM_START_TILES);
+  assert.equal(raidBeamRangeTiles(RAID_BEAM_GROW_SECONDS), SEARCHLIGHT_FULL_RANGE_TILES);
+  assert.equal(raidBeamRangeTiles(RAID_BEAM_GROW_SECONDS * 4), SEARCHLIGHT_FULL_RANGE_TILES);
+  const mid = RAID_BEAM_START_TILES + (SEARCHLIGHT_FULL_RANGE_TILES - RAID_BEAM_START_TILES) * 0.5;
+  assert.equal(raidBeamRangeTiles(RAID_BEAM_GROW_SECONDS / 2), mid);
   // Alarm bonus additive (not ratio-scaled)
   assert.equal(effectiveBeamRangeTiles(configured, 10, 1.6), at10 * configured + 1.6);
 

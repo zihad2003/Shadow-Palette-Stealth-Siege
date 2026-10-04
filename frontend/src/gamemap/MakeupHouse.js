@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { GAME_COLORS, GAME_COLOR_KEYS } from '../colors.js';
-import { GRID_WIDTH, GRID_DEPTH, TILE_HEIGHT, MAP_COLORS } from './mapConfig.js';
+import { TILE_HEIGHT, MAP_COLORS, MAKEUP_HOUSE_TILE, tileWorldPos } from './mapConfig.js';
 
 function clay(color, extras = {}) {
   return new THREE.MeshStandardMaterial({
@@ -13,15 +13,15 @@ function clay(color, extras = {}) {
 }
 
 /**
- * Clay Makeup House — sits on the slab just inside the south-west wall,
- * off the paintable grid so every tile stays a paint target.
+ * Clay Makeup House — one tile inside the south-west corner, west of Craft House.
  */
 export function createMakeupHouse() {
   const house = new THREE.Group();
   house.name = 'MakeupHouse';
   house.userData.isMakeupHouse = true;
 
-  house.position.set(-GRID_WIDTH / 2 + 0.85, TILE_HEIGHT, GRID_DEPTH / 2 - 0.7);
+  const spot = tileWorldPos(MAKEUP_HOUSE_TILE.column, MAKEUP_HOUSE_TILE.row);
+  house.position.set(spot.x, TILE_HEIGHT, spot.z);
 
   const body = new THREE.Mesh(new RoundedBoxGeometry(1.35, 0.85, 1.15, 2, 0.1), clay('#C9B79A'));
   body.position.y = 0.42;

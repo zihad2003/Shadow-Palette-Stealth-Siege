@@ -109,10 +109,12 @@ export default function LiveDefenseView() {
   useEffect(() => {
     let raf = 0;
     let last = performance.now();
+    const started = performance.now();
     let moveCooldown = 0;
     const tick = (now) => {
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
+      sceneApi.current?.setRaidElapsed?.((now - started) / 1000);
       moveCooldown = Math.max(0, moveCooldown - dt);
       if (!outcome && moveCooldown <= 0) {
         const { forward, turn } = walkAxes(keys.current);

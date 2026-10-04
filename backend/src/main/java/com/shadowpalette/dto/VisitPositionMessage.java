@@ -9,15 +9,13 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class VisitStateRequest {
+public class VisitPositionMessage {
     private Long visitId;
     private Boolean seated;
     private Integer gear;
     private Double trackT;
     private Double column;
     private Double row;
-    /** Guest emote ping, e.g. "wave|1234567890". */
     private String reaction;
-    /** One friendly chat line from the sender. */
     private String chat;
 }

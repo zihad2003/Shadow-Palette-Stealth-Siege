@@ -227,9 +227,12 @@ public class PlayerService {
 
     private SessionStartResponse buildResponseFromUser(User user, boolean newUser, String plainRecoveryToken) {
         String jwt = jwtUtil.generateToken(user.getId(), user.getUsername());
-        var activeStay = jailService != null ? jailService.getActiveJailStay(user.getId()) : java.util.Optional.<com.shadowpalette.entity.JailStay>empty();
-        boolean isJailed = activeStay.isPresent();
-        var jailStayDto = isJailed ? jailService.toDto(activeStay.get(), user.getId()) : null;
+        var activeStay = jailService != null
+                ? jailService.getActiveJailStayForParticipant(user.getId())
+                : java.util.Optional.<com.shadowpalette.entity.JailStay>empty();
+        boolean isJailed = jailService != null && jailService.isJailed(user.getId());
+        boolean holdingPrisoner = jailService != null && jailService.isHoldingPrisoner(user.getId());
+        var jailStayDto = activeStay.isPresent() ? jailService.toDto(activeStay.get(), user.getId()) : null;
 
         return SessionStartResponse.builder()
                 .success(true)
@@ -247,6 +250,7 @@ public class PlayerService {
                 .jwt(jwt)
                 .recoveryToken(plainRecoveryToken)
                 .isJailed(isJailed)
+                .holdingPrisoner(holdingPrisoner)
                 .jailStay(jailStayDto)
                 .hasPin(hasPassword(user))
                 .build();

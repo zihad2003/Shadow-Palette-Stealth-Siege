@@ -55,6 +55,12 @@ public class LiveRaidService {
                     .message("ATTACKER_IN_JAIL")
                     .build();
         }
+        if (jailService != null && jailService.isHoldingPrisoner(SecurityUtils.getCurrentUserId())) {
+            return LiveRaidStartResponse.builder()
+                    .success(false)
+                    .message("HOLDING_PRISONER")
+                    .build();
+        }
 
         String raidId = (request.getRaidId() != null && !request.getRaidId().isBlank())
                 ? request.getRaidId().trim()
@@ -240,10 +246,25 @@ public class LiveRaidService {
             // Only the base owner can change status/outcome (catch, carry, jail, release).
             String reqStatus = msg.getStatus();
             if (reqStatus != null) {
-                boolean startingCarry = ("CATCH".equals(reqStatus) || "CARRIED".equals(reqStatus))
-                        && !"CARRIED".equals(session.getStatus())
-                        && !"JAIL_LOCKED".equals(session.getStatus());
-                if (startingCarry) {
+                if ("CATCH".equals(reqStatus)) {
+                    boolean inRange = session.getAttackerX() != null
+                            && Math.hypot(session.getAttackerX() - x, session.getAttackerY() - y)
+                            <= StealthConstants.LIVE_CATCH_DISTANCE;
+                    if (!inRange) {
+                        session.setCatchProgress(0);
+                        return toState(session, "CATCH_TOO_FAR");
+                    }
+                    double progress = msg.getCatchProgress() != null
+                            ? Math.max(0, Math.min(1, msg.getCatchProgress()))
+                            : 0;
+                    session.setCatchProgress(progress);
+                    boolean completeHold = progress >= 1.0 - 0.05
+                            || "CAUGHT_IN_JAIL".equals(msg.getOutcome());
+                    if (completeHold && !"CARRIED".equals(session.getStatus())
+                            && !"JAIL_LOCKED".equals(session.getStatus())) {
+                        session.setStatus("CARRIED");
+                    }
+                } else if ("CARRIED".equals(reqStatus)) {
                     boolean inRange = session.getAttackerX() != null
                             && Math.hypot(session.getAttackerX() - x, session.getAttackerY() - y)
                             <= StealthConstants.LIVE_CATCH_DISTANCE;
@@ -251,7 +272,8 @@ public class LiveRaidService {
                         return toState(session, "CATCH_TOO_FAR");
                     }
                     session.setStatus("CARRIED");
-                } else if (!"CATCH".equals(reqStatus)) {
+                    session.setCatchProgress(1);
+                } else {
                     session.setStatus(reqStatus);
                 }
             }
@@ -480,6 +502,8 @@ public class LiveRaidService {
                 .defenderModel(session.getDefenderModel())
                 .defenderCamo(session.getDefenderCamo())
                 .message(message)
+                .catchProgress(session.getCatchProgress() > 0 ? session.getCatchProgress() : null)
+                .catchTarget(session.getCatchProgress() > 0 ? "ATTACKER" : null)
                 .build();
     }
 

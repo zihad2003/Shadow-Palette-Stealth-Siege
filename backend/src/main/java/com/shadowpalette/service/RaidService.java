@@ -96,6 +96,9 @@ public class RaidService {
             if (jailService != null && jailService.isJailed(attackerId)) {
                 throw new ApiException(HttpStatus.FORBIDDEN, "ATTACKER_IN_JAIL");
             }
+            if (jailService != null && jailService.isHoldingPrisoner(attackerId)) {
+                throw new ApiException(HttpStatus.FORBIDDEN, "HOLDING_PRISONER");
+            }
             userRepository.findById(attackerId).ifPresent(attacker -> {
                 if (attacker.getRaidCooldownUntil() != null && attacker.getRaidCooldownUntil().isAfter(LocalDateTime.now())) {
                     throw new ApiException(HttpStatus.FORBIDDEN, "RAID_COOLDOWN_ACTIVE");

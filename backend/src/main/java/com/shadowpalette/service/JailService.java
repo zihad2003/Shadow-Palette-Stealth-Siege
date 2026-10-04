@@ -26,6 +26,8 @@ import java.util.*;
 @RequiredArgsConstructor
 public class JailService {
 
+    public static final int MAX_RANSOM_ROUNDS = 3;
+
     private final JailStayRepository jailStayRepository;
     private final RansomOfferRepository ransomOfferRepository;
     private final UserRepository userRepository;
@@ -87,6 +89,36 @@ public class JailService {
         return getActiveJailStay(userId).isPresent();
     }
 
+    /** Active stay where this user is the captor (holding a prisoner). */
+    @Transactional
+    public Optional<JailStay> getActiveCaptorStay(Long captorId) {
+        if (captorId == null) return Optional.empty();
+        Optional<JailStay> opt = jailStayRepository.findFirstByCaptorIdAndStatus(captorId, "JAILED");
+        if (opt.isEmpty()) return Optional.empty();
+        JailStay stay = opt.get();
+        LocalDateTime now = LocalDateTime.now();
+        if (!stay.getReleaseAt().isAfter(now)) {
+            stay.setStatus("EXPIRED_RELEASED");
+            jailStayRepository.save(stay);
+            broadcastJailUpdate(stay, "EXPIRED_RELEASED", null);
+            return Optional.empty();
+        }
+        return Optional.of(stay);
+    }
+
+    public boolean isHoldingPrisoner(Long captorId) {
+        return getActiveCaptorStay(captorId).isPresent();
+    }
+
+    /** Prisoner stay first; otherwise captor stay for negotiation UI. */
+    @Transactional
+    public Optional<JailStay> getActiveJailStayForParticipant(Long userId) {
+        if (userId == null) return Optional.empty();
+        Optional<JailStay> asPrisoner = getActiveJailStay(userId);
+        if (asPrisoner.isPresent()) return asPrisoner;
+        return getActiveCaptorStay(userId);
+    }
+
     @Transactional(readOnly = true)
     public JailStayDto toDto(JailStay stay, Long callerId) {
         if (stay == null) return null;
@@ -130,6 +162,8 @@ public class JailService {
                 .jailStayId(offer.getJailStayId())
                 .offeredBy(offer.getOfferedBy())
                 .coins(offer.getCoins())
+                .ink(offer.getInk())
+                .chips(offer.getChips())
                 .message(offer.getMessage())
                 .status(offer.getStatus())
                 .createdAt(offer.getCreatedAt())
@@ -139,7 +173,7 @@ public class JailService {
     }
 
     @Transactional
-    public RansomOfferDto createOffer(Long stayId, Long callerUserId, int coins, String message) {
+    public RansomOfferDto createOffer(Long stayId, Long callerUserId, int coins, int ink, int chips, String message) {
         JailStay stay = jailStayRepository.findById(stayId)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "JAIL_STAY_NOT_FOUND"));
 
@@ -153,18 +187,29 @@ public class JailService {
             throw new ApiException(HttpStatus.FORBIDDEN, "NOT_PARTICIPANT");
         }
 
-        String offeredBy = isPrisoner ? "PRISONER" : "CAPTOR";
+        if (stay.getRansomOfferCount() >= MAX_RANSOM_ROUNDS) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "MAX_ROUNDS_REACHED");
+        }
 
-        // If prisoner is offering coins, verify they have enough coins
+        String offeredBy = isPrisoner ? "PRISONER" : "CAPTOR";
+        int safeCoins = Math.max(0, coins);
+        int safeInk = Math.max(0, ink);
+        int safeChips = Math.max(0, chips);
+
+        User prisoner = userRepository.findById(stay.getPrisonerId())
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "PRISONER_NOT_FOUND"));
         if (isPrisoner) {
-            User prisoner = userRepository.findById(stay.getPrisonerId())
-                    .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "PRISONER_NOT_FOUND"));
-            if (prisoner.getCoins() < coins) {
+            if (prisoner.getCoins() < safeCoins) {
                 throw new ApiException(HttpStatus.BAD_REQUEST, "INSUFFICIENT_COINS");
+            }
+            if (prisoner.getInkEnergy() < safeInk) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "INSUFFICIENT_INK");
+            }
+            if (prisoner.getChips() < safeChips) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "INSUFFICIENT_CHIPS");
             }
         }
 
-        // Expire any existing pending offers on this stay
         List<RansomOffer> pendings = ransomOfferRepository.findByJailStayIdAndStatus(stayId, "PENDING");
         LocalDateTime now = LocalDateTime.now();
         for (RansomOffer p : pendings) {
@@ -178,11 +223,13 @@ public class JailService {
         RansomOffer offer = RansomOffer.builder()
                 .jailStayId(stayId)
                 .offeredBy(offeredBy)
-                .coins(Math.max(0, coins))
+                .coins(safeCoins)
+                .ink(safeInk)
+                .chips(safeChips)
                 .message(message != null ? message.trim() : null)
                 .status("PENDING")
                 .createdAt(now)
-                .expiresAt(now.plusSeconds(60))
+                .expiresAt(now.plusSeconds(90))
                 .roundNumber(stay.getRansomOfferCount())
                 .build();
 
@@ -233,14 +280,26 @@ public class JailService {
         User captor = userRepository.findByIdForUpdate(stay.getCaptorId())
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "CAPTOR_NOT_FOUND"));
 
-        int amount = Math.max(0, offer.getCoins());
-        if (prisoner.getCoins() < amount) {
-            throw new ApiException(HttpStatus.BAD_REQUEST, "INSUFFICIENT_FUNDS");
+        int amountCoins = Math.max(0, offer.getCoins());
+        int amountInk = Math.max(0, offer.getInk());
+        int amountChips = Math.max(0, offer.getChips());
+        if (prisoner.getCoins() < amountCoins) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "INSUFFICIENT_COINS");
+        }
+        if (prisoner.getInkEnergy() < amountInk) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "INSUFFICIENT_INK");
+        }
+        if (prisoner.getChips() < amountChips) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "INSUFFICIENT_CHIPS");
         }
 
-        prisoner.setCoins(prisoner.getCoins() - amount);
-        captor.setCoins(captor.getCoins() + amount);
-        prisoner.setRaidCooldownUntil(LocalDateTime.now()); // Clear raid cooldown upon release
+        prisoner.setCoins(prisoner.getCoins() - amountCoins);
+        prisoner.setInkEnergy(prisoner.getInkEnergy() - amountInk);
+        prisoner.setChips(prisoner.getChips() - amountChips);
+        captor.setCoins(captor.getCoins() + amountCoins);
+        captor.setInkEnergy(captor.getInkEnergy() + amountInk);
+        captor.setChips(captor.getChips() + amountChips);
+        prisoner.setRaidCooldownUntil(LocalDateTime.now());
 
         userRepository.save(prisoner);
         userRepository.save(captor);
@@ -252,13 +311,15 @@ public class JailService {
         stay.setReleaseAt(LocalDateTime.now());
         jailStayRepository.save(stay);
 
-        broadcastRansomSettled(stay, offer, true, amount);
+        broadcastRansomSettled(stay, offer, true, amountCoins, amountInk, amountChips);
         return RansomResponse.builder()
                 .success(true)
                 .status("ACCEPTED")
                 .attackerId(stay.getPrisonerId())
                 .defenderId(stay.getCaptorId())
-                .coinsTransferred(amount)
+                .coinsTransferred(amountCoins)
+                .inkTransferred(amountInk)
+                .chipsTransferred(amountChips)
                 .message("Ransom accepted! Hostage released.")
                 .build();
     }
@@ -284,14 +345,16 @@ public class JailService {
         offer.setStatus("REJECTED");
         ransomOfferRepository.save(offer);
 
-        broadcastRansomSettled(stay, offer, false, 0);
+        broadcastRansomSettled(stay, offer, false, 0, 0, 0);
         return RansomResponse.builder()
                 .success(true)
                 .status("REJECTED")
                 .attackerId(stay.getPrisonerId())
                 .defenderId(stay.getCaptorId())
                 .coinsTransferred(0)
-                .message("Ransom offer rejected.")
+                .inkTransferred(0)
+                .chipsTransferred(0)
+                .message("Ransom offer rejected. Prisoner remains jailed.")
                 .build();
     }
 
@@ -335,8 +398,12 @@ public class JailService {
         payload.put("offerId", offer.getId());
         payload.put("offeredBy", offer.getOfferedBy());
         payload.put("coins", offer.getCoins());
+        payload.put("ink", offer.getInk());
+        payload.put("chips", offer.getChips());
         payload.put("message", offer.getMessage());
         payload.put("roundNumber", offer.getRoundNumber());
+        payload.put("maxRounds", MAX_RANSOM_ROUNDS);
+        payload.put("roundsUsed", stay.getRansomOfferCount());
         payload.put("attackerId", stay.getPrisonerId());
         payload.put("defenderId", stay.getCaptorId());
 
@@ -344,14 +411,17 @@ public class JailService {
         messaging.convertAndSend("/topic/raid-ransom/" + stay.getCaptorId(), (Object) payload);
     }
 
-    private void broadcastRansomSettled(JailStay stay, RansomOffer offer, boolean accepted, int transferred) {
+    private void broadcastRansomSettled(JailStay stay, RansomOffer offer, boolean accepted,
+                                        int transferredCoins, int transferredInk, int transferredChips) {
         Map<String, Object> payload = new HashMap<>();
         payload.put("type", accepted ? "RANSOM_ACCEPTED" : "RANSOM_REJECTED");
         payload.put("jailStayId", stay.getId());
         payload.put("offerId", offer.getId());
         payload.put("attackerId", stay.getPrisonerId());
         payload.put("defenderId", stay.getCaptorId());
-        payload.put("coinsTransferred", transferred);
+        payload.put("coinsTransferred", transferredCoins);
+        payload.put("inkTransferred", transferredInk);
+        payload.put("chipsTransferred", transferredChips);
 
         messaging.convertAndSend("/topic/raid-ransom/" + stay.getPrisonerId(), (Object) payload);
         messaging.convertAndSend("/topic/raid-ransom/" + stay.getCaptorId(), (Object) payload);

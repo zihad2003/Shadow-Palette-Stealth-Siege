@@ -53,7 +53,7 @@ function buildingFootprint(b) {
 }
 
 export function buildingCoversTile(b, column, row) {
-  if (!b || b.buildingType === 'MAKEUP_HOUSE') return false;
+  if (!b) return false;
   const { x, y, w, h } = buildingFootprint(b);
   return column >= x && column < x + w && row >= y && row < y + h;
 }
@@ -75,7 +75,7 @@ export function isStaticDecorBanned(column, row) {
 
 function markBuildingFootprints(solids, buildings = []) {
   buildings.forEach((b) => {
-    if (!b || b.buildingType === 'MAKEUP_HOUSE') return;
+    if (!b) return;
     const isJail = b.buildingType === 'JAIL' || b.buildingType === 'BASE_JAIL';
     if (b.ruined && !isJail) return;
     const { x, y, w, h } = buildingFootprint(b);
@@ -120,15 +120,6 @@ function markGaragePad(solids) {
   }
 }
 
-function markMakeupHouse(solids) {
-  for (let c = 0; c <= 2; c++) {
-    for (let r = MAP_ROWS - 3; r <= MAP_ROWS - 1; r++) {
-      if (isGateTile(c, r)) continue;
-      solids.add(tileKey(c, r));
-    }
-  }
-}
-
 /**
  * Solid tiles the character cannot enter — walls, houses, props, parked buggy.
  * Gate stays open unless `gateLocked`. Ruins stay walkable for rebuild.
@@ -138,7 +129,6 @@ export function collectSolidTiles({
   decorTiles = null,
   includeSearchlight = true,
   includePerimeter = true,
-  includeMakeupHouse = true,
   blockGarage = false,
   gateLocked = false,
 } = {}) {
@@ -146,7 +136,6 @@ export function collectSolidTiles({
   markBuildingFootprints(solids, buildings);
   if (includeSearchlight) markSearchlight(solids);
   if (includePerimeter) markPerimeterWalls(solids, { gateLocked });
-  if (includeMakeupHouse) markMakeupHouse(solids);
   if (blockGarage) markGaragePad(solids);
   if (decorTiles) {
     decorTiles.forEach((key) => solids.add(key));

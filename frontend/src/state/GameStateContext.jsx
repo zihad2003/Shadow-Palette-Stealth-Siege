@@ -39,14 +39,16 @@ import {
 } from '../gamemap/paletteBuggy.js';
 import { soundEngine } from '../soundEngine.js';
 import { createRaidSession, rejectColorChange } from '../raid/RaidSession.js';
-import { ensureStompConnected, stompSubscribe, stompUnsubscribe, disconnectStomp } from '../live/stompClient.js';
+import { ensureStompConnected, stompPublish, stompSubscribe, stompUnsubscribe, disconnectStomp } from '../live/stompClient.js';
 import { MAP_COLS, MAP_ROWS } from '../gamemap/mapConfig.js';
 import { canPlaceOnGameMap, getGameFootprint, migrateHouseFootprints } from '../gamemap/placeUtils.js';
 import {
   readDailyState,
   writeDailyState,
   bumpProgress,
+  bumpPaintColor,
   allTasksComplete,
+  paintDayStatus,
   DAILY_TASK_REWARD,
   ensureToday,
 } from '../daily/dailyTasks.js';
@@ -55,8 +57,6 @@ import { GATE_SPAWN_TILE } from '../gamemap/mapConfig.js';
 import {
   DEFAULT_SEARCHLIGHT_LEVEL,
   SEARCHLIGHT_UPGRADE_COSTS,
-  clampSearchlightLevel,
-  searchlightSpec,
 } from '../raid/stealthConstants.js';
 import {
   TASK_REWARDS,
@@ -345,9 +345,7 @@ export function GameStateProvider({ children }) {
   const [selectedTool, setSelectedTool] = useState('PAINT');
   /** Walk-brush: paint/erase the tiles you step on while ON. size 1 = single, 3 = 3×3. */
   const [brush, setBrush] = useState({ on: false, size: 1, erase: false });
-  const [searchlightLevel, setSearchlightLevel] = useState(() =>
-    savedWorld?.searchlightLevel || DEFAULT_SEARCHLIGHT_LEVEL
-  );
+  const [searchlightLevel, setSearchlightLevel] = useState(DEFAULT_SEARCHLIGHT_LEVEL);
   const [buildings, setBuildings] = useState(() =>
     migrateHouseFootprints(
       Array.isArray(savedWorld?.buildings) && savedWorld.buildings.length
@@ -387,6 +385,7 @@ export function GameStateProvider({ children }) {
   const [isOptionsOpen, setIsOptionsOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isJailed, setIsJailed] = useState(false);
+  const [isHoldingPrisoner, setIsHoldingPrisoner] = useState(false);
   const [jailStay, setJailStay] = useState(null);
   const [loadingScreen, setLoadingScreen] = useState({ active: false, title: '', subtitle: '', progress: 0 });
   const [toasts, setToasts] = useState([]);
@@ -493,6 +492,7 @@ export function GameStateProvider({ children }) {
   };
 
   const saveWorld = (message = 'Saved') => {
+    if (visitRoleRef.current === 'guest') return false;
     try {
       const serialized = JSON.stringify(worldRef.current);
       storeWorldJson(serialized, userId);
@@ -545,13 +545,9 @@ export function GameStateProvider({ children }) {
     } catch {
       /* private mode */
     }
-    if (res.isJailed) {
-      setIsJailed(true);
-      setJailStay(res.jailStay || null);
-    } else {
-      setIsJailed(false);
-      setJailStay(null);
-    }
+    setIsJailed(!!res.isJailed);
+    setIsHoldingPrisoner(!!res.holdingPrisoner);
+    setJailStay(res.jailStay || null);
 
     let data = null;
     if (res.worldSaveJson) {
@@ -578,7 +574,7 @@ export function GameStateProvider({ children }) {
       if (data.camoColor) setCamoColor(data.camoColor);
       if (data.prestigeLevel != null) setPrestigeLevel(data.prestigeLevel);
       if (data.successfulRaids != null) setSuccessfulRaids(data.successfulRaids);
-      if (data.searchlightLevel) setSearchlightLevel(data.searchlightLevel);
+      setSearchlightLevel(DEFAULT_SEARCHLIGHT_LEVEL);
       if (data.selectedColor) setSelectedColor(data.selectedColor);
       if (Number.isFinite(Number(data.gameDay))) setGameDay(Math.max(1, Math.floor(Number(data.gameDay))));
       if (data.coinBanks && typeof data.coinBanks === 'object') setCoinBanks(data.coinBanks);
@@ -705,15 +701,20 @@ export function GameStateProvider({ children }) {
     saveWorld('');
   };
 
-  const bumpDailyProgress = (id, amount = 1) => {
+  const bumpDailyProgress = (id, amount = 1, colorKey = null) => {
     const prev = ensureToday(dailyTasksRef.current);
-    const next = bumpProgress(prev, id, amount);
+    let next = bumpProgress(prev, id, amount);
+    if (id === 'paint' && colorKey) next = bumpPaintColor(next, colorKey, amount);
+    const colorsSame = GAME_COLOR_KEYS.every(
+      (key) => (Number(next.colors?.[key]) || 0) === (Number(prev.colors?.[key]) || 0)
+    );
     if (
       next.day === prev.day &&
       next.claimed === prev.claimed &&
       next.progress.paint === prev.progress.paint &&
       next.progress.collect === prev.progress.collect &&
-      next.progress.raid === prev.progress.raid
+      next.progress.raid === prev.progress.raid &&
+      colorsSame
     ) {
       return;
     }
@@ -781,6 +782,11 @@ export function GameStateProvider({ children }) {
   };
 
   const sleepAtHouse = () => {
+    const paintGate = paintDayStatus(dailyTasksRef.current);
+    if (!paintGate.ok) {
+      showToast(paintGate.warning, 'error');
+      return false;
+    }
     const nextDay = (Number(worldRef.current.gameDay) || 1) + 1;
     const nextCoins = (Number(worldRef.current.coins) || 0) + DAILY_LOGIN_COINS;
     const banks = { ...(worldRef.current.coinBanks || {}) };
@@ -852,6 +858,10 @@ export function GameStateProvider({ children }) {
   const transitionTo = (nextState, params = {}) => {
     if (isJailed && (nextState === 'RAID_ENTER' || nextState === 'STEALTH_RAID')) {
       showToast('You are detained in Base Jail! Settle ransom or wait for release.', 'error');
+      return false;
+    }
+    if (isHoldingPrisoner && (nextState === 'RAID_ENTER' || nextState === 'STEALTH_RAID' || nextState === 'RAID_FINDER')) {
+      showToast('Release your jail prisoner before leaving on another raid.', 'error');
       return false;
     }
     soundEngine.playTabSound();
@@ -1251,7 +1261,7 @@ export function GameStateProvider({ children }) {
     soundEngine.playPaintSound();
     setInkEnergy((v) => Math.max(0, v - PAINT_TILE_INK));
     setPaintedTiles((prev) => ({ ...prev, [key]: selectedColor }));
-    bumpDailyProgress('paint', 1);
+    bumpDailyProgress('paint', 1, selectedColor);
     return true;
   };
 
@@ -1292,7 +1302,7 @@ export function GameStateProvider({ children }) {
     soundEngine.playPaintSound();
     setInkEnergy((v) => Math.max(0, v - PAINT_TILE_INK * batch.length));
     setPaintedTiles(nextTiles);
-    bumpDailyProgress('paint', batch.length);
+    bumpDailyProgress('paint', batch.length, selectedColor);
     return { painted: batch.length, stop: batch.length < todo.length, batch };
   };
 
@@ -1361,9 +1371,9 @@ export function GameStateProvider({ children }) {
   const repairedCount = buildings.filter(
     (b) =>
       !b.ruined
-      && ['SLEEP_HOUSE', 'INK_HOUSE', 'CRAFT_HOUSE', 'COIN_GENERATOR', 'JAIL', 'BASE_JAIL'].includes(b.buildingType)
+      && ['SLEEP_HOUSE', 'INK_HOUSE', 'CRAFT_HOUSE', 'COIN_GENERATOR', 'JAIL', 'BASE_JAIL', 'MAKEUP_HOUSE'].includes(b.buildingType)
   ).length;
-  const ruinedCount = buildings.filter((b) => b.ruined && b.buildingType !== 'MAKEUP_HOUSE').length;
+  const ruinedCount = buildings.filter((b) => b.ruined).length;
   const guideActive = guideStep !== GUIDE_STEPS.DONE;
   const activeRuin = guideActive ? nextGuideRuin(buildings, GATE_SPAWN_TILE) : null;
   const activeRuinId = activeRuin?.id ?? null;
@@ -1501,10 +1511,6 @@ export function GameStateProvider({ children }) {
       showToast('Hold F to rebuild', 'info');
       return false;
     }
-    if (building.buildingType === 'MAKEUP_HOUSE') {
-      showToast('Makeup stays', 'info');
-      return false;
-    }
     setSelectedBuildingId(buildingId);
     setMovingBuildingId(buildingId);
     setSelectedTool('MOVE');
@@ -1619,6 +1625,10 @@ export function GameStateProvider({ children }) {
   };
 
   const upgradeHouse = async (buildingId) => {
+    if (isVisitGuest) {
+      showToast('Friendly visit — look only', 'info');
+      return false;
+    }
     const building = buildings.find((b) => b.id === buildingId);
     if (!building) {
       showToast('Select a house', 'info');
@@ -1654,26 +1664,7 @@ export function GameStateProvider({ children }) {
 
   const handleUpgradeSelected = () => upgradeHouse(selectedBuildingId);
 
-  const upgradeSearchlight = () => {
-    const lv = clampSearchlightLevel(searchlightLevel);
-    if (lv >= 3) {
-      showToast('Light max', 'info');
-      return false;
-    }
-    const cost = SEARCHLIGHT_UPGRADE_COSTS[lv];
-    if (!cost) return false;
-    if (coins < cost.coins || inkEnergy < cost.ink) {
-      showToast(`Need ${cost.coins}c / ${cost.ink} ink`, 'error');
-      return false;
-    }
-    soundEngine.playBuildSound();
-    setCoins((v) => v - cost.coins);
-    setInkEnergy((v) => v - cost.ink);
-    setSearchlightLevel(lv + 1);
-    const next = searchlightSpec(lv + 1);
-    showToast(`Light L${next.level}`, 'success');
-    return true;
-  };
+  const upgradeSearchlight = () => false;
 
   const activatePatrolRobot = async () => {
     if (isVisitGuest) {
@@ -1947,14 +1938,36 @@ export function GameStateProvider({ children }) {
     return true;
   };
 
+  const sendVisitChat = (text) => {
+    if (!visitSession?.visitId) return false;
+    const body = String(text || '').trim().replace(/\s+/g, ' ').slice(0, 80);
+    if (!body) return false;
+    stompPublish(`/app/visit/${visitSession.visitId}/position`, {
+      visitId: visitSession.visitId,
+      chat: body,
+    }).catch(() => {
+      postVisitState({
+        visitId: visitSession.visitId,
+        userId,
+        chat: body,
+      }).catch(() => {});
+    });
+    return true;
+  };
+
   const sendVisitReaction = (kind) => {
     if (!visitSession) return;
     const rx = `${kind}|${Date.now()}`;
-    postVisitState({
+    stompPublish(`/app/visit/${visitSession.visitId}/position`, {
       visitId: visitSession.visitId,
-      userId,
       reaction: rx,
-    }).catch(() => { });
+    }).catch(() => {
+      postVisitState({
+        visitId: visitSession.visitId,
+        userId,
+        reaction: rx,
+      }).catch(() => { });
+    });
     window.dispatchEvent(new CustomEvent('visit-reaction', { detail: { kind } }));
   };
 
@@ -2335,11 +2348,13 @@ export function GameStateProvider({ children }) {
     recordRaidResult,
     claimDailyLogin,
     dailyTasks,
+    dailyPaintGate: paintDayStatus(dailyTasks),
     bumpDailyProgress,
     claimDailyTasks,
     tradeChipsForCoins,
     performPrestige,
     sendVisitReaction,
+    sendVisitChat,
     raidTargetId,
     setRaidTargetId,
     raidData,
@@ -2352,6 +2367,8 @@ export function GameStateProvider({ children }) {
     setIsHistoryOpen,
     isJailed,
     setIsJailed,
+    isHoldingPrisoner,
+    setIsHoldingPrisoner,
     jailStay,
     setJailStay,
     loadingScreen,
@@ -2653,68 +2670,103 @@ export function GameStateProvider({ children }) {
   useEffect(() => {
     if (!visitSession?.visitId) return undefined;
     const visitId = visitSession.visitId;
+    let cancelled = false;
+
+    const applyVisitDto = (s) => {
+      if (!s || cancelled) return;
+      if (s.status === 'ENDED' || s.success === false) {
+        void endVisitRef.current({ kicked: visitRoleRef.current === 'guest' });
+        return;
+      }
+      setVisitSession(s);
+      if (visitRoleRef.current === 'guest') {
+        setBuggyGear(Number(s.gear) || 0);
+        setBuggyTrackT(Number(s.trackT) || 0);
+      }
+      if (s.reaction && s.reaction !== visitSessionRef.current?.reaction) {
+        const [kind] = s.reaction.split('|');
+        if (visitRoleRef.current === 'host') {
+          showToast(`Guest sent a ${kind}!`, 'info');
+          window.dispatchEvent(new CustomEvent('visit-reaction', { detail: { kind } }));
+        }
+      }
+    };
+
+    (async () => {
+      try {
+        await ensureStompConnected();
+        if (cancelled) return;
+        await stompSubscribe(`/topic/visit/${visitId}/state`, applyVisitDto);
+      } catch {
+        /* REST fallback poll below */
+      }
+    })();
+
     const poll = async () => {
       try {
         const s = await fetchVisitSession(visitId);
-        if (!s || s.status === 'ENDED' || s.success === false) {
-          void endVisitRef.current({ kicked: visitRoleRef.current === 'guest' });
-          return;
-        }
-        setVisitSession(s);
-        if (visitRoleRef.current === 'guest') {
-          setBuggyGear(Number(s.gear) || 0);
-          setBuggyTrackT(Number(s.trackT) || 0);
-          if (s.guestSeated !== undefined && s.guestSeated !== buggySeated) {
-            /* guest seated is local authority; ignore */
-          }
-        } else if (s.guestSeated !== visitSession.guestSeated || s.reaction !== visitSessionRef.current?.reaction) {
-          setVisitSession(s);
-        }
-        if (s.reaction && s.reaction !== visitSessionRef.current?.reaction) {
-          const [kind] = s.reaction.split('|');
-          if (visitRoleRef.current === 'host') {
-            showToast(`Guest sent a ${kind}!`, 'info');
-            window.dispatchEvent(new CustomEvent('visit-reaction', { detail: { kind } }));
-          }
-        }
+        applyVisitDto(s);
       } catch {
         /* ignore */
       }
     };
-    const id = window.setInterval(poll, 250);
-    return () => window.clearInterval(id);
+    poll();
+    const id = window.setInterval(poll, 4000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+      stompUnsubscribe(`/topic/visit/${visitId}/state`, applyVisitDto);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visitSession?.visitId]);
 
   useEffect(() => {
     if (!visitSession?.visitId || visitRole === 'guest') return undefined;
+    const visitId = visitSession.visitId;
     const id = window.setInterval(() => {
       const pose = visitPoseRef.current;
-      postVisitState({
-        visitId: visitSession.visitId,
-        userId,
+      stompPublish(`/app/visit/${visitId}/position`, {
+        visitId,
         seated: buggySeated,
         gear: buggyGear,
         trackT: buggyTrackT,
         column: pose.column,
         row: pose.row,
-      }).catch(() => { });
-    }, 250);
+      }).catch(() => {
+        postVisitState({
+          visitId,
+          userId,
+          seated: buggySeated,
+          gear: buggyGear,
+          trackT: buggyTrackT,
+          column: pose.column,
+          row: pose.row,
+        }).catch(() => { });
+      });
+    }, 100);
     return () => window.clearInterval(id);
   }, [visitSession?.visitId, visitRole, buggySeated, buggyGear, buggyTrackT, userId]);
 
   useEffect(() => {
     if (!visitSession?.visitId || visitRole !== 'guest') return undefined;
+    const visitId = visitSession.visitId;
     const id = window.setInterval(() => {
       const pose = visitPoseRef.current;
-      postVisitState({
-        visitId: visitSession.visitId,
-        userId,
+      stompPublish(`/app/visit/${visitId}/position`, {
+        visitId,
         seated: buggySeated,
         column: pose.column,
         row: pose.row,
-      }).catch(() => { });
-    }, 250);
+      }).catch(() => {
+        postVisitState({
+          visitId,
+          userId,
+          seated: buggySeated,
+          column: pose.column,
+          row: pose.row,
+        }).catch(() => { });
+      });
+    }, 100);
     return () => window.clearInterval(id);
   }, [visitSession?.visitId, visitRole, buggySeated, userId]);
 

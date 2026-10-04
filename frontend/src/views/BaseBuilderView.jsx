@@ -5,14 +5,13 @@ import { Plus, Minus, Eye, Map } from 'lucide-react';
 import TopResourceBar from '../components/hud/TopResourceBar.jsx';
 import NavigationTabs from '../components/hud/NavigationTabs.jsx';
 import BottomBuildDock from '../components/hud/BottomBuildDock.jsx';
-import BaseStatusPanel from '../components/hud/BaseStatusPanel.jsx';
 import MakeupHousePanel from '../components/hud/MakeupHousePanel.jsx';
 import HudBanner from '../components/ui/HudBanner.jsx';
 import HudHeader from '../components/ui/HudHeader.jsx';
 import ClayButton from '../components/ui/ClayButton.jsx';
 import GameMap from '../gamemap/GameMap.jsx';
 import { useGameState, GUIDE_STEPS, STARTER_HOUSE_COUNT } from '../state/GameStateContext.jsx';
-import { GATE_SPAWN_TILE, MAP_ROWS, WALK_TILE_SECONDS } from '../gamemap/mapConfig.js';
+import { GATE_SPAWN_TILE, WALK_TILE_SECONDS } from '../gamemap/mapConfig.js';
 import { isTileInBeam } from '../raid/SearchlightSensor.js';
 import { LIVE_CATCH_HOLD_SECONDS, ROBOT_CHASE_PROXIMITY } from '../raid/stealthConstants.js';
 import { collectSolidTiles } from '../gamemap/occupancy.js';
@@ -21,7 +20,7 @@ import { stepDirection, attemptStep, nudgeOffSolid, TURN_RATE } from '../charact
 import { noteKeyDown, noteKeyUp, walkAxes, shiftHeld, codeHeld, bindKeyReleaseGuards } from '../character/walkInput.js';
 import { soundEngine } from '../soundEngine.js';
 import { listDecorOccupiedTiles } from '../gamemap/MapDecor.js';
-import { findRuinNear, findRepairedNear, isNearMakeupHouse, nextGuideRuin, houseLabel } from '../gamemap/starterRuins.js';
+import { findRuinNear, findRepairedNear, nextGuideRuin, houseLabel } from '../gamemap/starterRuins.js';
 import { canPlaceOnGameMap } from '../gamemap/placeUtils.js';
 import { createSprintMeter, SPRINT_SPEED_MULT } from '../character/sprint.js';
 import StaminaBar from '../components/hud/StaminaBar.jsx';
@@ -30,6 +29,7 @@ import ActionPrompt from '../components/hud/ActionPrompt.jsx';
 import HouseStation from '../components/hud/HouseStation.jsx';
 import { GAME_COLORS, GAME_COLOR_KEYS } from '../colors.js';
 import { ensureStompConnected, stompPublish, stompSubscribe, stompUnsubscribe } from '../live/stompClient.js';
+import { fetchMyJailStay } from '../api.js';
 import RansomModal from '../components/raid/RansomModal.jsx';
 
 const BASE_DECOR_SEED = 7;
@@ -111,6 +111,7 @@ export default function BaseBuilderView() {
     saveWorld,
     mountProgress,
     gameDay,
+    dailyPaintGate,
     coinBanks,
     inkBanks,
     collectHouseCoins,
@@ -127,7 +128,14 @@ export default function BaseBuilderView() {
     setLiveRaidInvite,
     userId,
     coins,
+    inkEnergy,
+    chips,
     setCoins,
+    setInkEnergy,
+    setChips,
+    jailStay,
+    setJailStay,
+    setIsHoldingPrisoner,
   } = useGameState();
   const sceneApi = useRef(null);
   const [selectedTile, setSelectedTile] = useState(null);
@@ -192,25 +200,21 @@ export default function BaseBuilderView() {
 
   const nearRuin = findRuinNear(buildings, walker.column, walker.row);
   const nearRepaired = findRepairedNear(buildings, walker.column, walker.row);
-  const makeupFirst =
-    isNearMakeupHouse(walker.column, walker.row) && walker.column <= 2 && walker.row >= MAP_ROWS - 4;
-  const makeupStation = makeupFirst ? { id: 'makeup', buildingType: 'MAKEUP_HOUSE', ruined: false } : null;
-  const stationHouse = makeupStation || nearRepaired;
-  const nearSleep = !makeupStation && nearRepaired?.buildingType === 'SLEEP_HOUSE' ? nearRepaired : null;
-  const nearCoin = !makeupStation && nearRepaired?.buildingType === 'COIN_GENERATOR' ? nearRepaired : null;
-  const nearInk = !makeupStation && nearRepaired?.buildingType === 'INK_HOUSE' ? nearRepaired : null;
-  const nearCraft = !makeupStation && nearRepaired?.buildingType === 'CRAFT_HOUSE' ? nearRepaired : null;
-  const nearJail = !makeupStation && (nearRepaired?.buildingType === 'JAIL' || nearRepaired?.buildingType === 'BASE_JAIL') ? nearRepaired : null;
+  const stationHouse = nearRepaired;
+  const nearSleep = nearRepaired?.buildingType === 'SLEEP_HOUSE' ? nearRepaired : null;
+  const nearCoin = nearRepaired?.buildingType === 'COIN_GENERATOR' ? nearRepaired : null;
+  const nearInk = nearRepaired?.buildingType === 'INK_HOUSE' ? nearRepaired : null;
+  const nearCraft = nearRepaired?.buildingType === 'CRAFT_HOUSE' ? nearRepaired : null;
+  const nearMakeup = nearRepaired?.buildingType === 'MAKEUP_HOUSE' ? nearRepaired : null;
+  const nearJail = nearRepaired?.buildingType === 'JAIL' || nearRepaired?.buildingType === 'BASE_JAIL' ? nearRepaired : null;
   const jailBuilding = buildings?.find((b) => b.buildingType === 'JAIL' || b.buildingType === 'BASE_JAIL');
   const distToJail = jailBuilding ? Math.hypot(walker.column - (jailBuilding.xPos ?? 15), walker.row - (jailBuilding.yPos ?? 15)) : Infinity;
   const isNearJailCell = distToJail <= 3.8 || !!nearJail;
   const distToIntruder = intruder ? Math.hypot(walker.column - intruder.column, walker.row - intruder.row) : Infinity;
   const canCatchIntruder = !carriedIntruder && distToIntruder <= CATCH_RANGE_TILES;
 
-  const handleCatchIntruder = () => {
-    if (!intruder || jailedIntruderRef.current) return;
-    const target = intruder;
-    const pos = walkerRef.current;
+  const finalizeIntruderJail = (target) => {
+    if (!target || jailedIntruderRef.current) return;
     const jailPos = {
       column: jailBuilding?.xPos ?? jailBuilding?.column ?? 15,
       row: jailBuilding?.yPos ?? jailBuilding?.row ?? 15,
@@ -235,6 +239,13 @@ export default function BaseBuilderView() {
     soundEngine.playCatchSound();
     showToast(`${target.name || 'Raider'} locked in Base Jail. Ransom is open.`, 'success');
     setShowJailRansomModal(true);
+    setIsHoldingPrisoner(true);
+    void fetchMyJailStay().then((stay) => { if (stay) setJailStay(stay); });
+  };
+
+  const handleCatchIntruder = () => {
+    if (!intruder || jailedIntruderRef.current) return;
+    const pos = walkerRef.current;
     const raidId = liveRaidInvite?.raidId;
     if (raidId) {
       stompPublish(`/app/live-raid/${raidId}/position`, {
@@ -245,6 +256,7 @@ export default function BaseBuilderView() {
         model: pos.characterModel || 1,
         camo: pos.camoColor || null,
         status: 'CATCH',
+        catchProgress: 1,
         outcome: 'CAUGHT_IN_JAIL',
       }).catch(() => {});
     }
@@ -564,6 +576,26 @@ export default function BaseBuilderView() {
         });
         await stompSubscribe(`/topic/live-raid/${raidId}/state`, (state) => {
           if (!state || cancelled) return;
+          if (state.message === 'CATCH_TOO_FAR') {
+            catchHoldRef.current = 0;
+            setCatchProgress(0);
+            soundEngine.stopRebuildHum();
+            showToast('Raider slipped away — get closer', 'warning');
+            return;
+          }
+          const jailedNow =
+            state.status === 'JAIL_LOCKED'
+            || state.outcome === 'CAUGHT_IN_JAIL'
+            || (state.terminal && state.outcome === 'CAUGHT');
+          if (jailedNow && !jailedIntruderRef.current && intruderRef.current) {
+            finalizeIntruderJail(intruderRef.current);
+            return;
+          }
+          if (state.status === 'CARRIED' && !jailedIntruderRef.current && intruderRef.current) {
+            setCarriedIntruder(intruderRef.current);
+            setIntruder(null);
+            return;
+          }
           if (jailedIntruderRef.current) {
             homePatrolChaseRef.current = false;
             sceneApi.current?.setPatrolChase?.(false);
@@ -622,6 +654,10 @@ export default function BaseBuilderView() {
 
     pubTimer = window.setInterval(() => {
       const pos = walkerRef.current;
+      const holdPct = catchHoldRef.current > 0
+        ? Math.min(1, catchHoldRef.current / CATCH_HOLD_SECONDS)
+        : 0;
+      const catching = holdPct > 0 && !carriedIntruderRef.current && !jailedIntruderRef.current;
       stompPublish(`/app/live-raid/${raidId}/position`, {
         userId,
         role: 'DEFENDER',
@@ -629,7 +665,8 @@ export default function BaseBuilderView() {
         y: pos.row,
         model: pos.characterModel || 1,
         camo: pos.camoColor || null,
-        status: carriedIntruderRef.current ? 'CARRIED' : null,
+        status: carriedIntruderRef.current ? 'CARRIED' : (catching ? 'CATCH' : null),
+        catchProgress: catching ? holdPct : null,
       }).catch(() => {});
       if (carriedIntruderRef.current) {
         sceneApi.current?.setPartnerPose?.(pos.column, pos.row, {
@@ -846,6 +883,7 @@ export default function BaseBuilderView() {
             ? ruin
             : null;
       const canHold =
+        !rk.isVisitGuest &&
         !canMount &&
         !catchActive &&
         holdingF &&
@@ -888,6 +926,8 @@ export default function BaseBuilderView() {
 
   useEffect(() => {
     const down = (e) => {
+      const tag = e.target?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || e.target?.isContentEditable) return;
       noteKeyDown(keys.current, e);
       if (e.code === 'KeyF' && !e.repeat) {
         e.preventDefault();
@@ -947,12 +987,11 @@ export default function BaseBuilderView() {
           return;
         }
         const house = findRepairedNear(rk.buildings, pos.column, pos.row);
-        const atMakeup = isNearMakeupHouse(pos.column, pos.row) && pos.column <= 2 && pos.row >= MAP_ROWS - 4;
-        if (!rk.isVisitGuest && atMakeup) {
-          setMakeupOpen(true);
-          return;
-        }
         if (!rk.isVisitGuest && house) {
+          if (house.buildingType === 'MAKEUP_HOUSE') {
+            setMakeupOpen(true);
+            return;
+          }
           if (house.buildingType === 'SLEEP_HOUSE') {
             rk.sleepAtHouse();
             return;
@@ -985,15 +1024,15 @@ export default function BaseBuilderView() {
           brushKeysRef.current.toggleBrush();
         }
       }
-      if ((e.key === 'q' || e.key === 'Q') && !e.repeat) {
+      if ((e.key === 'q' || e.key === 'Q') && !e.repeat && !rebuildKeysRef.current?.isVisitGuest) {
         e.preventDefault();
         brushKeysRef.current.cycleBrushSize();
       }
-      if ((e.key === 'r' || e.key === 'R') && !e.repeat) {
+      if ((e.key === 'r' || e.key === 'R') && !e.repeat && !rebuildKeysRef.current?.isVisitGuest) {
         e.preventDefault();
         brushKeysRef.current.toggleEraser();
       }
-      if (e.key >= '1' && e.key <= '5' && !e.repeat) {
+      if (e.key >= '1' && e.key <= '5' && !e.repeat && !rebuildKeysRef.current?.isVisitGuest) {
         const key = GAME_COLOR_KEYS[Number(e.key) - 1];
         if (key) {
           brushKeysRef.current.setSelectedColor(key);
@@ -1026,7 +1065,7 @@ export default function BaseBuilderView() {
         }
         moveKeysRef.current.cancelMoveBuilding();
       }
-      if ((e.key === 'm' || e.key === 'M') && !e.repeat) {
+      if ((e.key === 'm' || e.key === 'M') && !e.repeat && !rebuildKeysRef.current?.isVisitGuest) {
         e.preventDefault();
         const mv = moveKeysRef.current;
         if (mv.movingBuildingId) {
@@ -1062,6 +1101,7 @@ export default function BaseBuilderView() {
   }, []);
 
   const handleTileClick = async (data) => {
+    if (isVisitGuest) return;
     setSelectedTile(data);
     const res = await handlePlaceAt(data.column, data.row, { occupant: walkerRef.current });
     if (res && res.batch && res.batch.length > 0) {
@@ -1092,6 +1132,10 @@ export default function BaseBuilderView() {
   };
 
   const handleBuildingClick = (buildingId) => {
+    if (isVisitGuest) {
+      showToast('Friendly visit — look only', 'info');
+      return;
+    }
     const building = buildings.find((b) => b.id === buildingId);
     if (building?.ruined) {
       if (guideActive && activeRuinId && building.id !== activeRuinId) {
@@ -1135,7 +1179,7 @@ export default function BaseBuilderView() {
                 : 'E turn patrol on'
             : null,
           nearJail && !nearRuin ? 'E Base Jail (Holding Cell)' : null,
-          makeupStation ? 'E change camo' : null,
+          nearMakeup && !nearRuin ? 'E change camo' : null,
           nearRepaired && !nearSleep && !nearCoin && !nearInk && !nearCraft && !movingBuilding ? 'M move house' : null,
           nearCar && garageComplete && !carriedPart ? 'F enter' : null,
           brush.on ? `E brush off · ${brush.size}×${brush.size}` : null,
@@ -1158,7 +1202,6 @@ export default function BaseBuilderView() {
         onTileHover={handleTileHover}
         showSearchlight
         searchlightLevel={searchlightLevel}
-        showMakeupHouse
         attacker={walker}
         cameraMode={cameraMode}
         onTileClick={handleTileClick}
@@ -1219,6 +1262,7 @@ export default function BaseBuilderView() {
           building={peekHouse}
           ruined={!!peekHouse?.ruined}
           gameDay={gameDay}
+          sleepWarning={peekHouse?.buildingType === 'SLEEP_HOUSE' ? dailyPaintGate?.warning || '' : ''}
           storedCoins={Math.floor(Number(coinBanks[peekHouse?.id]) || 0)}
           storedInk={Math.floor(Number(inkBanks[peekHouse?.id]) || 0)}
           selectedColor={selectedColor}
@@ -1270,7 +1314,6 @@ export default function BaseBuilderView() {
       {guideStep !== GUIDE_STEPS.WELCOME && <ActionPrompt lines={actionLines} />}
 
       <aside className="absolute right-4 top-[4.75rem] z-40 hidden md:flex flex-col items-end gap-2">
-        <BaseStatusPanel />
         <div className="flex flex-col gap-1.5 pointer-events-auto">
           <ClayButton
             variant="ghost"
@@ -1331,19 +1374,29 @@ export default function BaseBuilderView() {
       <RansomModal
         isOpen={showJailRansomModal}
         isPrisoner={false}
+        jailStayId={jailStay?.id || null}
         attackerId={carriedIntruder?.id || intruder?.id || liveRaidInvite?.attackerUserId || null}
         defenderId={userId}
         attackerName={carriedIntruder?.name || intruder?.name || liveRaidInvite?.attackerName || 'Intruder'}
         defenderName="Base Owner (You)"
         playerCoins={coins || 500}
-        onRelease={(ransomCoins) => {
-          if (ransomCoins > 0) {
-            setCoins((c) => c + ransomCoins);
-            showToast(`Ransom received: +${ransomCoins} coins! Intruder released and sent home.`, 'success');
-          } else {
-            showToast('Intruder released and sent back to their base.', 'info');
-          }
+        playerInk={inkEnergy || 100}
+        playerChips={chips || 200}
+        onRelease={(payment = {}) => {
+          const ransomCoins = Number(payment.coins) || 0;
+          const ransomInk = Number(payment.ink) || 0;
+          const ransomChips = Number(payment.chips) || 0;
+          if (ransomCoins > 0) setCoins((c) => c + ransomCoins);
+          if (ransomInk > 0) setInkEnergy((i) => i + ransomInk);
+          if (ransomChips > 0) setChips((ch) => ch + ransomChips);
+          showToast(
+            ransomCoins + ransomInk + ransomChips > 0
+              ? `Ransom received: +${ransomCoins}c · +${ransomInk} ink · +${ransomChips} pts. Prisoner released.`
+              : 'Prisoner released and sent home.',
+            'success'
+          );
           setShowJailRansomModal(false);
+          setIsHoldingPrisoner(false);
           jailedIntruderRef.current = null;
           sceneApi.current?.clearPartnerPose?.();
           sceneApi.current?.clearPrisonerPose?.();
@@ -1359,21 +1412,7 @@ export default function BaseBuilderView() {
           setLiveRaidInvite(null);
         }}
         onDecline={() => {
-          showToast('Negotiation ended. Intruder released and sent back to their base.', 'info');
-          setShowJailRansomModal(false);
-          jailedIntruderRef.current = null;
-          sceneApi.current?.clearPartnerPose?.();
-          sceneApi.current?.clearPrisonerPose?.();
-          const raidId = liveRaidInvite?.raidId;
-          if (raidId) {
-            stompPublish(`/app/live-raid/${raidId}/position`, {
-              userId,
-              role: 'DEFENDER',
-              outcome: 'RELEASED',
-              status: 'RELEASED',
-            }).catch(() => {});
-          }
-          setLiveRaidInvite(null);
+          showToast('Offer declined — intruder stays in your jail.', 'info');
         }}
       />
     </div>

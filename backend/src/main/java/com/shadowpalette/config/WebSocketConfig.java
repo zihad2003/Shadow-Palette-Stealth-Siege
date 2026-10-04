@@ -2,6 +2,7 @@ package com.shadowpalette.config;
 
 import com.shadowpalette.liveraid.LiveRaidRegistry;
 import com.shadowpalette.liveraid.LiveRaidSession;
+import com.shadowpalette.service.PresenceService;
 import com.shadowpalette.security.JwtUtil;
 import com.shadowpalette.security.UserPrincipal;
 import io.jsonwebtoken.Claims;
@@ -37,6 +38,8 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     private final JwtUtil jwtUtil;
     @Lazy
     private final LiveRaidRegistry liveRaidRegistry;
+    @Lazy
+    private final PresenceService presenceService;
 
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
@@ -126,6 +129,20 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
                                     && !userId.equals(session.getAttackerUserId())
                                     && !userId.equals(session.getDefenderUserId())) {
                                 throw new MessageDeliveryException("Not a participant of this live raid");
+                            }
+                        }
+                        // /topic/visit/{visitId}/state — only host or guest
+                        if (destination.startsWith("/topic/visit/") && destination.endsWith("/state")) {
+                            String visitIdStr = destination
+                                    .substring("/topic/visit/".length(),
+                                               destination.length() - "/state".length());
+                            try {
+                                Long visitId = Long.parseLong(visitIdStr);
+                                if (!presenceService.isVisitParticipant(visitId, userId)) {
+                                    throw new MessageDeliveryException("Not a participant of this visit");
+                                }
+                            } catch (NumberFormatException ex) {
+                                throw new MessageDeliveryException("Invalid visit channel");
                             }
                         }
                     }
