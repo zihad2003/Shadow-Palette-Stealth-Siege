@@ -232,7 +232,7 @@ export default function BaseBuilderView() {
       camoColor: locked.camoColor,
       characterModel: locked.characterModel,
     });
-    soundEngine.playGateSlamSound?.();
+    soundEngine.playCatchSound();
     showToast(`${target.name || 'Raider'} locked in Base Jail. Ransom is open.`, 'success');
     setShowJailRansomModal(true);
     const raidId = liveRaidInvite?.raidId;
@@ -271,7 +271,7 @@ export default function BaseBuilderView() {
       camoColor: locked.camoColor,
       characterModel: locked.characterModel,
     });
-    soundEngine.playGateSlamSound?.();
+    soundEngine.playCatchSound();
     showToast('Intruder locked in Base Jail! Intercom open for ransom negotiation.', 'success');
     setShowJailRansomModal(true);
     const raidId = liveRaidInvite?.raidId;

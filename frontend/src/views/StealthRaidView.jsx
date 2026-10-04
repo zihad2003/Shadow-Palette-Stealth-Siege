@@ -944,7 +944,7 @@ export default function StealthRaidView() {
       if (!msg || Number(msg.fromUserId) === Number(userId)) return;
       if (msg.type === 'ROBOT_HIT') {
         const secs = Number(msg.payload?.stunSeconds) || ROBOT_STUN_SECONDS;
-        soundEngine.playWallHitSound();
+        soundEngine.playKickSound();
         sceneApi.current?.stunPatrolRobot?.(secs);
         robotContext.current?.stun?.(secs);
         robotStunnedUntilRef.current = Date.now() + secs * 1000;
@@ -1068,7 +1068,7 @@ export default function StealthRaidView() {
       }
     }
     sceneApi.current?.pulseBuilding?.(houseId);
-    soundEngine.playSuccessSound();
+    soundEngine.playLootSound();
     const label = kind === 'ink' ? 'ink' : 'coins';
     showToast(source === 'partner' ? `Partner looted · you got ${gain} ${label}` : `Stole ${gain} ${label}`, 'success');
     return true;
@@ -1335,7 +1335,7 @@ export default function StealthRaidView() {
       return;
     }
 
-    soundEngine.playWallHitSound();
+    soundEngine.playKickSound();
     sceneApi.current?.playKick?.();
     sceneApi.current?.stunPatrolRobot?.(ROBOT_STUN_SECONDS);
     robotContext.current?.stun?.(ROBOT_STUN_SECONDS);

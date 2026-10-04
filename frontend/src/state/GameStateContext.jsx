@@ -757,7 +757,7 @@ export function GameStateProvider({ children }) {
     setCoinBanks(banks);
     setCoins(nextCoins);
     bumpDailyProgress('collect', 1);
-    soundEngine.playSuccessSound();
+    soundEngine.playCoinSound();
     showToast(`Collected ${n} coins`, 'success');
     return true;
   };
@@ -775,7 +775,7 @@ export function GameStateProvider({ children }) {
     worldRef.current = { ...worldRef.current, inkBanks: banks, inkEnergy: nextInk };
     setInkBanks(banks);
     setInkEnergy(nextInk);
-    soundEngine.playSuccessSound();
+    soundEngine.playInkSound();
     showToast(`Collected ${n} ink`, 'success');
     return true;
   };
@@ -806,7 +806,7 @@ export function GameStateProvider({ children }) {
     setCoins(nextCoins);
     setInkEnergy(nextInk);
     setCoinBanks(banks);
-    soundEngine.playSuccessSound();
+    soundEngine.playSleepSound();
     return saveWorld(`Day ${nextDay} · saved`);
   };
 
@@ -984,10 +984,11 @@ export function GameStateProvider({ children }) {
       return true;
     }
     if (inkEnergy < MAKEUP_RECOLOR_INK) {
+      soundEngine.playErrorSound();
       showToast(`Need ${MAKEUP_RECOLOR_INK} ink`, 'error');
       return false;
     }
-    soundEngine.playPaintSound();
+    soundEngine.playCamoSound();
     setInkEnergy((v) => Math.max(0, v - MAKEUP_RECOLOR_INK));
     setCamoColor(gate.camoColor);
     setHasRecamoed(true);
@@ -1708,6 +1709,7 @@ export function GameStateProvider({ children }) {
     setPatrolUnlocked(true);
     setPatrolOn(true);
     setSelectedTool('PAINT');
+    soundEngine.playPatrolOnSound();
     showToast('Patrol bought. 1c / 30s while on.', 'success');
     return true;
   };
@@ -1728,6 +1730,8 @@ export function GameStateProvider({ children }) {
       return false;
     }
     setPatrolOn(next);
+    if (next) soundEngine.playPatrolOnSound();
+    else soundEngine.playPatrolOffSound();
     showToast(next ? 'Patrol on · 1c / 30s' : 'Patrol parked in Craft House', next ? 'success' : 'info');
     return true;
   };
@@ -2191,10 +2195,12 @@ export function GameStateProvider({ children }) {
         if (v < PATROL_UPKEEP_COINS) {
           queueMicrotask(() => {
             setPatrolOn(false);
+            soundEngine.playPatrolOffSound();
             showToast('Patrol parked — not enough coins', 'info');
           });
           return v;
         }
+        soundEngine.playCoinTickSound();
         return v - PATROL_UPKEEP_COINS;
       });
     }, PATROL_UPKEEP_MS);
