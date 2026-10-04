@@ -120,15 +120,27 @@ class LiveRaidSessionIntegrationTest {
                 101L
         );
 
-        // Defender catches attacker at same tile
-        var state = liveRaidService.updatePosition(
+        // Proximity alone no longer auto-catches — owner must hold F in range.
+        var near = liveRaidService.updatePosition(
                 raidId,
                 LiveRaidPositionMessage.builder().role("DEFENDER").x(15.1).y(15.0).build(),
                 "ws-def-1",
                 2050L
         );
+        assertNull(near.getOutcome());
+        assertFalse(near.isTerminal());
 
-        assertEquals("CAUGHT", state.getOutcome());
+        // Hold-F catch in range jails the raider and persists CAUGHT on the session row.
+        var state = liveRaidService.updatePosition(
+                raidId,
+                LiveRaidPositionMessage.builder().role("DEFENDER").x(15.1).y(15.0)
+                        .status("CATCH").outcome("CAUGHT_IN_JAIL").build(),
+                "ws-def-1",
+                2050L
+        );
+
+        assertTrue(state.isTerminal());
+        assertEquals("CAUGHT_IN_JAIL", state.getOutcome());
 
         // Check DB: entity updated to CAUGHT with endedAt set
         LiveRaidSessionEntity caughtEntity = sessionRepository.findByRaidId(raidId).orElseThrow();
