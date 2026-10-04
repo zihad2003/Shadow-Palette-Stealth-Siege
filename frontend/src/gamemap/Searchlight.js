@@ -135,10 +135,10 @@ function buildLanternL1(root) {
 
 /** L2 — octagonal watch turret with brass lamp. */
 function buildTurretL2(root) {
-  const terrace = shadow(new THREE.Mesh(new THREE.CylinderGeometry(0.72, 0.8, 0.14, 8), clay(CREAM)));
+  const terrace = shadow(new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.54, 0.14, 8), clay(CREAM)));
   terrace.position.y = 0.07;
   root.add(terrace);
-  root.add(goldRing(0.68, 0.035, 0.15));
+  root.add(goldRing(0.46, 0.03, 0.15));
 
   const base = shadow(new THREE.Mesh(new THREE.CylinderGeometry(0.46, 0.56, 0.38, 8), clay(STONE)));
   base.position.y = 0.32;
@@ -183,16 +183,16 @@ function buildTurretL2(root) {
 
 /** L3 — paint lighthouse: terraces, stained windows, crystal lantern. */
 function buildLighthouseL3(root) {
-  const plaza = shadow(new THREE.Mesh(new THREE.CylinderGeometry(0.95, 1.05, 0.14, 16), clay(CREAM)));
+  const plaza = shadow(new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.55, 0.14, 16), clay(CREAM)));
   plaza.position.y = 0.07;
   root.add(plaza);
-  root.add(goldRing(0.92, 0.04, 0.15));
+  root.add(goldRing(0.48, 0.03, 0.15));
 
-  const step = shadow(new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.82, 0.22, 12), clay(STONE)));
+  const step = shadow(new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.5, 0.22, 12), clay(STONE)));
   step.position.y = 0.24;
   root.add(step);
 
-  const lower = shadow(new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.58, 0.7, 12), clay(CREAM)));
+  const lower = shadow(new THREE.Mesh(new THREE.CylinderGeometry(0.38, 0.48, 0.7, 12), clay(CREAM)));
   lower.position.y = 0.68;
   root.add(lower);
 
@@ -211,7 +211,7 @@ function buildLighthouseL3(root) {
       new THREE.OctahedronGeometry(0.055),
       clay(GAME_COLORS[key], { emissive: GAME_COLORS[key], emissiveIntensity: 0.55 })
     );
-    gem.position.set(Math.sin(a) * 0.96, 0.22, Math.cos(a) * 0.96);
+    gem.position.set(Math.sin(a) * 0.44, 0.22, Math.cos(a) * 0.44);
     keep(gem);
     root.add(gem);
   });

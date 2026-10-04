@@ -31,7 +31,7 @@ export const GARAGE_ORIGIN = {
   column: Math.floor(SEARCHLIGHT_TILE.column) - 1,
   row: Math.floor(SEARCHLIGHT_TILE.row) + 5,
 };
-export const GARAGE_SIZE = 4;
+export const GARAGE_SIZE = 3;
 
 function clay(color, extras = {}) {
   return new THREE.MeshStandardMaterial({
@@ -51,7 +51,7 @@ export function isGarageTile(column, row) {
   );
 }
 
-export function isNearGarage(column, row, radius = 3) {
+export function isNearGarage(column, row, radius = 2) {
   const cx = GARAGE_ORIGIN.column + (GARAGE_SIZE - 1) / 2;
   const cy = GARAGE_ORIGIN.row + (GARAGE_SIZE - 1) / 2;
   return isGarageTile(column, row) || Math.hypot(column - cx, row - cy) <= radius;

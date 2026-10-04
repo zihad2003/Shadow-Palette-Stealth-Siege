@@ -1,7 +1,7 @@
-import { MAP_COLS, MAP_ROWS, LARGE_MAP, SEARCHLIGHT_TILE, GATE_SPAWN_TILE } from './mapConfig.js';
+import { MAP_COLS, MAP_ROWS, SEARCHLIGHT_TILE, GATE_SPAWN_TILE } from './mapConfig.js';
 import { inSearchlightPlaza } from './placeUtils.js';
 
-export const GARAGE_SIZE = 4;
+export const GARAGE_SIZE = 3;
 export const GATE_HALF_TILES = 2;
 
 export function tileKey(column, row) {
@@ -89,17 +89,11 @@ function markBuildingFootprints(solids, buildings = []) {
   });
 }
 
+/** Only the lighthouse tile is solid — empty plaza tiles stay walkable. */
 function markSearchlight(solids) {
   const cx = Math.floor(SEARCHLIGHT_TILE.column);
   const cy = Math.floor(SEARCHLIGHT_TILE.row);
-  const r = LARGE_MAP ? 2 : 1;
-  for (let x = cx - r; x <= cx + r; x++) {
-    for (let y = cy - r; y <= cy + r; y++) {
-      if (x >= 0 && y >= 0 && x < MAP_COLS && y < MAP_ROWS) {
-        solids.add(tileKey(x, y));
-      }
-    }
-  }
+  solids.add(tileKey(cx, cy));
 }
 
 function markPerimeterWalls(solids, { gateLocked = false } = {}) {
