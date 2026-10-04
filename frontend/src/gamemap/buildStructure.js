@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { GAME_COLORS } from '../colors.js';
-import { TILE_SIZE, TILE_HEIGHT, TILE_PITCH, tileWorldPos, SEARCHLIGHT_TILE, MAP_COLS, MAP_ROWS } from './mapConfig.js';
+import { TILE_HEIGHT, TILE_PITCH, tileWorldPos, MAP_COLS, MAP_ROWS } from './mapConfig.js';
 import {
   ROBOT_CHASE_SPEED,
   ROBOT_HIT_SPEED,
@@ -295,8 +295,43 @@ export function tickGuideMarker(marker, elapsed, camera) {
   if (camera) marker.pin.quaternion.copy(camera.quaternion);
 }
 
+/** Door / floor tile in the Craft House — robot exits from here and parks back here. */
+export function craftHouseHome(buildings = []) {
+  const craft = (buildings || []).find((b) => b && b.buildingType === 'CRAFT_HOUSE');
+  if (!craft) {
+    return { column: 4, row: MAP_ROWS - 4 };
+  }
+  const w = Math.max(1, Number(craft.footprintWidth) || 3);
+  const h = Math.max(1, Number(craft.footprintHeight) || 3);
+  return {
+    column: Number(craft.xPos) + (w - 1) / 2,
+    row: Number(craft.yPos) + (h - 1) / 2,
+  };
+}
+
+/** Yard loop around the whole fortress, inset from walls and corner houses. */
+export function defaultPatrolWaypoints() {
+  const inset = 6;
+  const left = inset;
+  const right = MAP_COLS - 1 - inset;
+  const top = inset;
+  const bottom = MAP_ROWS - 1 - inset;
+  const midC = (MAP_COLS - 1) / 2;
+  const midR = (MAP_ROWS - 1) / 2;
+  return [
+    { column: left, row: top },
+    { column: midC, row: top },
+    { column: right, row: top },
+    { column: right, row: midR },
+    { column: right, row: bottom },
+    { column: midC, row: bottom },
+    { column: left, row: bottom },
+    { column: left, row: midR },
+  ];
+}
+
 /** Detailed patrol robot with chase + patrol modes and state-tinted poses. */
-export function createGamePatrolRobot() {
+export function createGamePatrolRobot({ home = null, parked: startParked = false } = {}) {
   const bot = new THREE.Group();
   bot.name = 'PatrolRobot';
 
@@ -349,23 +384,30 @@ export function createGamePatrolRobot() {
     disabled: { eye: '#38BDF8', body: '#3A3A3A', lean: -0.22, bob: 0.005 },
   };
 
-  // Idle in front of the searchlight tower (toward the gate), far enough that
-  // stepping into the beam is not an instant catch.
-  const cx = SEARCHLIGHT_TILE.column;
-  const cy = SEARCHLIGHT_TILE.row;
-  const waypoints = [
-    { column: cx - 1.8, row: cy + 5.5 },
-    { column: cx + 1.8, row: cy + 5.5 },
-    { column: cx + 1.8, row: cy + 4.2 },
-    { column: cx - 1.8, row: cy + 4.2 },
-  ];
-  let mode = 'patrol';
-  let targetCol = cx;
-  let targetRow = cy + 5.5;
-  let col = waypoints[0].column;
-  let row = waypoints[0].row;
+  const waypoints = defaultPatrolWaypoints();
+  let homeCol = home?.column ?? waypoints[waypoints.length - 1].column;
+  let homeRow = home?.row ?? waypoints[waypoints.length - 1].row;
+  let mode = startParked ? 'park' : 'patrol';
+  let wantPark = !!startParked;
+  let parked = !!startParked;
+  let targetCol = homeCol;
+  let targetRow = homeRow;
+  let col = home ? homeCol : waypoints[0].column;
+  let row = home ? homeRow : waypoints[0].row;
   let catchProgress = 0;
-  let wpIndex = 0;
+  const nearestWp = (c, r) => {
+    let best = 0;
+    let bestD = Infinity;
+    for (let i = 0; i < waypoints.length; i += 1) {
+      const d = Math.hypot(waypoints[i].column - c, waypoints[i].row - r);
+      if (d < bestD) {
+        bestD = d;
+        best = i;
+      }
+    }
+    return best;
+  };
+  let wpIndex = nearestWp(col, row);
   let worldX = 0;
   let worldZ = 0;
   let yaw = 0;
@@ -382,6 +424,14 @@ export function createGamePatrolRobot() {
   impact.rotation.x = -Math.PI / 2;
   impact.position.y = 0.2;
   bot.add(impact);
+  if (startParked) {
+    const nest = tileWorldPos(col, row);
+    worldX = nest.x;
+    worldZ = nest.z;
+    primed = true;
+    bot.visible = false;
+    bot.position.set(worldX, TILE_HEIGHT, worldZ);
+  }
 
   const applyTint = (key) => {
     const tint = STATE_TINT[key] || STATE_TINT.patrol;
@@ -412,7 +462,28 @@ export function createGamePatrolRobot() {
       return { column: col, row };
     },
     get chasing() {
-      return (mode === 'chase' || mode === 'hit' || liveDriven) && stunTimer <= 0;
+      return (mode === 'chase' || mode === 'hit' || liveDriven) && stunTimer <= 0 && !wantPark;
+    },
+    get parked() {
+      return parked;
+    },
+    setHome(next) {
+      if (!next) return;
+      if (next.column != null && Number.isFinite(Number(next.column))) homeCol = Number(next.column);
+      if (next.row != null && Number.isFinite(Number(next.row))) homeRow = Number(next.row);
+    },
+    snapToHome() {
+      col = homeCol;
+      row = homeRow;
+      const p = tileWorldPos(col, row);
+      worldX = p.x;
+      worldZ = p.z;
+      primed = true;
+      parked = true;
+      wantPark = true;
+      mode = 'park';
+      bot.visible = false;
+      bot.position.set(worldX, TILE_HEIGHT, worldZ);
     },
     get liveDriven() {
       return liveDriven;
@@ -460,12 +531,35 @@ export function createGamePatrolRobot() {
       if (rowNum != null && Number.isFinite(Number(rowNum))) targetRow = Number(rowNum);
     },
     setMode(next, target) {
-      if (stunTimer > 0) return; // Keep offline while stunned
       const key = String(next || 'patrol').toLowerCase();
+      if (key === 'park' || key === 'home') {
+        wantPark = true;
+        liveDriven = false;
+        if (stunTimer > 0) {
+          preStunMode = 'park';
+          return;
+        }
+        if (mode === 'park' || parked) {
+          applyTint('patrol');
+          return;
+        }
+        mode = 'park';
+        parked = false;
+        bot.visible = true;
+        applyTint('patrol');
+        return;
+      }
+      if (stunTimer > 0) return; // Keep offline while stunned
+      wantPark = false;
       const nextMode = key === 'chasing' ? 'chase' : key;
       if (target) {
         if (target.column != null) targetCol = target.column;
         if (target.row != null) targetRow = target.row;
+      }
+      if (parked || !bot.visible) {
+        parked = false;
+        bot.visible = true;
+        wpIndex = nearestWp(col, row);
       }
       if (nextMode === mode) {
         applyTint(mode);
@@ -476,9 +570,12 @@ export function createGamePatrolRobot() {
       if (mode !== 'hit' && prev === 'hit') catchProgress = 0;
       if (
         (mode === 'chase' || mode === 'hit') &&
-        (prev === 'patrol' || prev === 'searching' || prev === 'suspicious' || prev === 'alert')
+        (prev === 'patrol' || prev === 'searching' || prev === 'suspicious' || prev === 'alert' || prev === 'park')
       ) {
         catchProgress = 0;
+      }
+      if (mode === 'patrol' || mode === 'searching' || mode === 'suspicious') {
+        wpIndex = nearestWp(col, row);
       }
       applyTint(mode);
     },
@@ -525,9 +622,14 @@ export function createGamePatrolRobot() {
           hitReact = 0;
           body.rotation.z = 0;
           impact.material.opacity = 0;
-          mode = preStunMode === 'disabled' ? 'patrol' : (preStunMode || 'patrol');
+          mode = wantPark || preStunMode === 'park' ? 'park' : preStunMode === 'disabled' ? 'patrol' : (preStunMode || 'patrol');
           if (mode === 'disabled') mode = 'patrol';
-          applyTint(mode);
+          if (mode === 'park') {
+            wantPark = true;
+            parked = false;
+            bot.visible = true;
+          }
+          applyTint(mode === 'park' ? 'patrol' : mode);
         }
         return {
           caught: false,
@@ -568,6 +670,42 @@ export function createGamePatrolRobot() {
         bot.position.set(worldX, TILE_HEIGHT + Math.sin(elapsed * 10) * tint.bob, worldZ);
         bot.rotation.y = yaw;
         return { caught: false, tagged: false, hitting: false, state: 'chase', chasing: true, live: true };
+      }
+
+      if (mode === 'park') {
+        const dx = homeCol - col;
+        const dy = homeRow - row;
+        const dist = Math.hypot(dx, dy);
+        if (dist < 0.14) {
+          parked = true;
+          col = homeCol;
+          row = homeRow;
+          const p = tileWorldPos(col, row);
+          worldX = p.x;
+          worldZ = p.z;
+          bot.position.set(worldX, TILE_HEIGHT, worldZ);
+          bot.visible = false;
+          catchProgress = 0;
+          return { caught: false, hitting: false, state: 'park', chasing: false, parked: true };
+        }
+        const step = 1.55 * dt;
+        col += (dx / dist) * Math.min(step, dist);
+        row += (dy / dist) * Math.min(step, dist);
+        const p = tileWorldPos(col, row);
+        if (!primed) {
+          worldX = p.x;
+          worldZ = p.z;
+          primed = true;
+        }
+        const follow = 1 - Math.exp(-7 * dt);
+        worldX += (p.x - worldX) * follow;
+        worldZ += (p.z - worldZ) * follow;
+        yaw = lerpAngle(yaw, Math.atan2(dx, dy), follow);
+        bot.visible = true;
+        bot.position.set(worldX, TILE_HEIGHT + Math.sin(elapsed * 7) * 0.03, worldZ);
+        bot.rotation.y = yaw;
+        catchProgress = 0;
+        return { caught: false, hitting: false, state: 'park', chasing: false, parked: false };
       }
 
       // Idle orbits only — never while chasing.

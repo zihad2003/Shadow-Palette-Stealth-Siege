@@ -13,7 +13,7 @@ import { createMakeupHouse } from './MakeupHouse.js';
 import { createWallBreakFX } from './WallBreakFX.js';
 import { createPaintSplash } from './PaintSplash.js';
 import { createHouseReadyCue } from './HouseReadyCue.js';
-import { buildGameHouse, buildRuinedHouse, placeHouseOnTile, createGamePatrolRobot, tickBuildingMotion, buildHouseBlueprint, tintBlueprint, createGuideMarker, alignGuideMarker, tintGuideMarker, tickGuideMarker, createRebuildFX, tickRebuildFX } from './buildStructure.js';
+import { buildGameHouse, buildRuinedHouse, placeHouseOnTile, createGamePatrolRobot, craftHouseHome, tickBuildingMotion, buildHouseBlueprint, tintBlueprint, createGuideMarker, alignGuideMarker, tintGuideMarker, tickGuideMarker, createRebuildFX, tickRebuildFX } from './buildStructure.js';
 import { createAttacker, tickCharacter, CHAR_MESH_REV } from '../character/buildCharacter.js';
 import { canEnterTile } from './occupancy.js';
 import {
@@ -439,12 +439,14 @@ export default function GameMap({
         if (grayscale) desaturateObject(interiorDecor);
         scene.add(interiorDecor);
       }
+      patrol?.setHome?.(craftHouseHome(buildingsRef.current));
     };
     syncBuildings();
 
-    const patrolArmed = () =>
-      patrolPoweredRef.current !== false &&
+    const patrolOwned = () =>
       (defensesRef.current || []).some((d) => (d.type || d.defenseType) === 'PATROL_ROBOT');
+
+    const patrolArmed = () => patrolPoweredRef.current !== false && patrolOwned();
 
     const patrolHuntsRaiders = () => {
       if (!patrolArmed()) return false;
@@ -453,14 +455,23 @@ export default function GameMap({
     };
 
     const syncPatrol = () => {
-      const has = patrolArmed();
-      if (has && !patrol) {
-        patrol = createGamePatrolRobot();
+      const owned = patrolOwned();
+      const powered = patrolArmed();
+      const home = craftHouseHome(buildingsRef.current);
+      if (owned && !patrol) {
+        patrol = createGamePatrolRobot({ home, parked: !powered && !grayscale });
         if (grayscale) desaturateObject(patrol.object);
         scene.add(patrol.object);
-      } else if (!has && patrol) {
+      } else if (!owned && patrol) {
         scene.remove(patrol.object);
         patrol = null;
+      }
+      if (!patrol) return;
+      patrol.setHome?.(home);
+      if (grayscale || powered) {
+        if (patrol.parked || !patrol.object.visible) patrol.setMode('patrol');
+      } else {
+        patrol.setMode('park');
       }
     };
     syncPatrol();
@@ -1385,11 +1396,12 @@ export default function GameMap({
         },
         getPatrolState: () => ({
           ...lastPatrolHit,
-          chasing: (patrolCmd.chasing || !!patrol?.chasing) && !patrol?.isStunned,
+          chasing: (patrolCmd.chasing || !!patrol?.chasing) && !patrol?.isStunned && !patrol?.parked,
           live: !!patrol?.liveDriven,
           position: patrol?.position || null,
           stunned: !!patrol?.isStunned,
           stunRemaining: patrol?.stunRemaining || 0,
+          parked: !!patrol?.parked,
         }),
         /** Apply a live-defender robot pose (disables AI until clearLivePatrol). */
         setLivePatrolPosition: (column, row, snap = false) => {
@@ -1742,7 +1754,7 @@ export default function GameMap({
         if (!patrolHuntsRaiders()) {
           if (patrolCmd.chasing) {
             patrolCmd.chasing = false;
-            patrol.setMode('patrol');
+            if (patrolArmed()) patrol.setMode('patrol');
           }
         } else if (patrolCmd.chasing) {
           patrol.setChaseTarget?.(patrolCmd.column, patrolCmd.row);
