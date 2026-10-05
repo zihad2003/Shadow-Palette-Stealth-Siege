@@ -245,7 +245,9 @@ export default function BaseBuilderView() {
 
   const handleCatchIntruder = () => {
     if (!intruder || jailedIntruderRef.current) return;
+    const caught = intruder;
     const pos = walkerRef.current;
+    finalizeIntruderJail(caught);
     const raidId = liveRaidInvite?.raidId;
     if (raidId) {
       stompPublish(`/app/live-raid/${raidId}/position`, {
@@ -580,6 +582,12 @@ export default function BaseBuilderView() {
             catchHoldRef.current = 0;
             setCatchProgress(0);
             soundEngine.stopRebuildHum();
+            if (jailedIntruderRef.current) {
+              jailedIntruderRef.current = null;
+              setShowJailRansomModal(false);
+              setIsHoldingPrisoner(false);
+              sceneApi.current?.clearPrisonerPose?.();
+            }
             showToast('Raider slipped away — get closer', 'warning');
             return;
           }
@@ -626,10 +634,9 @@ export default function BaseBuilderView() {
               characterModel: model,
             });
           }
-          if (state.outcome === 'RELEASED') {
+          if (state.outcome === 'RELEASED' && !jailedIntruderRef.current) {
             setIntruder(null);
             setCarriedIntruder(null);
-            jailedIntruderRef.current = null;
             setShowJailRansomModal(false);
             sceneApi.current?.clearPartnerPose?.();
             sceneApi.current?.clearPrisonerPose?.();

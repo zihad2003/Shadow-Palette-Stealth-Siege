@@ -75,8 +75,7 @@ public class JailService {
         if (opt.isEmpty()) return Optional.empty();
 
         JailStay stay = opt.get();
-        LocalDateTime now = LocalDateTime.now();
-        if (!stay.getReleaseAt().isAfter(now)) {
+        if (!stay.getReleaseAt().isAfter(LocalDateTime.now())) {
             stay.setStatus("EXPIRED_RELEASED");
             jailStayRepository.save(stay);
             broadcastJailUpdate(stay, "EXPIRED_RELEASED", null);
@@ -96,8 +95,7 @@ public class JailService {
         Optional<JailStay> opt = jailStayRepository.findFirstByCaptorIdAndStatus(captorId, "JAILED");
         if (opt.isEmpty()) return Optional.empty();
         JailStay stay = opt.get();
-        LocalDateTime now = LocalDateTime.now();
-        if (!stay.getReleaseAt().isAfter(now)) {
+        if (!stay.getReleaseAt().isAfter(LocalDateTime.now())) {
             stay.setStatus("EXPIRED_RELEASED");
             jailStayRepository.save(stay);
             broadcastJailUpdate(stay, "EXPIRED_RELEASED", null);
@@ -381,7 +379,10 @@ public class JailService {
 
         messaging.convertAndSend("/topic/raid-ransom/" + stay.getPrisonerId(), (Object) payload);
         messaging.convertAndSend("/topic/raid-ransom/" + stay.getCaptorId(), (Object) payload);
-        if (stay.getRaidId() != null) {
+        // Creating a stay must not tell the live raid the prisoner is free.
+        // Only a real timer release ends the raid this way. Paying the ransom
+        // releases them through broadcastRansomSettled.
+        if (stay.getRaidId() != null && "EXPIRED_RELEASED".equals(type)) {
             Map<String, Object> state = new HashMap<>();
             state.put("raidId", stay.getRaidId());
             state.put("outcome", "RELEASED");

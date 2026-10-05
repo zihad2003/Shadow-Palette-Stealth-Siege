@@ -52,19 +52,36 @@ export default function RansomModal({
   }, [jailStayIdProp]);
 
   useEffect(() => {
-    if (!isOpen) return;
-    if (jailStayIdProp) return;
-    fetchMyJailStay()
-      .then((stay) => {
-        if (stay?.id) {
-          setJailStayId(stay.id);
-          setRoundsUsed(stay.ransomOfferCount || 0);
-          roundsUsedRef.current = stay.ransomOfferCount || 0;
-          const pending = [...(stay.offers || [])].reverse().find((o) => o.status === 'PENDING');
-          if (pending) setCurrentOffer(pending);
-        }
-      })
-      .catch(() => {});
+    if (!isOpen) return undefined;
+    if (jailStayIdProp) return undefined;
+    let cancelled = false;
+    const applyStay = (stay) => {
+      if (!stay?.id || cancelled) return false;
+      setJailStayId(stay.id);
+      setRoundsUsed(stay.ransomOfferCount || 0);
+      roundsUsedRef.current = stay.ransomOfferCount || 0;
+      const pending = [...(stay.offers || [])].reverse().find((o) => o.status === 'PENDING');
+      if (pending) setCurrentOffer(pending);
+      return true;
+    };
+    const tryFetch = (attempt) => {
+      fetchMyJailStay()
+        .then((stay) => {
+          if (applyStay(stay)) return;
+          if (!cancelled && attempt < 8) {
+            window.setTimeout(() => tryFetch(attempt + 1), 350);
+          }
+        })
+        .catch(() => {
+          if (!cancelled && attempt < 8) {
+            window.setTimeout(() => tryFetch(attempt + 1), 350);
+          }
+        });
+    };
+    tryFetch(0);
+    return () => {
+      cancelled = true;
+    };
   }, [isOpen, jailStayIdProp]);
 
   useEffect(() => {
@@ -75,6 +92,15 @@ export default function RansomModal({
 
     const handleMsg = (msg) => {
       if (!msg) return;
+      if (msg.jailStayId) setJailStayId(msg.jailStayId);
+      if (msg.type === 'JAILED') {
+        setStatusMessage(
+          isPrisoner
+            ? 'Locked in the enemy Base Jail. Wait for the owner’s demand or make an offer.'
+            : 'Intruder is locked in your jail. Set the ransom to send them home.'
+        );
+        return;
+      }
       if (msg.type === 'RANSOM_OFFER') {
         setCurrentOffer({
           id: msg.offerId,
@@ -229,7 +255,7 @@ export default function RansomModal({
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+      <div className="fixed inset-0 z-[220] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
         <motion.div
           initial={{ opacity: 0, scale: 0.9, y: 20 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}

@@ -873,11 +873,11 @@ export default function StealthRaidView() {
               attackerRef.current = snap;
             }
           }
-          if (state.outcome === 'RELEASED') {
+          if (state.outcome === 'RELEASED' && ransomPaidRef.current) {
             setShowRansomModal(false);
             imprisonedRef.current = false;
             setImprisoned(false);
-            showToastRef.current?.('Base owner released you from jail! Returning to your base...', 'success');
+            showToastRef.current?.('Ransom paid. Returning to your base...', 'success');
             window.setTimeout(() => {
               transitionTo('BASE_BUILDER');
             }, 1200);
@@ -1290,7 +1290,7 @@ export default function StealthRaidView() {
   const finishRaid = () => {
     if (settled.current) return;
     const { outcome } = hudRef.current;
-    if (!outcome) return;
+    if (!outcome || outcome === 'JAILED') return;
     settled.current = true;
     if (document.pointerLockElement) document.exitPointerLock?.();
     try {

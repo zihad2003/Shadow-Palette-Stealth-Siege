@@ -21,7 +21,7 @@ export default function SideRaidPanel({
   const [submitted, setSubmitted] = useState(false);
 
   useEffect(() => {
-    if (!outcome || submitted) return;
+    if (!outcome || outcome === 'JAILED' || submitted) return;
     let cancelled = false;
     (async () => {
       setSubmitted(true);
